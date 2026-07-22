@@ -2,6 +2,9 @@ name: context-keeper
 
 services:
   db:
+    # Backup (NFR-5, Faza 7): `infra/backup.sh` woła `pg_dump` WEWNĄTRZ tego kontenera
+    # (docker compose exec -T db ...) — zgodność wersji klient/serwer za darmo. Dumpy lądują
+    # na hoście w BACKUP_DIR (domyślnie ./backups, poza tym volumem) — patrz README "Backup / Restore".
     image: pgvector/pgvector:pg18-trixie
     restart: unless-stopped
     environment:

@@ -90,6 +90,25 @@ export const envSchema = z
     // reszta wykrytych warunków wraca w kolejnym stateless re-scanie, nie ginie po cichu.
     NIGHTLY_MAX_PROPOSALS_PER_RUN: z.coerce.number().int().positive().default(200),
 
+    // Backup (NFR-5, §9 tech-stack; plan Fazy 7). Appka TYCH zmiennych nie czyta — to kontrakt dla
+    // `infra/backup.sh` + przyszłego host-side schedulera (Faza 8), dokładnie jak NIGHTLY_CRON/TZ.
+    BACKUP_DIR: z.string().min(1).default('./backups'),
+    // Tiered retention (plan §1a): daily = zachowaj WSZYSTKIE dumpy młodsze niż N dni; weekly =
+    // zachowaj po jednym (najnowszym) reprezentancie na tydzień ISO w oknie
+    // [DAILY_DAYS, DAILY_DAYS + WEEKLY_WEEKS*7) dni. Cutoff kasowania jest WYPROWADZONY, bez
+    // trzeciej redundantnej zmiennej. WEEKLY_WEEKS=0 degraduje łagodnie do płaskiej retencji
+    // DAILY_DAYS dni.
+    BACKUP_RETENTION_DAILY_DAYS: z.coerce.number().int().positive().default(7),
+    BACKUP_RETENTION_WEEKLY_WEEKS: z.coerce.number().int().nonnegative().default(4),
+    BACKUP_CRON: z.string().min(1).default('0 4 * * *'),
+    BACKUP_TZ: z.string().min(1).default('Europe/Warsaw'),
+    // Offsite — pluggable hook (nic wymuszone na sztywno, plan §1 pkt "Offsite"). RCLONE_REMOTE
+    // (np. "s3:bucket/ck") -> `rclone copy`; BACKUP_OFFSITE_CMD -> dowolna komenda użytkownika,
+    // wołana z "$1" = path do dumpa (patrz .env.example). Gdy oba ustawione, BACKUP_OFFSITE_CMD ma
+    // pierwszeństwo. Oba opcjonalne — brak obu = tylko lokalny dump (retencja i tak działa).
+    RCLONE_REMOTE: z.string().optional(),
+    BACKUP_OFFSITE_CMD: z.string().optional(),
+
     // Rate limiting per token (§10)
     RATE_LIMIT_SAVE_PER_MIN: z.coerce.number().int().positive().default(20),
     RATE_LIMIT_SEARCH_PER_MIN: z.coerce.number().int().positive().default(120),

@@ -15,6 +15,9 @@ build/
 # Docker volumes / local data
 pgdata/
 
+# Backupy pg_dump (infra/backup.sh) — wrażliwe, nigdy do repo (patrz README "Backup / Restore")
+/backups/
+
 # Drizzle generated meta (migracje SQL trzymamy, meta cache nie)
 apps/server/src/db/migrations/meta/_journal_local.json
 
