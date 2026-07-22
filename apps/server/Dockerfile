@@ -4,7 +4,12 @@
 FROM node:24-slim AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable && corepack prepare pnpm@10.33.2 --activate
+# `npm install -g` zamiast corepack: corepack prepare/--activate zapisuje stan aktywacji
+# pod HOME usera, który go uruchomił (tu: root) — w runtime stage działamy jako `node`
+# (inny HOME), więc corepack tej aktywacji nie widzi i przy KAŻDYM `pnpm ...` próbuje
+# doinstalować pnpm z registry (a bez sieci/uprawnień do zapisu w /app to się wywala EACCES).
+# Globalny `npm install -g` nie ma tego problemu — binarka jest dostępna dla każdego usera.
+RUN npm install -g pnpm@10.33.2
 WORKDIR /app
 
 # --- build: pełna instalacja + kompilacja (dashboard PRZED server, §M5 planu Fazy 5 —

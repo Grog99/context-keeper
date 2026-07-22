@@ -31,8 +31,8 @@ curl localhost:3000/health    # -> {"status":"ok","db":"up"}
 docker compose run --rm app node dist/cli.js create-project acme
 ```
 
-> W kontenerze uruchamiamy `node dist/...` bezpośrednio (obraz prod nie zawiera pnpm/devDeps).
-> Skróty `pnpm db:migrate` / `pnpm cli` działają w dev na hoście.
+> W kontenerze uruchamiamy `node dist/...` bezpośrednio — bez pośredniczącego procesu pnpm.
+> Skrót `pnpm cli <cmd>` też działa w kontenerze (woła to samo `dist/cli.js`), `node dist/cli.js` jest po prostu bardziej bezpośredni.
 
 Profile opcjonalne:
 
