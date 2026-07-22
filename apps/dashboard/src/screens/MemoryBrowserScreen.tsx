@@ -184,6 +184,7 @@ export function MemoryBrowserScreen() {
               <SelectItem value="all">status: wszystkie</SelectItem>
               <SelectItem value="approved">approved</SelectItem>
               <SelectItem value="archived">archived</SelectItem>
+              <SelectItem value="purged">purged</SelectItem>
             </SelectContent>
           </Select>
           <Input
@@ -381,7 +382,7 @@ function MemoryRow({
         'relative grid min-h-[56px] cursor-pointer grid-cols-[auto_1fr_auto] items-center gap-2.5 border-b border-border px-3.5 py-2.5',
         'hover:bg-muted focus-visible:outline-none',
         selected && 'bg-accent-subtle',
-        item.status === 'archived' && 'opacity-60',
+        item.status !== 'approved' && 'opacity-60',
       )}
     >
       {selected && <span className="absolute inset-y-0 left-0 w-[2px] bg-primary" aria-hidden />}
@@ -411,7 +412,7 @@ function MemoryRow({
       </div>
       <div className="flex flex-col items-end gap-1">
         <span className="whitespace-nowrap font-mono text-[11px] text-faint">acc {item.accessCount}</span>
-        {item.status === 'archived' && <StatusChip status="archived" />}
+        {item.status !== 'approved' && <StatusChip status={item.status} />}
       </div>
     </div>
   );

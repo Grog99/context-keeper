@@ -1,9 +1,16 @@
-import { Archive, CircleCheck, Clock, ShieldAlert, Lock, X } from 'lucide-react';
+import { Archive, CircleCheck, Clock, ShieldAlert, Lock, Trash2, X } from 'lucide-react';
 import { Badge, type BadgeProps } from './ui/badge';
 import { cn } from '../lib/utils';
 
 /** Sygnatura §8.2 design-systemu — kolor + ikona + label RAZEM (P2, nigdy sam kolor). */
-export type StatusChipStatus = 'pending' | 'approved' | 'rejected' | 'archived' | 'stale' | 'secret_blocked';
+export type StatusChipStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'archived'
+  | 'purged'
+  | 'stale'
+  | 'secret_blocked';
 
 const CONFIG: Record<
   StatusChipStatus,
@@ -13,6 +20,8 @@ const CONFIG: Record<
   approved: { variant: 'success', icon: CircleCheck, label: 'APPROVED' },
   rejected: { variant: 'neutral', icon: X, label: 'REJECTED' },
   archived: { variant: 'neutral', icon: Archive, label: 'ARCHIVED' },
+  // Ikona spójna z `AuditScreen.tsx` (purge_tombstone) — ten sam koncept, ten sam symbol.
+  purged: { variant: 'danger', icon: Trash2, label: 'PURGED' },
   stale: { variant: 'danger', icon: Lock, label: 'STALE' },
   secret_blocked: { variant: 'danger', icon: ShieldAlert, label: 'SECRET_BLOCKED' },
 };

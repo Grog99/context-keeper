@@ -3,7 +3,7 @@
 
 export type MemoryKind = 'fact' | 'document';
 export type MemoryScope = 'global' | 'project';
-export type MemoryStatus = 'approved' | 'archived';
+export type MemoryStatus = 'approved' | 'archived' | 'purged';
 export type MemorySource = 'agent' | 'human' | 'nightly';
 
 export type ProposalType = 'create' | 'update' | 'merge' | 'delete';

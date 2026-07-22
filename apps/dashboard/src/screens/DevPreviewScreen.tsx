@@ -13,7 +13,15 @@ import { StatusChip, type StatusChipStatus } from '../components/StatusChip';
 import { TokenReveal } from '../components/TokenReveal';
 import { Separator } from '../components/ui/separator';
 
-const STATUSES: StatusChipStatus[] = ['pending', 'approved', 'rejected', 'archived', 'stale', 'secret_blocked'];
+const STATUSES: StatusChipStatus[] = [
+  'pending',
+  'approved',
+  'rejected',
+  'archived',
+  'purged',
+  'stale',
+  'secret_blocked',
+];
 
 // Fixture "now" obliczone RAZ na poziomie modułu (nie w renderze — reguła czystości renderu z
 // react-hooks v7/React Compiler zabrania `Date.now()` wewnątrz komponentu, patrz react.dev/rules).

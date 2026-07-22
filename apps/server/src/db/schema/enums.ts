@@ -3,7 +3,9 @@ import { pgEnum } from 'drizzle-orm/pg-core';
 // `kind` opisuje czym pamięć JEST (rozszerzalny — `event` dojdzie w v2 przez ALTER TYPE ... ADD VALUE).
 export const memoryKind = pgEnum('memory_kind', ['fact', 'document']);
 export const memoryScope = pgEnum('memory_scope', ['global', 'project']);
-export const memoryStatus = pgEnum('memory_status', ['approved', 'archived']);
+// `purged` = hard-purge (FR-S3, §10 tech-stack) — treść wymazana we wszystkich content-bearing
+// tabelach, wiersz zostaje jako tombstone (audit `purge_tombstone`). Nieodwracalne, wyłącznie CLI.
+export const memoryStatus = pgEnum('memory_status', ['approved', 'archived', 'purged']);
 // `source` = autorstwo (kto utworzył), trzymane osobno od `kind`.
 export const memorySource = pgEnum('memory_source', ['agent', 'human', 'nightly']);
 
