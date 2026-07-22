@@ -47,6 +47,7 @@ export function toPgVectorLiteral(vector: number[]): string {
 @Injectable()
 export class EmbeddingService {
   private readonly logger = new Logger(EmbeddingService.name);
+  private lastHealthLatencyMs: number | null = null;
 
   constructor(
     @Inject(EMBEDDING_PROVIDER) private readonly provider: EmbeddingProvider,
@@ -61,11 +62,20 @@ export class EmbeddingService {
     return this.provider.dim;
   }
 
+  /** Latencja ostatniego `health()` (FR-D7/NFR-4) — `null` dopóki `health()` nie zostanie
+   * wywołane choć raz (np. świeży proces przed pierwszym pollem `MetricsController`). */
+  get healthLatencyMs(): number | null {
+    return this.lastHealthLatencyMs;
+  }
+
   async health(): Promise<boolean> {
+    const startedAt = Date.now();
     try {
       return await this.provider.health();
     } catch {
       return false;
+    } finally {
+      this.lastHealthLatencyMs = Date.now() - startedAt;
     }
   }
 

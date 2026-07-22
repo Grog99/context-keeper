@@ -119,7 +119,7 @@ export interface AuditLogRowApi {
 
 export interface DashboardMetrics {
   queueDepth: number;
-  embedding: { status: 'up' | 'down'; model: string };
+  embedding: { status: 'up' | 'down'; model: string; latencyMs: number | null };
   secretBlocked24h: number;
   nightlyRun: { at: string; metadata: Record<string, unknown> | null } | null;
 }

@@ -30,6 +30,14 @@ const SCREEN_PATH: Record<ScreenKey, string> = {
   audyt: '/audyt',
 };
 
+/** Label paska zdrowia (FR-D7): `up`/`degraded` + latencja ostatniego health-checku, gdy znana. */
+function embeddingStatusLabel(metrics: DashboardMetrics | undefined): string {
+  if (!metrics) return '—';
+  const base = metrics.embedding.status === 'up' ? 'up' : 'degraded';
+  const { latencyMs } = metrics.embedding;
+  return latencyMs === null ? base : `${base} · ${latencyMs}ms`;
+}
+
 /**
  * §9.0 design-systemu — rama wszystkich ekranów: rail (240px, nawigacja + "Nowa pamięć" + mini-metryki)
  * + top bar (52px: ContextSwitcher, ⌘K search, health strip, toggle motywu). Screeny renderują się
@@ -138,7 +146,7 @@ export function AppShell() {
                 (metrics?.embedding.status === 'up' ? 'text-success' : metrics ? 'text-warning' : 'text-foreground')
               }
             >
-              {metrics ? (metrics.embedding.status === 'up' ? 'up' : 'degraded') : '—'}
+              {embeddingStatusLabel(metrics)}
             </b>
           </div>
           <Button variant="ghost" size="sm" className="mt-1 justify-start px-2 text-muted-foreground" onClick={handleLogout}>
@@ -163,7 +171,7 @@ export function AppShell() {
             <MetricStat label="Kolejka" value={metrics?.queueDepth ?? '—'} />
             <MetricStat
               label="Embedding"
-              value={metrics ? (metrics.embedding.status === 'up' ? 'up' : 'degraded') : '—'}
+              value={embeddingStatusLabel(metrics)}
               status={metrics ? (metrics.embedding.status === 'up' ? 'ok' : 'warn') : 'neutral'}
             />
             <MetricStat

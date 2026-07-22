@@ -12,7 +12,7 @@ const SECRET_BLOCKED_WINDOW_MS = 24 * 60 * 60_000;
 
 export interface DashboardMetrics {
   queueDepth: number;
-  embedding: { status: 'up' | 'down'; model: string };
+  embedding: { status: 'up' | 'down'; model: string; latencyMs: number | null };
   secretBlocked24h: number;
   /** `null` = "brak danych" po stronie SPA — nocny job to Faza 6, `audit_log` nie ma jeszcze
    * zdarzeń `nightly_run` w v1 (§Ryzyka planu). */
@@ -49,7 +49,11 @@ export class MetricsController {
 
     return {
       queueDepth: queueDepthRow?.count ?? 0,
-      embedding: { status: embeddingUp ? 'up' : 'down', model: this.embedding.model },
+      embedding: {
+        status: embeddingUp ? 'up' : 'down',
+        model: this.embedding.model,
+        latencyMs: this.embedding.healthLatencyMs,
+      },
       secretBlocked24h,
       nightlyRun: nightlyRun
         ? {
