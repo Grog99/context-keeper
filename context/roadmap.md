@@ -27,10 +27,10 @@ Host NestJS (adapter Express). Postgres + pgvector, Docker Compose, model danych
 **3. Retrieval** ✅
 Hybrid: wektor + full-text, fuzja RRF, dwufazowy (nagłówki → body). Abstrakcja providera embeddingów + presety deploy-time (`multilingual`/`english`/`api`, CLI `reembed`) + degradacja fail-open (FTS-only).
 
-**4. Kolejka akceptacji** ⬜
+**4. Kolejka akceptacji** ✅
 Tabela `proposals`, transakcyjne zatwierdzanie, optimistic concurrency (stale = blokada), edit-before-approve, supersession.
 
-**5. Dashboard** ⬜
+**5. Dashboard** ✅
 4 ekrany (kolejka / przeglądarka pamięci / projekty+tokeny / audyt) + przełącznik kontekstu + human-create (fakty, dokumenty, import `.md`). Wg design systemu.
 
 **6. Nocny job** ⬜

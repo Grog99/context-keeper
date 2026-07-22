@@ -7,12 +7,15 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable && corepack prepare pnpm@10.33.2 --activate
 WORKDIR /app
 
-# --- build: pełna instalacja + kompilacja + wyodrębnienie paczki prod ---
+# --- build: pełna instalacja + kompilacja (dashboard PRZED server, §M5 planu Fazy 5 —
+# `copy-dashboard.mjs` w server'owym `build` kopiuje apps/dashboard/dist -> dist/public) + wyodrębnienie paczki prod ---
 FROM base AS build
 COPY . /app
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+RUN pnpm --filter @context-keeper/dashboard build
 RUN pnpm --filter @context-keeper/server build
-# `deploy` tworzy samodzielny katalog z dist + node_modules (tylko prod deps).
+# `deploy` tworzy samodzielny katalog z dist + node_modules (tylko prod deps). `dist/public` (SPA) już
+# jest wewnątrz apps/server/dist w tym momencie, więc jedzie razem z resztą paczki.
 # --legacy: paczka nie ma cross-depów workspace, więc nie potrzebujemy injected deploy (pnpm 10).
 RUN pnpm deploy --filter=@context-keeper/server --prod --legacy /prod/server
 

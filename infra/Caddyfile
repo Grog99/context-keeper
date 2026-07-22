@@ -11,10 +11,18 @@
 {$ACME_DOMAIN} {
 	encode zstd gzip
 
-	# v1: cała aplikacja na jednym origin (app:3000).
-	reverse_proxy app:3000
-
-	# Docelowy rozdział ekspozycji (do włączenia gdy powstanie dashboard, Faza 5):
-	#   handle /mcp* { reverse_proxy app:3000 }          # publiczny
-	#   handle *     { ... }                              # dashboard tylko za VPN / CF Access
+	# Faza 5: rozdział ekspozycji — `/mcp*`/`/health*` (PORT_MCP=3000) to jedyna publiczna
+	# powierzchnia; reszta (SPA + `/api/*`, PORT_DASHBOARD=3001) to dashboard recenzenta. Ten
+	# Caddyfile tylko routuje po ścieżce — "za VPN / CF Access" to warstwa PRZED Caddym (network
+	# policy ograniczający kto w ogóle dobija się do tego hosta/portu, albo osobna aplikacja
+	# Cloudflare Access na subdomenie dashboardu) — poza zakresem samego reverse proxy tutaj.
+	handle /mcp* {
+		reverse_proxy app:3000
+	}
+	handle /health* {
+		reverse_proxy app:3000
+	}
+	handle {
+		reverse_proxy app:3001
+	}
 }

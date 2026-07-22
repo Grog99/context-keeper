@@ -1,0 +1,481 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { toast } from 'sonner';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../components/ui/alert-dialog';
+import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Skeleton } from '../components/ui/skeleton';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Textarea } from '../components/ui/textarea';
+import { EmptyState } from '../components/EmptyState';
+import { MonoId } from '../components/MonoId';
+import { OriginPath } from '../components/OriginPath';
+import { RevisionTimeline, type RevisionItem } from '../components/RevisionTimeline';
+import { StatusChip } from '../components/StatusChip';
+import { api } from '../lib/api';
+import { contextQueryParams, useActiveContext } from '../lib/context';
+import { describeApiError } from '../lib/errors';
+import { formatAbsoluteTime, formatRelativeTime } from '../lib/format';
+import { queryKeys } from '../lib/query';
+import { toQueryString } from '../lib/query-string';
+import { cn } from '../lib/utils';
+import type { MemoryDetail, MemoryListItem, ProjectListItem, RevisionRowApi, WithWarnings } from '../types/api';
+import type { MemoryKind, MemoryStatus } from '../types/domain';
+
+type KindFilter = 'all' | MemoryKind;
+type StatusFilter = 'all' | MemoryStatus;
+
+function toRevisionItems(rows: RevisionRowApi[]): RevisionItem[] {
+  return rows.map((r) => ({
+    id: r.id,
+    action: r.action,
+    actor: r.actor,
+    createdAt: r.createdAt,
+    supersedes: r.supersedes,
+    supersededBy: r.supersededBy,
+  }));
+}
+
+export function MemoryBrowserScreen() {
+  const { active } = useActiveContext();
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const [kind, setKind] = useState<KindFilter>('all');
+  const [status, setStatus] = useState<StatusFilter>('all');
+  const [tagsInput, setTagsInput] = useState('');
+  const [qInput, setQInput] = useState('');
+  const [q, setQ] = useState('');
+  // `selectedId` pochodzi WYŁĄCZNIE z URL (§CommandPalette deep-link `/pamiec?id=`) — brak osobnego
+  // stanu do zsynchronizowania efektem (react-hooks/set-state-in-effect, React Compiler): `select()`
+  // niżej po prostu zapisuje do URL, a ten render czyta z niego bezpośrednio.
+  const selectedId = searchParams.get('id');
+  const [editingForId, setEditingForId] = useState<string | null>(null);
+  const editing = editingForId !== null && editingForId === selectedId;
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [tabState, setTabState] = useState<{ id: string; tab: string } | null>(null);
+  const tab = tabState && tabState.id === selectedId ? tabState.tab : 'body';
+
+  useEffect(() => {
+    const handle = setTimeout(() => setQ(qInput.trim()), 400);
+    return () => clearTimeout(handle);
+  }, [qInput]);
+
+  function setTab(next: string): void {
+    if (selectedId) setTabState({ id: selectedId, tab: next });
+  }
+
+  const tags = tagsInput
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
+
+  const filterParams: Record<string, string | string[]> = { ...contextQueryParams(active) };
+  if (kind !== 'all') filterParams.kind = kind;
+  if (status !== 'all') filterParams.status = status;
+  if (tags.length > 0) filterParams.tags = tags;
+  if (q) filterParams.q = q;
+
+  const { data, isLoading } = useQuery({
+    queryKey: queryKeys.memories(filterParams),
+    queryFn: () => api.get<MemoryListItem[]>(`/memories${toQueryString(filterParams)}`),
+  });
+
+  const { data: projects } = useQuery({
+    queryKey: queryKeys.projects(),
+    queryFn: () => api.get<ProjectListItem[]>('/projects'),
+  });
+
+  const list = data ?? [];
+
+  const { data: detail, isLoading: detailLoading } = useQuery({
+    queryKey: queryKeys.memory(selectedId ?? ''),
+    queryFn: () => api.get<MemoryDetail>(`/memories/${selectedId}`),
+    enabled: Boolean(selectedId),
+  });
+
+  const { data: revisions } = useQuery({
+    queryKey: queryKeys.memoryRevisions(selectedId ?? ''),
+    queryFn: () => api.get<RevisionRowApi[]>(`/memories/${selectedId}/revisions`),
+    enabled: Boolean(selectedId),
+  });
+
+  function select(id: string): void {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('id', id);
+      return next;
+    });
+  }
+
+  function invalidateMemory(id: string): void {
+    queryClient.invalidateQueries({ queryKey: ['memories'] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.memory(id) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.memoryRevisions(id) });
+  }
+
+  const editMutation = useMutation({
+    mutationFn: (vars: { id: string; header: string; body: string; tags: string[] }) =>
+      api.patch<WithWarnings>(`/memories/${vars.id}`, { header: vars.header, body: vars.body, tags: vars.tags }),
+    onSuccess: (result, vars) => {
+      setEditingForId(null);
+      if (result.warnings.length > 0) {
+        for (const w of result.warnings) toast.warning(w);
+      } else {
+        toast.success('Zapisano');
+      }
+      invalidateMemory(vars.id);
+    },
+    onError: (err) => toast.error(describeApiError(err)),
+  });
+
+  const archiveMutation = useMutation({
+    mutationFn: (id: string) => api.post(`/memories/${id}/archive`),
+    onSuccess: (_r, id) => {
+      toast('Zarchiwizowano');
+      setArchiveOpen(false);
+      invalidateMemory(id);
+    },
+    onError: (err) => toast.error(describeApiError(err)),
+  });
+
+  const promoteMutation = useMutation({
+    mutationFn: (id: string) => api.post(`/memories/${id}/promote`),
+    onSuccess: (_r, id) => {
+      toast.success('Promowano do global');
+      invalidateMemory(id);
+    },
+    onError: (err) => toast.error(describeApiError(err)),
+  });
+
+  return (
+    <div className="grid h-full min-h-0" style={{ gridTemplateColumns: 'minmax(320px, 38%) 1fr' }}>
+      <div className="flex min-w-0 flex-col border-r border-border">
+        <div className="flex h-auto flex-none flex-wrap items-center gap-2 border-b border-border px-3.5 py-2">
+          <Select value={kind} onValueChange={(v) => setKind(v as KindFilter)}>
+            <SelectTrigger className="h-7 gap-1.5 px-2 text-[12px]">
+              <SelectValue placeholder="kind" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">kind: wszystkie</SelectItem>
+              <SelectItem value="fact">fact</SelectItem>
+              <SelectItem value="document">document</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={status} onValueChange={(v) => setStatus(v as StatusFilter)}>
+            <SelectTrigger className="h-7 gap-1.5 px-2 text-[12px]">
+              <SelectValue placeholder="status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">status: wszystkie</SelectItem>
+              <SelectItem value="approved">approved</SelectItem>
+              <SelectItem value="archived">archived</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            value={tagsInput}
+            onChange={(e) => setTagsInput(e.target.value)}
+            placeholder="tagi (po przecinku)"
+            className="h-7 w-32 text-[12px]"
+          />
+          <Input
+            value={qInput}
+            onChange={(e) => setQInput(e.target.value)}
+            placeholder="szukaj…"
+            className="h-7 flex-1 min-w-[120px] text-[12px]"
+          />
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {isLoading ? (
+            <div className="flex flex-col gap-2 p-3.5">
+              {[0, 1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-14 w-full" />
+              ))}
+            </div>
+          ) : list.length === 0 ? (
+            <EmptyState title="Brak pamięci" description="Zmień filtry albo kontekst — nic tu nie pasuje." />
+          ) : (
+            list.map((item) => (
+              <MemoryRow
+                key={item.id}
+                item={item}
+                selected={item.id === selectedId}
+                projectName={projects?.find((p) => p.id === item.projectId)?.name ?? null}
+                onClick={() => select(item.id)}
+              />
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="flex min-w-0 flex-col bg-surface">
+        {!selectedId ? (
+          <EmptyState title="Wybierz pamięć z listy" description="Szczegóły pojawią się tutaj." />
+        ) : detailLoading || !detail ? (
+          <div className="p-6">
+            <Skeleton className="h-8 w-2/3" />
+          </div>
+        ) : (
+          <>
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              <div className="mb-1 flex items-start gap-3">
+                <h2 className="flex-1 text-lg font-medium leading-snug tracking-tight text-foreground">{detail.header}</h2>
+                <StatusChip status={detail.status} />
+              </div>
+              <div className="mb-4 flex flex-wrap items-center gap-x-3.5 gap-y-2 border-b border-border pb-4 text-xs">
+                <MonoId value={detail.id} />
+                <Dot />
+                <span className="font-mono text-faint">{detail.kind}</span>
+                <Dot />
+                <OriginPath
+                  origin={detail.source}
+                  scope={detail.scope}
+                  projectName={projects?.find((p) => p.id === detail.projectId)?.name ?? null}
+                />
+                <Dot />
+                <span className="font-mono text-faint">
+                  access {detail.accessCount} · ostatnio {detail.lastAccessedAt ? formatRelativeTime(detail.lastAccessedAt) : 'nigdy'}
+                </span>
+              </div>
+
+              <Tabs value={tab} onValueChange={setTab}>
+                <TabsList>
+                  <TabsTrigger value="body">Body</TabsTrigger>
+                  <TabsTrigger value="meta">Metadane</TabsTrigger>
+                  <TabsTrigger value="revisions">Rewizje ({revisions?.length ?? 0})</TabsTrigger>
+                </TabsList>
+                <TabsContent value="body" className="pt-4">
+                  {editing ? (
+                    <MemoryEditForm
+                      initialHeader={detail.header}
+                      initialBody={detail.body}
+                      initialTags={detail.tags}
+                      saving={editMutation.isPending}
+                      onCancel={() => setEditingForId(null)}
+                      onSave={(vars) => editMutation.mutate({ id: detail.id, ...vars })}
+                    />
+                  ) : (
+                    <div className="max-w-[68ch] rounded-md border border-border bg-muted/40 px-4 py-3 text-md leading-relaxed text-foreground [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-sm [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{detail.body}</ReactMarkdown>
+                    </div>
+                  )}
+                </TabsContent>
+                <TabsContent value="meta" className="pt-4">
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-5 gap-y-2.5 text-sm">
+                    <dt className="text-muted-foreground">Scope</dt>
+                    <dd className="font-mono text-xs">
+                      {detail.scope}
+                      {detail.projectId ? ` · ${detail.projectId}` : ''}
+                    </dd>
+                    <dt className="text-muted-foreground">Source</dt>
+                    <dd className="font-mono text-xs">{detail.source}</dd>
+                    <dt className="text-muted-foreground">Wersja</dt>
+                    <dd className="font-mono text-xs">{detail.version}</dd>
+                    <dt className="text-muted-foreground">Utworzono</dt>
+                    <dd className="font-mono text-xs">{formatAbsoluteTime(detail.createdAt)}</dd>
+                    <dt className="text-muted-foreground">Zaktualizowano</dt>
+                    <dd className="font-mono text-xs">{formatAbsoluteTime(detail.updatedAt)}</dd>
+                    <dt className="text-muted-foreground">Zatwierdzono</dt>
+                    <dd className="font-mono text-xs">{detail.approvedAt ? formatAbsoluteTime(detail.approvedAt) : '—'}</dd>
+                    <dt className="text-muted-foreground">Tagi</dt>
+                    <dd className="font-mono text-xs">{detail.tags.join(', ') || '—'}</dd>
+                  </dl>
+                </TabsContent>
+                <TabsContent value="revisions" className="pt-4">
+                  <RevisionTimeline
+                    revisions={toRevisionItems(revisions ?? [])}
+                    onSelectMemory={(id) => select(id)}
+                  />
+                </TabsContent>
+              </Tabs>
+            </div>
+            <div className="flex flex-none items-center gap-2 border-t border-border px-6 py-3">
+              <Button
+                variant="secondary"
+                onClick={() => detail && setEditingForId(detail.id)}
+                disabled={editing || detail.status !== 'approved'}
+              >
+                Edytuj
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => setArchiveOpen(true)}
+                disabled={detail.status !== 'approved'}
+              >
+                Archiwizuj
+              </Button>
+              {detail.scope === 'project' && (
+                <Button
+                  variant="secondary"
+                  onClick={() => promoteMutation.mutate(detail.id)}
+                  disabled={detail.status !== 'approved' || promoteMutation.isPending}
+                >
+                  Promuj do global
+                </Button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      <AlertDialog open={archiveOpen} onOpenChange={setArchiveOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archiwizować pamięć?</AlertDialogTitle>
+          </AlertDialogHeader>
+          <AlertDialogDescription>
+            Soft-delete — pamięć zniknie z search, ale zostaje w audycie i da się odtworzyć z rewizji.
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Anuluj</AlertDialogCancel>
+            <AlertDialogAction onClick={() => selectedId && archiveMutation.mutate(selectedId)} disabled={archiveMutation.isPending}>
+              Archiwizuj
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+function MemoryRow({
+  item,
+  selected,
+  onClick,
+  projectName,
+}: {
+  item: MemoryListItem;
+  selected: boolean;
+  onClick: () => void;
+  projectName: string | null;
+}) {
+  const visibleTags = item.tags.slice(0, 2);
+  const hidden = item.tags.length - visibleTags.length;
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      aria-selected={selected}
+      className={cn(
+        'relative grid min-h-[56px] cursor-pointer grid-cols-[auto_1fr_auto] items-center gap-2.5 border-b border-border px-3.5 py-2.5',
+        'hover:bg-muted focus-visible:outline-none',
+        selected && 'bg-accent-subtle',
+        item.status === 'archived' && 'opacity-60',
+      )}
+    >
+      {selected && <span className="absolute inset-y-0 left-0 w-[2px] bg-primary" aria-hidden />}
+      <Badge variant="kind">{item.kind}</Badge>
+      <div className="flex min-w-0 flex-col gap-1">
+        <div className="truncate text-[13.5px] font-medium text-foreground">{item.header}</div>
+        <div className="flex min-w-0 items-center gap-2.5">
+          <OriginPath origin={item.source} scope={item.scope} projectName={projectName} />
+          {item.tags.length > 0 && (
+            <span className="flex min-w-0 gap-1">
+              {visibleTags.map((tag) => (
+                <span
+                  key={tag}
+                  className="whitespace-nowrap rounded-[4px] border border-border bg-muted px-1.5 py-px font-mono text-[10.5px] text-muted-foreground"
+                >
+                  {tag}
+                </span>
+              ))}
+              {hidden > 0 && (
+                <span className="whitespace-nowrap rounded-[4px] border border-border bg-muted px-1.5 py-px font-mono text-[10.5px] text-muted-foreground">
+                  +{hidden}
+                </span>
+              )}
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="flex flex-col items-end gap-1">
+        <span className="whitespace-nowrap font-mono text-[11px] text-faint">acc {item.accessCount}</span>
+        {item.status === 'archived' && <StatusChip status="archived" />}
+      </div>
+    </div>
+  );
+}
+
+function MemoryEditForm({
+  initialHeader,
+  initialBody,
+  initialTags,
+  onCancel,
+  onSave,
+  saving,
+}: {
+  initialHeader: string;
+  initialBody: string;
+  initialTags: string[];
+  onCancel: () => void;
+  onSave: (vars: { header: string; body: string; tags: string[] }) => void;
+  saving: boolean;
+}) {
+  const [header, setHeader] = useState(initialHeader);
+  const [body, setBody] = useState(initialBody);
+  const [tagsInput, setTagsInput] = useState(initialTags.join(', '));
+
+  return (
+    <div className="flex flex-col gap-3">
+      <label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
+        Nagłówek
+        <Input value={header} onChange={(e) => setHeader(e.target.value)} maxLength={200} />
+      </label>
+      <label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
+        Treść
+        <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={14} />
+      </label>
+      <label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
+        Tagi (po przecinku)
+        <Input value={tagsInput} onChange={(e) => setTagsInput(e.target.value)} />
+      </label>
+      <div className="flex justify-end gap-2">
+        <Button variant="secondary" size="sm" onClick={onCancel} disabled={saving}>
+          Anuluj
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={saving}
+          onClick={() =>
+            onSave({
+              header,
+              body,
+              tags: tagsInput
+                .split(',')
+                .map((t) => t.trim())
+                .filter(Boolean),
+            })
+          }
+        >
+          {saving ? 'Zapisywanie…' : 'Zapisz'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function Dot() {
+  return <span className="size-[3px] rounded-full bg-border-strong" aria-hidden />;
+}

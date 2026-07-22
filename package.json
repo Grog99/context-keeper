@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "pnpm --filter @context-keeper/server start:dev",
-    "build": "pnpm -r build",
+    "build": "pnpm --filter @context-keeper/dashboard build && pnpm --filter @context-keeper/server build",
     "lint": "eslint .",
     "test": "pnpm -r test",
     "cli": "pnpm --filter @context-keeper/server cli",
@@ -25,6 +25,9 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.7.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.7.0",
     "prettier": "^3.9.6",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.65.0"

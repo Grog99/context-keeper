@@ -1,9 +1,9 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { eq, isNotNull, sql } from 'drizzle-orm';
 import { generateId, ID_PREFIX } from '../common/ids';
 import { generateToken, hashToken, isValidTokenFormat } from '../common/tokens';
 import { DB, type Database } from '../db/db.tokens';
-import { projects, type ProjectRow } from '../db/schema';
+import { memories, projects, type ProjectRow } from '../db/schema';
 
 /** Kontekst projektu wyprowadzony z bearer tokena (dołączany do requestu przez BearerGuard). */
 export interface ProjectContext {
@@ -55,6 +55,17 @@ export class ProjectsService {
 
   async listProjects(): Promise<ProjectRow[]> {
     return this.db.select().from(projects).orderBy(projects.createdAt);
+  }
+
+  /** Liczba pamięci per projekt (§M1 planu Fazy 5, dashboard FR-D3) — jeden zagregowany zapytanie
+   * zamiast N+1 per wiersz listy projektów. */
+  async countMemoriesByProject(): Promise<Map<string, number>> {
+    const rows = await this.db
+      .select({ projectId: memories.projectId, count: sql<number>`count(*)::int` })
+      .from(memories)
+      .where(isNotNull(memories.projectId))
+      .groupBy(memories.projectId);
+    return new Map(rows.map((r) => [r.projectId as string, r.count]));
   }
 
   async findById(projectId: string): Promise<ProjectRow | null> {

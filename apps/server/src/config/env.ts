@@ -76,9 +76,11 @@ export const envSchema = z
     RATE_LIMIT_SEARCH_PER_MIN: z.coerce.number().int().positive().default(120),
     RATE_LIMIT_GET_PER_MIN: z.coerce.number().int().positive().default(240),
 
-    // Dashboard / sesja (używane od Fazy 5) — wymagane w produkcji.
+    // Dashboard / sesja (Faza 5) — DASHBOARD_PASSWORD/SESSION_SECRET wymagane w produkcji.
     DASHBOARD_PASSWORD: z.string().optional(),
     SESSION_SECRET: z.string().optional(),
+    SESSION_TTL_HOURS: z.coerce.number().int().positive().default(12),
+    DASHBOARD_COOKIE_NAME: z.string().min(1).default('ck_session'),
 
     // Compose / edge
     COMPOSE_PROFILES: z.string().optional(),

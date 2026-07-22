@@ -1,0 +1,390 @@
+import 'reflect-metadata';
+import { resolve } from 'node:path';
+import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import { Pool } from 'pg';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { AuditService } from '../src/audit/audit.service';
+import { ToolError } from '../src/common/errors';
+import { generateId, ID_PREFIX } from '../src/common/ids';
+import { AppConfigService } from '../src/config/config.service';
+import { envSchema } from '../src/config/env';
+import type { Database } from '../src/db/db.tokens';
+import * as schema from '../src/db/schema';
+import { auditLog, EMBEDDING_DIM, embeddings, memories, revisions, type MemoryRow, type NewMemoryRow } from '../src/db/schema';
+import type { EmbeddingProvider } from '../src/embeddings/embedding-provider';
+import { EmbeddingService } from '../src/embeddings/embedding.service';
+import { MemoryAdminService } from '../src/memory/memory-admin.service';
+import type { ProjectContext } from '../src/projects/projects.service';
+import { ProjectsService } from '../src/projects/projects.service';
+
+/** Jak w `proposals.integration.spec.ts` — wektor stały, testy tutaj sprawdzają MECHANIKĘ
+ * (revisions/audit/embeddings/scope), nie trafność rankingu. */
+class StubEmbeddingProvider implements EmbeddingProvider {
+  readonly dim = EMBEDDING_DIM;
+  throwOnEmbed = false;
+  constructor(public model: string) {}
+
+  async embed(texts: string[]): Promise<number[][]> {
+    if (this.throwOnEmbed) {
+      throw new Error('StubEmbeddingProvider: symulowana awaria providera');
+    }
+    return texts.map(() => new Array(EMBEDDING_DIM).fill(0.01));
+  }
+
+  async health(): Promise<boolean> {
+    return !this.throwOnEmbed;
+  }
+}
+
+describe('MemoryAdminService (integration, testcontainers) — przeglądarka pamięci + human-create/edit/archive/promote (Fazy 5 M1)', () => {
+  let container: StartedPostgreSqlContainer;
+  let pool: Pool;
+  let db: Database;
+  let projects: ProjectsService;
+  let audit: AuditService;
+  let projectA: ProjectContext;
+  let projectB: ProjectContext;
+
+  function buildAdmin(
+    provider: EmbeddingProvider,
+    envOverrides: Record<string, unknown> = {},
+  ): { config: AppConfigService; admin: MemoryAdminService } {
+    const config = new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused', ...envOverrides }));
+    const embeddingService = new EmbeddingService(provider, config);
+    return { config, admin: new MemoryAdminService(db, config, audit, embeddingService) };
+  }
+
+  async function seedApprovedMemory(overrides: Partial<NewMemoryRow> = {}): Promise<MemoryRow> {
+    const [row] = await db
+      .insert(memories)
+      .values({
+        id: generateId(ID_PREFIX.memory),
+        header: 'Seed header',
+        body: 'Seed body.',
+        kind: 'fact',
+        tags: [],
+        scope: 'project',
+        status: 'approved',
+        source: 'human',
+        version: 0,
+        approvedAt: new Date(),
+        ...overrides,
+      })
+      .returning();
+    return row;
+  }
+
+  beforeAll(async () => {
+    container = await new PostgreSqlContainer('pgvector/pgvector:pg18-trixie').start();
+    pool = new Pool({ connectionString: container.getConnectionUri() });
+    db = drizzle(pool, { schema });
+    await migrate(db, { migrationsFolder: resolve(process.cwd(), 'src/db/migrations') });
+
+    projects = new ProjectsService(db);
+    audit = new AuditService(db);
+    const createdA = await projects.createProject('memory-admin-test-a');
+    projectA = { projectId: createdA.project.id, projectName: createdA.project.name };
+    const createdB = await projects.createProject('memory-admin-test-b');
+    projectB = { projectId: createdB.project.id, projectName: createdB.project.name };
+  });
+
+  afterAll(async () => {
+    await pool?.end();
+    await container?.stop();
+  });
+
+  describe('humanCreate', () => {
+    it('wstawia approved memory source=human, revisions=created, audit human_edit, embedding fail-open (up -> recomputed)', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('human-create-model'));
+
+      const result = await admin.humanCreate({
+        kind: 'fact',
+        header: 'Human-created fakt',
+        body: 'Tresc utworzona recznie.',
+        tags: ['human'],
+        scope: 'project',
+        projectId: projectA.projectId,
+      });
+      expect(result.warnings).toEqual([]);
+      expect(result.id).toMatch(/^mem_/);
+
+      const [row] = await db.select().from(memories).where(eq(memories.id, result.id));
+      expect(row.status).toBe('approved');
+      expect(row.source).toBe('human');
+      expect(row.version).toBe(0);
+      expect(row.scope).toBe('project');
+      expect(row.projectId).toBe(projectA.projectId);
+
+      const embRows = await db.select().from(embeddings).where(eq(embeddings.memoryId, result.id));
+      expect(embRows.length).toBeGreaterThan(0);
+
+      const revRows = await db.select().from(revisions).where(eq(revisions.memoryId, result.id));
+      expect(revRows.some((r) => r.action === 'created' && r.actor === 'human-dashboard')).toBe(true);
+
+      const auditRows = await db.select().from(auditLog).where(eq(auditLog.eventType, 'human_edit'));
+      expect(auditRows.some((a) => a.affectedIds.includes(result.id))).toBe(true);
+    });
+
+    it('embedding provider down -> memory i tak approved (fail-open, vectorless)', async () => {
+      const provider = new StubEmbeddingProvider('human-create-down-model');
+      provider.throwOnEmbed = true;
+      const { admin } = buildAdmin(provider);
+
+      const result = await admin.humanCreate({
+        kind: 'fact',
+        header: 'Human-created bez embeddingu',
+        body: 'Provider padl przy tworzeniu.',
+        scope: 'global',
+      });
+
+      const [row] = await db.select().from(memories).where(eq(memories.id, result.id));
+      expect(row.status).toBe('approved');
+      expect(row.scope).toBe('global');
+      expect(row.projectId).toBeNull();
+
+      const embRows = await db.select().from(embeddings).where(eq(embeddings.memoryId, result.id));
+      expect(embRows.length).toBe(0);
+    });
+
+    it('sekret w treści -> ostrzeżenie non-blocking, memory i tak zapisana (FR-S1: human=warn)', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('human-create-secret-model'));
+
+      const result = await admin.humanCreate({
+        kind: 'fact',
+        header: 'Fakt z sekretem',
+        body: 'export AWS_ACCESS_KEY_ID=AKIAABCDEFGHIJKLMNOP',
+        scope: 'project',
+        projectId: projectA.projectId,
+      });
+      expect(result.warnings.length).toBeGreaterThan(0);
+
+      const [row] = await db.select().from(memories).where(eq(memories.id, result.id));
+      expect(row.status).toBe('approved');
+      expect(row.body).toContain('AKIAABCDEFGHIJKLMNOP');
+    });
+
+    it('scope=project bez projectId -> validation_error (ToolError)', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('human-create-invalid-model'));
+      await expect(
+        admin.humanCreate({ kind: 'fact', header: 'X', body: 'Y', scope: 'project' }),
+      ).rejects.toMatchObject({ code: 'validation_error' });
+    });
+  });
+
+  describe('editMemory', () => {
+    it('bumpuje version, wymienia embeddingi (delete+insert), revisions=edited z prior snapshot, audit human_edit', async () => {
+      const seeded = await seedApprovedMemory({
+        header: 'Stary naglowek edit',
+        body: 'Stara tresc edit.',
+        projectId: projectA.projectId,
+      });
+      await db.insert(embeddings).values({
+        id: generateId(ID_PREFIX.embedding),
+        memoryId: seeded.id,
+        chunkIndex: 0,
+        chunkText: 'stara tresc chunk edit',
+        embeddingModel: 'edit-model',
+        vector: new Array(EMBEDDING_DIM).fill(0.02),
+      });
+
+      const { admin } = buildAdmin(new StubEmbeddingProvider('edit-model'));
+      const result = await admin.editMemory(seeded.id, { header: 'Nowy naglowek edit' });
+      expect(result.warnings).toEqual([]);
+
+      const [row] = await db.select().from(memories).where(eq(memories.id, seeded.id));
+      expect(row.header).toBe('Nowy naglowek edit');
+      expect(row.body).toBe('Stara tresc edit.'); // pole spoza edita zostaje niezmienione
+      expect(row.version).toBe(1);
+
+      const embRows = await db.select().from(embeddings).where(eq(embeddings.memoryId, seeded.id));
+      expect(embRows.length).toBeGreaterThan(0);
+      expect(embRows.every((e) => e.chunkText !== 'stara tresc chunk edit')).toBe(true);
+
+      const revRows = await db.select().from(revisions).where(eq(revisions.memoryId, seeded.id));
+      const editedRev = revRows.find((r) => r.action === 'edited');
+      expect(editedRev).toBeDefined();
+      expect((editedRev!.snapshot as { header: string }).header).toBe('Stary naglowek edit');
+
+      const auditRows = await db.select().from(auditLog).where(eq(auditLog.eventType, 'human_edit'));
+      expect(auditRows.some((a) => a.affectedIds.includes(seeded.id))).toBe(true);
+    });
+
+    it('edit nieistniejącej pamięci -> not_found', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('edit-missing-model'));
+      await expect(admin.editMemory('mem_doesnotexist0', { header: 'X' })).rejects.toMatchObject({
+        code: 'not_found',
+      });
+    });
+  });
+
+  describe('archiveMemory', () => {
+    it('soft-delete: status=archived, version+1, embeddingi usunięte, revisions=archive, audit archive', async () => {
+      const seeded = await seedApprovedMemory({ header: 'Do archiwizacji', body: 'Tresc.', projectId: projectA.projectId });
+      await db.insert(embeddings).values({
+        id: generateId(ID_PREFIX.embedding),
+        memoryId: seeded.id,
+        chunkIndex: 0,
+        chunkText: 'chunk do archiwizacji',
+        embeddingModel: 'archive-model',
+        vector: new Array(EMBEDDING_DIM).fill(0.03),
+      });
+      const { admin } = buildAdmin(new StubEmbeddingProvider('archive-model'));
+
+      await admin.archiveMemory(seeded.id);
+
+      const [row] = await db.select().from(memories).where(eq(memories.id, seeded.id));
+      expect(row.status).toBe('archived');
+      expect(row.version).toBe(1);
+
+      const embRows = await db.select().from(embeddings).where(eq(embeddings.memoryId, seeded.id));
+      expect(embRows.length).toBe(0);
+
+      const revRows = await db.select().from(revisions).where(eq(revisions.memoryId, seeded.id));
+      expect(revRows.some((r) => r.action === 'archive')).toBe(true);
+
+      const auditRows = await db.select().from(auditLog).where(eq(auditLog.eventType, 'archive'));
+      expect(auditRows.some((a) => a.affectedIds.includes(seeded.id))).toBe(true);
+    });
+
+    it('archiwizacja już zarchiwizowanej -> validation_error', async () => {
+      const seeded = await seedApprovedMemory({ header: 'Podwojna archiwizacja', body: 'T.', projectId: projectA.projectId });
+      const { admin } = buildAdmin(new StubEmbeddingProvider('archive-twice-model'));
+      await admin.archiveMemory(seeded.id);
+      await expect(admin.archiveMemory(seeded.id)).rejects.toMatchObject({ code: 'validation_error' });
+    });
+  });
+
+  describe('promoteToGlobal', () => {
+    it('scope->global, project_id->null, version+1, revisions=promote, audit promote', async () => {
+      const seeded = await seedApprovedMemory({ header: 'Do promocji', body: 'Tresc.', projectId: projectA.projectId });
+      const { admin } = buildAdmin(new StubEmbeddingProvider('promote-model'));
+
+      await admin.promoteToGlobal(seeded.id);
+
+      const [row] = await db.select().from(memories).where(eq(memories.id, seeded.id));
+      expect(row.scope).toBe('global');
+      expect(row.projectId).toBeNull();
+      expect(row.version).toBe(1);
+
+      const revRows = await db.select().from(revisions).where(eq(revisions.memoryId, seeded.id));
+      expect(revRows.some((r) => r.action === 'promote')).toBe(true);
+
+      const auditRows = await db.select().from(auditLog).where(eq(auditLog.eventType, 'promote'));
+      expect(auditRows.some((a) => a.affectedIds.includes(seeded.id))).toBe(true);
+    });
+
+    it('promocja już-global -> validation_error', async () => {
+      const seeded = await seedApprovedMemory({ header: 'Juz global', body: 'T.', scope: 'global', projectId: null });
+      const { admin } = buildAdmin(new StubEmbeddingProvider('promote-twice-model'));
+      await expect(admin.promoteToGlobal(seeded.id)).rejects.toMatchObject({ code: 'validation_error' });
+    });
+  });
+
+  describe('getMemoryDetail — bez bumpowania access_count/last_accessed_at (§Ryzyka planu)', () => {
+    it('wielokrotny odczyt NIE zmienia access_count ani last_accessed_at', async () => {
+      const seeded = await seedApprovedMemory({
+        header: 'Nie bumpuj mnie',
+        body: 'Tresc.',
+        projectId: projectA.projectId,
+        accessCount: 5,
+      });
+      const { admin } = buildAdmin(new StubEmbeddingProvider('no-bump-model'));
+
+      const before = await admin.getMemoryDetail(seeded.id);
+      expect(before.accessCount).toBe(5);
+      await admin.getMemoryDetail(seeded.id);
+      await admin.getMemoryDetail(seeded.id);
+
+      const [row] = await db.select().from(memories).where(eq(memories.id, seeded.id));
+      expect(row.accessCount).toBe(5);
+      expect(row.lastAccessedAt).toBeNull();
+    });
+
+    it('nieistniejąca pamięć -> not_found (ToolError)', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('detail-missing-model'));
+      await expect(admin.getMemoryDetail('mem_doesnotexist0')).rejects.toBeInstanceOf(ToolError);
+    });
+  });
+
+  describe('listMemories — scope strict dla widoku projektu (FR-D6, §9.6 design-systemu)', () => {
+    it("scope='project'+projectId nie przecieka pamięci global ani innego projektu", async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('list-scope-model'));
+      const inProjectA = await seedApprovedMemory({ header: 'W projekcie A', body: 'T.', projectId: projectA.projectId });
+      const inProjectB = await seedApprovedMemory({ header: 'W projekcie B', body: 'T.', projectId: projectB.projectId });
+      const global = await seedApprovedMemory({ header: 'Global memory', body: 'T.', scope: 'global', projectId: null });
+
+      const results = await admin.listMemories({ scope: 'project', projectId: projectA.projectId });
+      const ids = results.map((r) => r.id);
+      expect(ids).toContain(inProjectA.id);
+      expect(ids).not.toContain(inProjectB.id);
+      expect(ids).not.toContain(global.id);
+    });
+
+    it("scope='global' zwraca tylko global", async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('list-global-model'));
+      const global = await seedApprovedMemory({ header: 'Global only test', body: 'T.', scope: 'global', projectId: null });
+      const project = await seedApprovedMemory({ header: 'Project only test', body: 'T.', projectId: projectA.projectId });
+
+      const results = await admin.listMemories({ scope: 'global' });
+      const ids = results.map((r) => r.id);
+      expect(ids).toContain(global.id);
+      expect(ids).not.toContain(project.id);
+    });
+
+    it("scope='all'/undefined (Wszystkie) zwraca oba scope bez ograniczenia projektu", async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('list-all-model'));
+      const inA = await seedApprovedMemory({ header: 'Wszystkie test A', body: 'T.', projectId: projectA.projectId });
+      const inB = await seedApprovedMemory({ header: 'Wszystkie test B', body: 'T.', projectId: projectB.projectId });
+
+      const results = await admin.listMemories({});
+      const ids = results.map((r) => r.id);
+      expect(ids).toContain(inA.id);
+      expect(ids).toContain(inB.id);
+    });
+
+    it('nie zwraca body (lekki widok listy)', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('list-nobody-model'));
+      await seedApprovedMemory({ header: 'Bez body w liscie', body: 'Sekretna tresc listy.', projectId: projectA.projectId });
+      const results = await admin.listMemories({ scope: 'project', projectId: projectA.projectId });
+      expect(results.length).toBeGreaterThan(0);
+      for (const r of results) {
+        expect((r as unknown as { body?: string }).body).toBeUndefined();
+      }
+    });
+  });
+
+  describe('AuditService.query — filtry FR-D4', () => {
+    it('filtruje po eventType i limit', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('audit-query-model'));
+      await admin.humanCreate({ kind: 'fact', header: 'Audit query test', body: 'T.', scope: 'project', projectId: projectA.projectId });
+
+      const rows = await audit.query({ eventType: 'human_edit', limit: 5 });
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.length).toBeLessThanOrEqual(5);
+      expect(rows.every((r) => r.eventType === 'human_edit')).toBe(true);
+    });
+
+    it('filtruje po from/to (zakres czasu)', async () => {
+      const future = new Date(Date.now() + 60_000);
+      const rows = await audit.query({ from: future });
+      expect(rows).toEqual([]);
+    });
+
+    it('filtruje po projectId (heurystyka actor=agent:<id> ∪ affected_ids ∩ pamięci projektu)', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('audit-project-model'));
+      const created = await admin.humanCreate({
+        kind: 'fact',
+        header: 'Audit project filter test',
+        body: 'T.',
+        scope: 'project',
+        projectId: projectB.projectId,
+      });
+
+      const rows = await audit.query({ projectId: projectB.projectId, eventType: 'human_edit' });
+      expect(rows.some((r) => r.affectedIds.includes(created.id))).toBe(true);
+    });
+  });
+});

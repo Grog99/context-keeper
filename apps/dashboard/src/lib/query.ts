@@ -1,0 +1,24 @@
+import { QueryClient } from '@tanstack/react-query';
+
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5_000,
+      retry: 1,
+    },
+  },
+});
+
+/** Klucze zapytań scentralizowane (unikaj literałów w komponentach — łatwiej invalidateQueries po mutacji). */
+export const queryKeys = {
+  session: () => ['session'] as const,
+  proposals: (filter: Record<string, unknown>) => ['proposals', filter] as const,
+  proposal: (id: string) => ['proposals', id] as const,
+  memories: (filter: Record<string, unknown>) => ['memories', filter] as const,
+  memory: (id: string) => ['memories', id] as const,
+  memoryRevisions: (id: string) => ['memories', id, 'revisions'] as const,
+  projects: () => ['projects'] as const,
+  audit: (filter: Record<string, unknown>) => ['audit', filter] as const,
+  metrics: () => ['metrics'] as const,
+  config: () => ['config'] as const,
+};

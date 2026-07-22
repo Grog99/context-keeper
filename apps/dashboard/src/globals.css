@@ -1,0 +1,171 @@
+/* Self-hosted (§12 design-system.md: "self-hosted, bez CDN") przez @fontsource — pakiety npm
+   dostarczają rzeczywiste pliki woff2 pod node_modules, Vite bundle'uje je do własnego origin przy
+   buildzie. Tylko wagi 400/500/600 (§3: "wagi tylko 400/500/600, bez ciężkich") i tylko podzbiory
+   `latin`+`latin-ext` (§11: "PL/EN mieszane" — `latin-ext` niesie polskie diakrytyki ą/ć/ę/ł/ń/ó/ś/ź/ż;
+   pełny import @fontsource ciągnie też cyrillic/greek/vietnamese, niepotrzebne tutaj). */
+@import '@fontsource/inter/latin-400.css';
+@import '@fontsource/inter/latin-500.css';
+@import '@fontsource/inter/latin-600.css';
+@import '@fontsource/inter/latin-ext-400.css';
+@import '@fontsource/inter/latin-ext-500.css';
+@import '@fontsource/inter/latin-ext-600.css';
+@import '@fontsource/jetbrains-mono/latin-400.css';
+@import '@fontsource/jetbrains-mono/latin-500.css';
+@import '@fontsource/jetbrains-mono/latin-ext-400.css';
+@import '@fontsource/jetbrains-mono/latin-ext-500.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============ Design tokens (§7.1 design-system.md, wklejone 1:1) ============ */
+:root {
+  /* neutrals + surface (warm stone) */
+  --background: #FAFAF9;
+  --foreground: #1C1917;
+  --surface: #FFFFFF;
+  --muted: #F5F5F4;
+  --muted-foreground: #57534E;
+  --faint: #A8A29E;
+  --border: #E7E5E4;
+  --border-strong: #D6D3D1;
+  --input: #E7E5E4;
+
+  /* brand accent — iris */
+  --primary: #5B4BD6;
+  --primary-hover: #4E3FC0;
+  --primary-foreground: #FFFFFF;
+  --accent-subtle: #EEEBFB;
+  --ring: #5B4BD6;
+
+  /* status — semantyka (para: solid + subtle + foreground-on-subtle) */
+  --success: #16A34A;  --success-subtle: #DCFCE7;  --success-foreground: #14532D;
+  --warning: #B45309;  --warning-subtle: #FEF3C7;  --warning-foreground: #78350F;
+  --danger:  #DC2626;  --danger-subtle:  #FEE2E2;  --danger-foreground:  #7F1D1D;
+  --info:    #5B4BD6;  --info-subtle:    #EEEBFB;  --info-foreground:    #372F8C;
+  --neutral: #78716C;  --neutral-subtle: #F5F5F4;  --neutral-foreground: #44403C;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / .06);
+  --shadow-md: 0 8px 24px -6px rgb(28 25 23 / .18);
+
+  --radius: 6px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #141312;
+    --foreground: #F5F3F0;
+    --surface: #1B1A18;
+    --muted: #232120;
+    --muted-foreground: #A8A29E;
+    --faint: #78716C;
+    --border: #2C2A27;
+    --border-strong: #3A3633;
+    --input: #2C2A27;
+
+    --primary: #8B7CF6;
+    --primary-hover: #9E90F8;
+    --primary-foreground: #15131F;
+    --accent-subtle: #221E3A;
+    --ring: #8B7CF6;
+
+    --success: #4ADE80;  --success-subtle: #0F2A18;  --success-foreground: #BBF7D0;
+    --warning: #FBBF24;  --warning-subtle: #2A2008;  --warning-foreground: #FDE68A;
+    --danger:  #F87171;  --danger-subtle:  #2A1414;  --danger-foreground:  #FECACA;
+    --info:    #8B7CF6;  --info-subtle:    #221E3A;  --info-foreground:    #DDD6FE;
+    --neutral: #A8A29E;  --neutral-subtle: #232120;  --neutral-foreground: #E7E5E4;
+
+    --shadow-md: 0 10px 28px -8px rgb(0 0 0 / .5);
+  }
+}
+
+/* Toggle użytkownika musi wygrać z media query — w OBIE strony (artifact-design/design-system.md
+   §7.1 wymóg). `data-theme` jest stampowany na <html> przez ThemeToggle (§App.tsx). */
+:root[data-theme='light'] {
+  --background: #FAFAF9;
+  --foreground: #1C1917;
+  --surface: #FFFFFF;
+  --muted: #F5F5F4;
+  --muted-foreground: #57534E;
+  --faint: #A8A29E;
+  --border: #E7E5E4;
+  --border-strong: #D6D3D1;
+  --input: #E7E5E4;
+  --primary: #5B4BD6;
+  --primary-hover: #4E3FC0;
+  --primary-foreground: #FFFFFF;
+  --accent-subtle: #EEEBFB;
+  --ring: #5B4BD6;
+  --success: #16A34A;  --success-subtle: #DCFCE7;  --success-foreground: #14532D;
+  --warning: #B45309;  --warning-subtle: #FEF3C7;  --warning-foreground: #78350F;
+  --danger:  #DC2626;  --danger-subtle:  #FEE2E2;  --danger-foreground:  #7F1D1D;
+  --info:    #5B4BD6;  --info-subtle:    #EEEBFB;  --info-foreground:    #372F8C;
+  --neutral: #78716C;  --neutral-subtle: #F5F5F4;  --neutral-foreground: #44403C;
+  --shadow-md: 0 8px 24px -6px rgb(28 25 23 / .18);
+}
+
+:root[data-theme='dark'] {
+  --background: #141312;
+  --foreground: #F5F3F0;
+  --surface: #1B1A18;
+  --muted: #232120;
+  --muted-foreground: #A8A29E;
+  --faint: #78716C;
+  --border: #2C2A27;
+  --border-strong: #3A3633;
+  --input: #2C2A27;
+  --primary: #8B7CF6;
+  --primary-hover: #9E90F8;
+  --primary-foreground: #15131F;
+  --accent-subtle: #221E3A;
+  --ring: #8B7CF6;
+  --success: #4ADE80;  --success-subtle: #0F2A18;  --success-foreground: #BBF7D0;
+  --warning: #FBBF24;  --warning-subtle: #2A2008;  --warning-foreground: #FDE68A;
+  --danger:  #F87171;  --danger-subtle:  #2A1414;  --danger-foreground:  #FECACA;
+  --info:    #8B7CF6;  --info-subtle:    #221E3A;  --info-foreground:    #DDD6FE;
+  --neutral: #A8A29E;  --neutral-subtle: #232120;  --neutral-foreground: #E7E5E4;
+  --shadow-md: 0 10px 28px -8px rgb(0 0 0 / .5);
+}
+
+/* ============ Base ============ */
+* {
+  border-color: var(--border);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: theme('fontFamily.sans');
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-mono,
+.mono {
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
