@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "ask": [
+      "Bash(docker compose down*)",
+      "Bash(docker-compose down*)",
+      "Bash(docker compose rm*)",
+      "Bash(docker-compose rm*)",
+      "Bash(docker volume rm*)",
+      "Bash(docker volume prune*)",
+      "Bash(docker system prune*)",
+      "PowerShell(docker compose down*)",
+      "PowerShell(docker-compose down*)",
+      "PowerShell(docker compose rm*)",
+      "PowerShell(docker-compose rm*)",
+      "PowerShell(docker volume rm*)",
+      "PowerShell(docker volume prune*)",
+      "PowerShell(docker system prune*)"
+    ]
+  }
+}
