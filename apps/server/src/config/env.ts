@@ -13,6 +13,19 @@ const zBool = z.preprocess((v) => {
 }, z.boolean());
 
 /**
+ * Trójka implikowana przez preset (§7 tech-stack) — PRESET jest tylko wygodą instalatora,
+ * PROVIDER/MODEL/DIM zostają autorytatywne (walidacja w superRefine niżej).
+ * `english`/`api` implikują wymiar inny niż fizyczna kolumna `vector(1024)` (Faza 3 nie robi
+ * cross-dimension migracji — patrz decyzja w planie Fazy 3) — dozwolone do skonfigurowania na
+ * poziomie env/interfejsu providera, ale realny re-embed pod nimi czeka na tę migrację.
+ */
+const EMBEDDING_PRESET_TRIO = {
+  multilingual: { provider: 'local', model: 'bge-m3', dim: 1024 },
+  english: { provider: 'local', model: 'bge-small-en-v1.5', dim: 384 },
+  api: { provider: 'api', model: 'text-embedding-3-small', dim: 1536 },
+} as const;
+
+/**
  * Kontrakt konfiguracji (12-factor). Kanon i komentarze: `.env.example`.
  * Wartości progów/limitów to knoby dostrajane na realnych danych (PRD §11).
  */
@@ -29,12 +42,24 @@ export const envSchema = z
     // Baza
     DATABASE_URL: z.string().min(1, 'DATABASE_URL jest wymagany'),
 
-    // Embeddingi — provider + preset (pełne wpięcie w Fazie 3; spójność walidowana już teraz).
+    // Embeddingi — provider + preset (Faza 3). Trójka PROVIDER+MODEL+DIM jest autorytatywna;
+    // PRESET to tylko wygoda instalatora (§7 tech-stack) — walidowana przeciw trójce w superRefine.
     EMBEDDING_PROVIDER: z.enum(['local', 'api']).default('local'),
     EMBEDDING_MODEL: z.string().min(1).default('bge-m3'),
     EMBEDDING_DIM: z.coerce.number().int().positive().default(1024),
     EMBEDDING_API_KEY: z.string().optional(),
     EMBEDDING_SAVE_TIMEOUT_MS: z.coerce.number().int().positive().default(1500),
+    EMBEDDING_PRESET: z.enum(['multilingual', 'english', 'api']).optional(),
+    // TEI sidecar (provider=local); zewnętrzne API (provider=api) — osobny URL, bo różne kontrakty HTTP.
+    EMBEDDING_BASE_URL: z.string().min(1).default('http://embeddings:80'),
+    EMBEDDING_API_URL: z.string().optional(),
+    // Budżet ramienia wektorowego przy SEARCH — odrębny od SAVE (search jest sync w ścieżce agenta).
+    EMBEDDING_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(800),
+
+    // Hybrid retrieval (§6 tech-stack, FR-R2-R5) — RRF + top-k/kandydaci ramienia wektorowego.
+    RRF_K: z.coerce.number().int().positive().default(60),
+    SEARCH_TOP_K: z.coerce.number().int().positive().default(10),
+    SEARCH_VECTOR_CANDIDATES: z.coerce.number().int().positive().default(50),
 
     // Limity wejścia (FR-V1)
     BODY_MAX_FACT: z.coerce.number().int().positive().default(8192),
@@ -67,6 +92,30 @@ export const envSchema = z
         path: ['EMBEDDING_API_KEY'],
         message: 'EMBEDDING_API_KEY jest wymagany gdy EMBEDDING_PROVIDER=api',
       });
+    }
+    if (env.EMBEDDING_PROVIDER === 'api' && !env.EMBEDDING_API_URL) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['EMBEDDING_API_URL'],
+        message: 'EMBEDDING_API_URL jest wymagany gdy EMBEDDING_PROVIDER=api',
+      });
+    }
+    if (env.EMBEDDING_PRESET) {
+      const expected = EMBEDDING_PRESET_TRIO[env.EMBEDDING_PRESET];
+      const matches =
+        env.EMBEDDING_PROVIDER === expected.provider &&
+        env.EMBEDDING_MODEL === expected.model &&
+        env.EMBEDDING_DIM === expected.dim;
+      if (!matches) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['EMBEDDING_PRESET'],
+          message:
+            `EMBEDDING_PRESET=${env.EMBEDDING_PRESET} wymaga PROVIDER=${expected.provider}, ` +
+            `MODEL=${expected.model}, DIM=${expected.dim} — trójka w env jest z nim niespójna ` +
+            `(popraw PROVIDER/MODEL/DIM albo usuń EMBEDDING_PRESET)`,
+        });
+      }
     }
     if (env.NODE_ENV === 'production') {
       if (!env.SESSION_SECRET) {

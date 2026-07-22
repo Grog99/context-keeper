@@ -27,6 +27,9 @@ export interface SearchResultItem {
   header: string;
   tags: string[];
   score: number;
+  /** Tylko `kind=document` (FR-M1): fragment najlepiej dopasowanego chunku wektorowego.
+   * Nieobecny przy ramieniu FTS-only (embedding-down) — pole czysto addytywne. */
+  excerpt?: string;
 }
 
 export interface GetMemoryResult {

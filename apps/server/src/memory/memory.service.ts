@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, arrayOverlaps, desc, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, arrayOverlaps, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { computeContentHash } from '../common/content-hash';
 import { ToolError } from '../common/errors';
@@ -7,7 +7,8 @@ import { generateId, ID_PREFIX } from '../common/ids';
 import { scanForSecrets } from '../common/secret-scanner';
 import { AppConfigService } from '../config/config.service';
 import { DB, type Database } from '../db/db.tokens';
-import { memories, proposals, type MemoryRow } from '../db/schema';
+import { embeddings, memories, proposals, stagingEmbeddings, type MemoryRow } from '../db/schema';
+import { EmbeddingService, toPgVectorLiteral } from '../embeddings/embedding.service';
 import type { ProjectContext } from '../projects/projects.service';
 import { classifyDedup } from './dedup';
 import type {
@@ -20,15 +21,17 @@ import type {
   SeedApprovedInput,
 } from './memory.types';
 import { normalizeHeader, normalizeTags, validateBody } from './validation';
+import { rrfFuse } from './rrf';
 
-// PRD §11 (otwarta kwestia — knob dostrajany na realnych danych); stała w v1, bez env.
-const DEFAULT_TOP_K = 10;
 const DEFAULT_SEARCH_KINDS: MemoryKindFilter[] = ['fact', 'document'];
+// Fragment chunku dopasowanego wektorowo, dołączany do wyniku search dla kind=document (FR-M1).
+const EXCERPT_MAX_LEN = 280;
 
 /**
  * Warstwa logiki pamięci (§4-6 tech-stack) — reużywalna później przez kolejkę akceptacji (Faza 4)
- * i dashboard (Faza 5). W Fazie 2 pokrywa dokładnie ścieżkę MCP: save → proposal (bez embeddingu),
- * search → FTS-only na `memories.fts`, get → approved w scope + bump technicznego licznika.
+ * i dashboard (Faza 5). Save → proposal (+ best-effort staged embedding, Faza 3), search → hybryda
+ * FTS+wektor fuzjowana RRF (fail-open do FTS-only przy embedding-down), get → approved w scope
+ * + bump technicznego licznika.
  */
 @Injectable()
 export class MemoryService {
@@ -36,6 +39,7 @@ export class MemoryService {
     @Inject(DB) private readonly db: Database,
     private readonly config: AppConfigService,
     private readonly audit: AuditService,
+    private readonly embedding: EmbeddingService,
   ) {}
 
   /**
@@ -106,9 +110,11 @@ export class MemoryService {
       return { id: outcome.existingId!, status: outcome.status };
     }
 
-    // TODO(Faza 3): podobne-ale-nie-exact → hint „similar to [ids]" po dołożeniu ramienia wektorowego
-    // (staging_embeddings). W Fazie 2 (bez embeddingów) nie odróżniamy podobieństwa — proposal
-    // powstaje zawsze (FR-M3), to jedyna dopuszczalna uproszczona ścieżka na tym etapie.
+    // Faza 4 seam: staged wektor (zapisywany niżej, best-effort) czeka na PROMOCJĘ do `embeddings`
+    // przy akceptacji proposala — kolejka akceptacji jeszcze nie istnieje, więc promocja NIE jest
+    // budowana tutaj. Dopóki jej nie ma, proposal zawsze powstaje bez rozróżniania "podobne" od
+    // "nowe" (FR-M3 hint similar-to zostaje na Fazie 4, gdy promocja da autorytatywne wektory
+    // do porównania — dzisiejszy staged wektor to tylko dedup-hint na przyszłość, nieużywany jeszcze).
     const mintedMemoryId = generateId(ID_PREFIX.memory);
     const proposalId = generateId(ID_PREFIX.proposal);
     const payload = { memoryId: mintedMemoryId, header, body, tags, kind: 'fact' as const };
@@ -133,13 +139,32 @@ export class MemoryService {
       metadata: { proposalId, kind: 'fact' },
     });
 
+    // Best-effort staged embedding (§7 tech-stack "embedding nigdy nie blokuje proposala"):
+    // provider down/timeout -> `embedMemoryBestEffort` zwraca null, proposal już powyżej powstał.
+    const staged = await this.embedding.embedMemoryBestEffort('fact', header, body, tags);
+    if (staged) {
+      await this.db.insert(stagingEmbeddings).values(
+        staged.chunks.map((c) => ({
+          id: generateId(ID_PREFIX.embedding),
+          proposalId,
+          chunkIndex: c.index,
+          chunkText: c.text,
+          embeddingModel: staged.model,
+          vector: c.vector,
+        })),
+      );
+    }
+
     return { id: mintedMemoryId, status: 'pending' };
   }
 
   /**
-   * search_memory (FR-M1, FR-R1-R5 — tylko ramię FTS w Fazie 2, ramię wektorowe + RRF w Fazie 3).
-   * FTS na całym dokumencie (`memories.fts`, konfiguracja `simple`) — bez chunkingu, więc bez collapse
-   * (collapse dotyczy trafień na poziomie chunków wektorowych, które dochodzą w Fazie 3).
+   * search_memory (FR-M1, FR-R1-R5): dwa ramiona fuzjowane RRF. FTS na całym dokumencie
+   * (`memories.fts`, konfiguracja `simple`) — bez chunkingu, więc bez collapse. Wektor na
+   * chunkach (`embeddings`, HNSW) — collapse = MIN dystansu per `memory_id` (FR-R3), zawężony
+   * do aktywnego modelu (FR-R5). Query-embed fail-open: provider down/timeout → pomijamy ramię
+   * wektorowe, RRF degeneruje się do samej listy FTS (identyczne z zachowaniem sprzed Fazy 3).
+   * "Dwufazowo" (§6.7) to istniejący split search(nagłówki)/get(body), NIE osobny re-rank pass.
    */
   async search(input: SearchMemoryInput, ctx: ProjectContext): Promise<SearchResultItem[]> {
     const query = input.query?.trim();
@@ -148,6 +173,61 @@ export class MemoryService {
     }
     const kinds = input.kind ? [input.kind] : DEFAULT_SEARCH_KINDS;
 
+    let tags: string[] | undefined;
+    if (input.tags && input.tags.length > 0) {
+      const normalizedTags = normalizeTags(input.tags, this.config);
+      if (normalizedTags.length > 0) {
+        tags = normalizedTags; // dowolny wspólny tag (any-of)
+      }
+    }
+
+    const candidateLimit = this.config.get('SEARCH_VECTOR_CANDIDATES');
+    const ftsIds = await this.ftsArm(query, ctx, kinds, tags, candidateLimit);
+
+    const qvec = await this.embedding.embedQuery(query); // null = fail-open, ramię pominięte
+    const vectorIds = qvec ? await this.vectorArm(qvec, ctx, kinds, tags, candidateLimit) : [];
+
+    const fused = rrfFuse([ftsIds, vectorIds], this.config.get('RRF_K')).slice(
+      0,
+      this.config.get('SEARCH_TOP_K'),
+    );
+    if (fused.length === 0) return [];
+
+    const fusedIds = fused.map((f) => f.id);
+    const rows = await this.db
+      .select({ id: memories.id, header: memories.header, tags: memories.tags, kind: memories.kind })
+      .from(memories)
+      .where(inArray(memories.id, fusedIds));
+    const byId = new Map(rows.map((r) => [r.id, r]));
+
+    // Excerpt tylko dla document (FR-M1) i tylko gdy mamy query-vector do wyboru najlepszego chunku
+    // (bez niego nie ma czym rankować chunków — pole zostaje po prostu nieobecne, additive).
+    const documentIds = fusedIds.filter((id) => byId.get(id)?.kind === 'document');
+    const excerpts = qvec ? await this.documentExcerpts(documentIds, qvec) : new Map<string, string>();
+
+    return fused
+      .filter((f) => byId.has(f.id))
+      .map((f) => {
+        const row = byId.get(f.id)!;
+        const excerpt = excerpts.get(f.id);
+        return {
+          id: row.id,
+          header: row.header,
+          tags: row.tags,
+          score: f.score,
+          ...(excerpt !== undefined ? { excerpt } : {}),
+        };
+      });
+  }
+
+  /** Ramię FTS (FR-R2): `plainto_tsquery('simple', …)` + `ts_rank`, zwraca id-y w kolejności rankingu. */
+  private async ftsArm(
+    query: string,
+    ctx: ProjectContext,
+    kinds: MemoryKindFilter[],
+    tags: string[] | undefined,
+    limit: number,
+  ): Promise<string[]> {
     // Kolumna `fts` (tsvector, generated always) nie jest zadeklarowana w schemacie drizzle
     // (celowo — Faza 1, patrz komentarz w db/schema/memories.ts: poza zasięgiem drizzle-kit,
     // dokładana ręcznie w migracji). Referencja przez surowy SQL — nazwa nieniejednoznaczna
@@ -166,22 +246,80 @@ export class MemoryService {
       scopeCondition,
       inArray(memories.kind, kinds),
     ];
-
-    if (input.tags && input.tags.length > 0) {
-      const normalizedTags = normalizeTags(input.tags, this.config);
-      if (normalizedTags.length > 0) {
-        conditions.push(arrayOverlaps(memories.tags, normalizedTags)); // dowolny wspólny tag
-      }
+    if (tags && tags.length > 0) {
+      conditions.push(arrayOverlaps(memories.tags, tags));
     }
 
     const rows = await this.db
-      .select({ id: memories.id, header: memories.header, tags: memories.tags, score: rank })
+      .select({ id: memories.id })
       .from(memories)
       .where(and(...conditions))
       .orderBy(desc(rank))
-      .limit(DEFAULT_TOP_K);
+      .limit(limit);
+    return rows.map((r) => r.id);
+  }
 
-    return rows.map((r) => ({ id: r.id, header: r.header, tags: r.tags, score: Number(r.score) }));
+  /**
+   * Ramię wektorowe (FR-R2, FR-R3, FR-R5): cosine ANN (`<=>`, HNSW) na `embeddings`, collapse
+   * MIN(dystans) per `memory_id`, zawężone do aktywnego `embedding_model`. Ten sam
+   * scope/status/kind/tags predicate co ramię FTS.
+   */
+  private async vectorArm(
+    qvec: number[],
+    ctx: ProjectContext,
+    kinds: MemoryKindFilter[],
+    tags: string[] | undefined,
+    limit: number,
+  ): Promise<string[]> {
+    const qvecLiteral = toPgVectorLiteral(qvec);
+    const scopeCondition = or(
+      eq(memories.scope, 'global'),
+      and(eq(memories.scope, 'project'), eq(memories.projectId, ctx.projectId)),
+    );
+    const conditions = [
+      eq(embeddings.embeddingModel, this.embedding.model),
+      eq(memories.status, 'approved'),
+      scopeCondition,
+      inArray(memories.kind, kinds),
+    ];
+    if (tags && tags.length > 0) {
+      conditions.push(arrayOverlaps(memories.tags, tags));
+    }
+
+    const dist = sql<number>`min(${embeddings.vector} <=> ${qvecLiteral}::vector)`;
+    const rows = await this.db
+      .select({ memoryId: embeddings.memoryId, dist })
+      .from(embeddings)
+      .innerJoin(memories, eq(memories.id, embeddings.memoryId))
+      .where(and(...conditions))
+      .groupBy(embeddings.memoryId)
+      .orderBy(asc(dist))
+      .limit(limit);
+    return rows.map((r) => r.memoryId);
+  }
+
+  /** Najlepiej dopasowany chunk (najmniejszy dystans do query-vector) per `memory_id`, do excerptu. */
+  private async documentExcerpts(memoryIds: string[], qvec: number[]): Promise<Map<string, string>> {
+    if (memoryIds.length === 0) return new Map();
+    const qvecLiteral = toPgVectorLiteral(qvec);
+    const dist = sql`${embeddings.vector} <=> ${qvecLiteral}::vector`;
+    const rows = await this.db
+      .selectDistinctOn([embeddings.memoryId], {
+        memoryId: embeddings.memoryId,
+        chunkText: embeddings.chunkText,
+      })
+      .from(embeddings)
+      .where(
+        and(inArray(embeddings.memoryId, memoryIds), eq(embeddings.embeddingModel, this.embedding.model)),
+      )
+      .orderBy(embeddings.memoryId, asc(dist));
+
+    return new Map(
+      rows.map((r) => [
+        r.memoryId,
+        r.chunkText.length > EXCERPT_MAX_LEN ? `${r.chunkText.slice(0, EXCERPT_MAX_LEN)}…` : r.chunkText,
+      ]),
+    );
   }
 
   /**
@@ -225,6 +363,8 @@ export class MemoryService {
    * [DEV-ONLY] Wstawia approved memory BEZPOŚREDNIO do `memories`, z pominięciem kolejki akceptacji
    * i skanera sekretów. Wyłącznie do ręcznej weryfikacji search/get na żywo przez CLI `seed-memory`
    * (kolejka akceptacji → Faza 4, human-create → Faza 5). NIE wystawiać przez MCP ani dashboard.
+   * Dokłada authoritative `embeddings` (fail-open, jak wszędzie) — żeby seedowane dane były od razu
+   * wektorowo wyszukiwalne bez osobnego `reembed` przy ręcznej weryfikacji.
    */
   async devSeedApproved(input: SeedApprovedInput): Promise<MemoryRow> {
     const header = normalizeHeader(input.header);
@@ -245,6 +385,20 @@ export class MemoryService {
         approvedAt: new Date(),
       })
       .returning();
+
+    const embedded = await this.embedding.embedMemoryBestEffort(input.kind, header, body, tags);
+    if (embedded) {
+      await this.db.insert(embeddings).values(
+        embedded.chunks.map((c) => ({
+          id: generateId(ID_PREFIX.embedding),
+          memoryId: row.id,
+          chunkIndex: c.index,
+          chunkText: c.text,
+          embeddingModel: embedded.model,
+          vector: c.vector,
+        })),
+      );
+    }
     return row;
   }
 }

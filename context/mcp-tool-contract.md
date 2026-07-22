@@ -18,14 +18,18 @@
 ## `search_memory`
 
 ```
-Search the shared project memory (facts and documents) using full-text search.
+Search the shared project memory (facts and documents) using hybrid full-text + semantic search.
 
 Scope: your project's memories plus "global" memories (shared across all projects). You cannot
 see other projects' memories.
 
 Returns headers only, ranked by relevance — call get_memory(id) to fetch the full body of anything
-that looks relevant. Default kind filter is fact + document; pass `kind` to narrow to just one.
-`tags` filters to memories sharing at least one of the given tags (any-of match).
+that looks relevant. For `kind=document` results, an `excerpt` of the best-matching passage is
+included alongside the header. Default kind filter is fact + document; pass `kind` to narrow to
+just one. `tags` filters to memories sharing at least one of the given tags (any-of match).
+
+If semantic search is temporarily unavailable, results silently fall back to full-text only — no
+error, no signal that this happened.
 
 If nothing relevant is found, an empty list is returned — this is not an error.
 ```
