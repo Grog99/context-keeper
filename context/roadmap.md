@@ -36,7 +36,7 @@ Tabela `proposals`, transakcyjne zatwierdzanie, optimistic concurrency (stale = 
 **6. Nocny job** ✅
 Proposer (nie executor): dedup / merge / prune → do tej samej kolejki. Advisory lock, idempotentny re-scan.
 
-**7. Utwardzenie** ⬜
+**7. Utwardzenie** ✅
 Audit log, observability (`/health`, metryki), backup (`pg_dump` + offsite), testy rdzenia (transakcja akceptacji, scope/IDOR, skaner sekretów).
 
 **8. Onboarding / instalator** ⬜
