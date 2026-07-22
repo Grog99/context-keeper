@@ -18,10 +18,12 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@nestjs/common": "^11.1.28",
     "@nestjs/core": "^11.1.28",
     "@nestjs/platform-express": "^11.1.28",
     "drizzle-orm": "^0.45.2",
+    "express": "^5.2.1",
     "nest-commander": "^3.20.1",
     "nestjs-pino": "^4.6.1",
     "pg": "^8.22.0",
@@ -36,6 +38,7 @@
     "@nestjs/schematics": "^11.1.0",
     "@nestjs/testing": "^11.1.28",
     "@testcontainers/postgresql": "^12.0.4",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.20.1",
     "@types/pg": "^8.20.0",
     "drizzle-kit": "^0.31.10",

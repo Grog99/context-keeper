@@ -37,3 +37,13 @@ export const auditEventType = pgEnum('audit_event_type', [
   'purge_tombstone',
   'nightly_run',
 ]);
+
+// Aliasy TS dla wartości enumów (Faza 2+) — jedno źródło prawdy (enumValues), bez duplikowania literałów.
+export type MemoryKind = (typeof memoryKind.enumValues)[number];
+export type MemoryScope = (typeof memoryScope.enumValues)[number];
+export type MemoryStatus = (typeof memoryStatus.enumValues)[number];
+export type MemorySource = (typeof memorySource.enumValues)[number];
+export type ProposalType = (typeof proposalType.enumValues)[number];
+export type ProposalOrigin = (typeof proposalOrigin.enumValues)[number];
+export type ProposalStatus = (typeof proposalStatus.enumValues)[number];
+export type AuditEventType = (typeof auditEventType.enumValues)[number];

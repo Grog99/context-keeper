@@ -3,6 +3,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { ConfigModule } from './config/config.module';
 import { DbModule } from './db/db.module';
 import { HealthModule } from './health/health.module';
+import { McpModule } from './mcp/mcp.module';
 import { ProjectsModule } from './projects/projects.module';
 
 @Module({
@@ -19,6 +20,7 @@ import { ProjectsModule } from './projects/projects.module';
     DbModule,
     ProjectsModule,
     HealthModule,
+    McpModule,
   ],
 })
 export class AppModule {}

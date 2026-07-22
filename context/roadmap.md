@@ -18,11 +18,11 @@ Legenda: ✅ zrobione · 🔨 w toku · ⬜ przed nami
 
 ## v1 — Rdzeń (budujemy teraz)
 
-**1. Fundament** ⬜
+**1. Fundament** ✅
 Host NestJS (adapter Express). Postgres + pgvector, Docker Compose, model danych (schema), projekty + bearer tokeny (`ck_`, hash). Reverse proxy opcjonalny (profil `edge-proxy` bundled Caddy / bring-your-own-proxy).
 
-**2. MCP server** ⬜
-3 narzędzia: `search_memory` / `get_memory` / `save_memory`. Auth per token → scope, taksonomia błędów, rate-limiting, skaner sekretów przy save.
+**2. MCP server** ✅
+3 narzędzia: `search_memory` / `get_memory` / `save_memory`. Auth per token → scope, taksonomia błędów, rate-limiting, skaner sekretów przy save. Transport Streamable HTTP bezstanowy; `search` FTS-only (wektor + RRF → Faza 3); kontrakt narzędzi w `mcp-tool-contract.md`.
 
 **3. Retrieval** ⬜
 Hybrid: wektor + full-text, fuzja RRF, dwufazowy (nagłówki → body). Abstrakcja providera embeddingów + presety deploy-time (`multilingual`/`english`/`api`, CLI `reembed`) + degradacja fail-open (FTS-only).
