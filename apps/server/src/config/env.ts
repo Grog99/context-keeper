@@ -67,9 +67,28 @@ export const envSchema = z
     TAGS_MAX: z.coerce.number().int().positive().default(10),
     TAG_MAX_LEN: z.coerce.number().int().positive().default(40),
 
-    // Nocny job (§8)
+    // Nocny job (§8, Faza 6). NIGHTLY_CRON/NIGHTLY_TZ to kontrakt dla ZEWNĘTRZNEGO schedulera
+    // (Faza 8, installer/infra) — `run-nightly` CLI ich nie czyta, odpala się natychmiast po
+    // wywołaniu. Progi poniżej to knoby dostrajane na realnych danych (PRD §11), wartości domyślne
+    // to punkt startowy (plan Fazy 6 §5 pkt 1, ZAAKCEPTOWANE bez zmian).
     NIGHTLY_CRON: z.string().min(1).default('0 3 * * *'),
     NIGHTLY_TZ: z.string().min(1).default('Europe/Warsaw'),
+    // Próg "near-identical" dla ANN dedup (dystans kosinusowy `<=>`, 0=identyczne, 2=przeciwne) —
+    // celowo wąski ("scan broadly, merge narrowly", FR-N3): tylko niemal identyczne treści.
+    NIGHTLY_DEDUP_DISTANCE: z.coerce.number().positive().default(0.05),
+    // Liczba sąsiadów pobieranych per fakt w zapytaniu ANN (LIMIT), zanim odfiltrujemy do NIGHTLY_DEDUP_DISTANCE.
+    NIGHTLY_ANN_NEIGHBORS: z.coerce.number().int().positive().default(5),
+    // Rozmiar strony paginacji przy skanowaniu approved facts (jak --batch w `reembed`).
+    NIGHTLY_BATCH_SIZE: z.coerce.number().int().positive().default(50),
+    // Prune (RecencyPruneScorer, v1): minimalny wiek pamięci, zanim w ogóle podlega ocenie.
+    NIGHTLY_PRUNE_MIN_AGE_DAYS: z.coerce.number().int().positive().default(30),
+    // Prune: ile dni bez odczytu (albo NIGDY nieodczytana) liczy się jako "stale".
+    NIGHTLY_PRUNE_STALE_DAYS: z.coerce.number().int().positive().default(90),
+    // Prune: maksymalny access_count, żeby wciąż kwalifikować się do usunięcia (0 = tylko faktycznie nietknięte).
+    NIGHTLY_PRUNE_MAX_ACCESS: z.coerce.number().int().nonnegative().default(0),
+    // Flood backstop (plan §5 pkt 6): limit NOWYCH proposali tworzonych w jednym przebiegu —
+    // reszta wykrytych warunków wraca w kolejnym stateless re-scanie, nie ginie po cichu.
+    NIGHTLY_MAX_PROPOSALS_PER_RUN: z.coerce.number().int().positive().default(200),
 
     // Rate limiting per token (§10)
     RATE_LIMIT_SAVE_PER_MIN: z.coerce.number().int().positive().default(20),

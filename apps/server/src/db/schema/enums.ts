@@ -9,7 +9,9 @@ export const memorySource = pgEnum('memory_source', ['agent', 'human', 'nightly'
 
 export const proposalType = pgEnum('proposal_type', ['create', 'update', 'merge', 'delete']);
 export const proposalOrigin = pgEnum('proposal_origin', ['agent', 'human', 'nightly']);
-export const proposalStatus = pgEnum('proposal_status', ['pending', 'approved', 'rejected']);
+// `withdrawn` = samo-wycofanie maszynowe (nocny job, Faza 6) — odróżnione od `rejected` (decyzja
+// human) mimo podobnego skutku (zamknięcie bez materializacji), bo audyt ma pokazywać KTO zdecydował.
+export const proposalStatus = pgEnum('proposal_status', ['pending', 'approved', 'rejected', 'withdrawn']);
 
 // Stan tokena projektu: none = jeszcze nie wygenerowany.
 export const projectTokenStatus = pgEnum('project_token_status', ['none', 'active', 'rotated']);
