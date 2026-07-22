@@ -33,7 +33,7 @@ Tabela `proposals`, transakcyjne zatwierdzanie, optimistic concurrency (stale = 
 **5. Dashboard** ✅
 4 ekrany (kolejka / przeglądarka pamięci / projekty+tokeny / audyt) + przełącznik kontekstu + human-create (fakty, dokumenty, import `.md`). Wg design systemu.
 
-**6. Nocny job** ⬜
+**6. Nocny job** ✅
 Proposer (nie executor): dedup / merge / prune → do tej samej kolejki. Advisory lock, idempotentny re-scan.
 
 **7. Utwardzenie** ⬜
