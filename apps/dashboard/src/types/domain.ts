@@ -24,4 +24,5 @@ export type AuditEventType =
   | 'token_rotated'
   | 'secret_blocked'
   | 'purge_tombstone'
-  | 'nightly_run';
+  | 'nightly_run'
+  | 'backup_completed';

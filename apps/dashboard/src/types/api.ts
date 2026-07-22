@@ -122,6 +122,7 @@ export interface DashboardMetrics {
   embedding: { status: 'up' | 'down'; model: string; latencyMs: number | null };
   secretBlocked24h: number;
   nightlyRun: { at: string; metadata: Record<string, unknown> | null } | null;
+  lastBackup: { at: string; metadata: Record<string, unknown> | null } | null;
 }
 
 export interface DashboardLimits {

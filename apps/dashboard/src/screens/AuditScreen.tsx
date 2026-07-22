@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Archive,
   CircleCheck,
+  DatabaseBackup,
   KeyRound,
   Moon,
   Pencil,
@@ -40,6 +41,7 @@ const EVENT_TYPES: AuditEventType[] = [
   'secret_blocked',
   'purge_tombstone',
   'nightly_run',
+  'backup_completed',
 ];
 
 const EVENT_CONFIG: Record<AuditEventType, { icon: LucideIcon; variant: NonNullable<BadgeProps['variant']> }> = {
@@ -55,6 +57,7 @@ const EVENT_CONFIG: Record<AuditEventType, { icon: LucideIcon; variant: NonNulla
   secret_blocked: { icon: ShieldAlert, variant: 'danger' },
   purge_tombstone: { icon: Trash2, variant: 'danger' },
   nightly_run: { icon: Moon, variant: 'info' },
+  backup_completed: { icon: DatabaseBackup, variant: 'info' },
 };
 
 function EventBadge({ eventType }: { eventType: AuditEventType }) {

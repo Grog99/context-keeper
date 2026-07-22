@@ -38,6 +38,7 @@ export const auditEventType = pgEnum('audit_event_type', [
   'secret_blocked',
   'purge_tombstone',
   'nightly_run',
+  'backup_completed',
 ]);
 
 // Aliasy TS dla wartości enumów (Faza 2+) — jedno źródło prawdy (enumValues), bez duplikowania literałów.

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuditModule } from '../audit/audit.module';
 import { ConfigModule } from '../config/config.module';
 import { DbModule } from '../db/db.module';
 import { EmbeddingsModule } from '../embeddings/embeddings.module';
@@ -11,6 +12,7 @@ import { CreateProjectCommand } from './create-project.command';
 import { EditProposalCommand } from './edit-proposal.command';
 import { ListProjectsCommand } from './list-projects.command';
 import { ListProposalsCommand } from './list-proposals.command';
+import { RecordBackupCommand } from './record-backup.command';
 import { ReembedCommand } from './reembed.command';
 import { RejectProposalCommand } from './reject-proposal.command';
 import { RotateTokenCommand } from './rotate-token.command';
@@ -32,6 +34,7 @@ import { SeedMemoryCommand } from './seed-memory.command';
     MemoryModule,
     ProposalsModule,
     NightlyModule,
+    AuditModule,
   ],
   providers: [
     CreateProjectCommand,
@@ -44,6 +47,7 @@ import { SeedMemoryCommand } from './seed-memory.command';
     RejectProposalCommand,
     EditProposalCommand,
     RunNightlyCommand,
+    RecordBackupCommand,
   ],
 })
 export class CliModule {}

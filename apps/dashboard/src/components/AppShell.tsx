@@ -180,6 +180,19 @@ export function AppShell() {
               status={metrics ? (metrics.nightlyRun ? 'ok' : 'neutral') : 'neutral'}
             />
             <MetricStat
+              label="Backup"
+              value={metrics?.lastBackup ? (metrics.lastBackup.metadata?.status === 'failed' ? '✗ nieudany' : '✓') : 'brak danych'}
+              status={
+                metrics
+                  ? metrics.lastBackup
+                    ? metrics.lastBackup.metadata?.status === 'failed'
+                      ? 'bad'
+                      : 'ok'
+                    : 'neutral'
+                  : 'neutral'
+              }
+            />
+            <MetricStat
               label="Sekrety /24h"
               value={metrics?.secretBlocked24h ?? '—'}
               status={metrics ? (metrics.secretBlocked24h > 0 ? 'bad' : 'ok') : 'neutral'}

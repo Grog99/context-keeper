@@ -1,6 +1,9 @@
 #!/bin/sh
 # infra/backup.sh — pg_dump (custom format, -Fc) do BACKUP_DIR + retencja tiered (7 daily +
 # 4 weekly, patrz prune_backups niżej) + opcjonalny offsite hook. Faza 7 (NFR-5) — plan §1a/§2.
+# Każdy przebieg (sukces LUB porażka) loguje też do audit_log (event `backup_completed`, przez
+# CLI `record-backup` w kontenerze `app`) — best-effort: fail zapisu audytu NIE zmienia exit code
+# skryptu (ani w jedną, ani w drugą stronę, patrz komentarze przy poszczególnych wywołaniach niżej).
 #
 # Uruchamia pg_dump WEWNĄTRZ kontenera `db` (docker compose exec) — gwarantuje zgodność wersji
 # klienta z serwerem (pgvector/pgvector:pg18-trixie); obraz `app` nie ma pg_dump wcale.
@@ -62,10 +65,16 @@ trap cleanup EXIT INT TERM
 echo "[backup] dumping ${POSTGRES_DB} (user=${POSTGRES_USER}) przez docker compose exec db pg_dump ..."
 if ! docker compose exec -T db pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB" > "$tmp"; then
   echo "[backup] BŁĄD: pg_dump nie powiódł się — patrz output wyżej" >&2
+  # Audit best-effort: jeśli record-backup sam zawiedzie (np. `app`/`db` niedostępne), nie maskujemy
+  # oryginalnego exit 1 poniżej — to on jest sygnałem prawdy dla crona/monitoringu.
+  docker compose run --rm app node dist/cli.js record-backup --status=failed --error="pg_dump failed" \
+    || echo "[backup] UWAGA: zapis audytu record-backup nie powiodł się" >&2
   exit 1
 fi
 if [ ! -s "$tmp" ]; then
   echo "[backup] BŁĄD: dump jest pusty" >&2
+  docker compose run --rm app node dist/cli.js record-backup --status=failed --error="empty dump" \
+    || echo "[backup] UWAGA: zapis audytu record-backup nie powiodł się" >&2
   exit 1
 fi
 
@@ -118,6 +127,9 @@ if [ -n "$BACKUP_OFFSITE_CMD" ]; then
     offsite="custom"
   else
     echo "[backup] BŁĄD: BACKUP_OFFSITE_CMD nie powiódł się — lokalny dump ZOSTAJE (${final})" >&2
+    docker compose run --rm app node dist/cli.js record-backup --status=failed --dump="$final" --size="$size" \
+      --error="offsite BACKUP_OFFSITE_CMD failed" \
+      || echo "[backup] UWAGA: zapis audytu record-backup nie powiodł się" >&2
     exit 1
   fi
 elif [ -n "$RCLONE_REMOTE" ]; then
@@ -126,6 +138,9 @@ elif [ -n "$RCLONE_REMOTE" ]; then
     offsite="rclone:${RCLONE_REMOTE}"
   else
     echo "[backup] BŁĄD: rclone copy nie powiódł się — lokalny dump ZOSTAJE (${final})" >&2
+    docker compose run --rm app node dist/cli.js record-backup --status=failed --dump="$final" --size="$size" \
+      --error="offsite rclone failed" \
+      || echo "[backup] UWAGA: zapis audytu record-backup nie powiodł się" >&2
     exit 1
   fi
 else
@@ -133,3 +148,8 @@ else
 fi
 
 echo "[backup] status=ok dump=${final} size=${size} offsite=${offsite}"
+# Audit best-effort: backup SAM w sobie już się udał (dump + offsite wyżej) — jeśli tylko zapis do
+# audit_log zawiedzie, NIE robimy z tego exit 1 (fałszywy alarm "backup failed" pod monitoringiem
+# byłby gorszy niż brak jednego wpisu w audycie).
+docker compose run --rm app node dist/cli.js record-backup --status=ok --dump="$final" --size="$size" --offsite="$offsite" \
+  || echo "[backup] UWAGA: zapis audytu record-backup nie powiodł się (dump sam jest OK)" >&2

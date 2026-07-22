@@ -17,6 +17,9 @@ export interface DashboardMetrics {
   /** `null` = "brak danych" po stronie SPA — nocny job to Faza 6, `audit_log` nie ma jeszcze
    * zdarzeń `nightly_run` w v1 (§Ryzyka planu). */
   nightlyRun: { at: string; metadata: Record<string, unknown> | null } | null;
+  /** Ostatni `backup_completed` (Faza 7) — `metadata.status` ('ok'/'failed') różnicuje wynik,
+   * analogicznie do `nightlyRun`. */
+  lastBackup: { at: string; metadata: Record<string, unknown> | null } | null;
 }
 
 /**
@@ -41,10 +44,11 @@ export class MetricsController {
       .from(proposals)
       .where(eq(proposals.status, 'pending'));
 
-    const [embeddingUp, secretBlocked24h, nightlyRun] = await Promise.all([
+    const [embeddingUp, secretBlocked24h, nightlyRun, lastBackup] = await Promise.all([
       this.embedding.health(),
       this.audit.countSince('secret_blocked', new Date(Date.now() - SECRET_BLOCKED_WINDOW_MS)),
       this.audit.latestByEventType('nightly_run'),
+      this.audit.latestByEventType('backup_completed'),
     ]);
 
     return {
@@ -59,6 +63,12 @@ export class MetricsController {
         ? {
             at: nightlyRun.createdAt.toISOString(),
             metadata: (nightlyRun.metadata as Record<string, unknown> | null) ?? null,
+          }
+        : null,
+      lastBackup: lastBackup
+        ? {
+            at: lastBackup.createdAt.toISOString(),
+            metadata: (lastBackup.metadata as Record<string, unknown> | null) ?? null,
           }
         : null,
     };
