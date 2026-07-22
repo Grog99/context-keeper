@@ -46,4 +46,5 @@ export type MemorySource = (typeof memorySource.enumValues)[number];
 export type ProposalType = (typeof proposalType.enumValues)[number];
 export type ProposalOrigin = (typeof proposalOrigin.enumValues)[number];
 export type ProposalStatus = (typeof proposalStatus.enumValues)[number];
+export type RevisionAction = (typeof revisionAction.enumValues)[number];
 export type AuditEventType = (typeof auditEventType.enumValues)[number];

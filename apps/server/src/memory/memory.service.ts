@@ -111,10 +111,9 @@ export class MemoryService {
     }
 
     // Faza 4 seam: staged wektor (zapisywany niżej, best-effort) czeka na PROMOCJĘ do `embeddings`
-    // przy akceptacji proposala — kolejka akceptacji jeszcze nie istnieje, więc promocja NIE jest
-    // budowana tutaj. Dopóki jej nie ma, proposal zawsze powstaje bez rozróżniania "podobne" od
-    // "nowe" (FR-M3 hint similar-to zostaje na Fazie 4, gdy promocja da autorytatywne wektory
-    // do porównania — dzisiejszy staged wektor to tylko dedup-hint na przyszłość, nieużywany jeszcze).
+    // przy akceptacji proposala — promocja żyje w `ProposalsService.approve` (Faza 4), NIE tutaj.
+    // FR-M3 hint "podobne do" wciąż nie jest zbudowany (poza zakresem Fazy 4) — dzisiejszy staged
+    // wektor to tylko dedup-hint na przyszłość, nieużywany jeszcze przy klasyfikacji create/duplicate.
     const mintedMemoryId = generateId(ID_PREFIX.memory);
     const proposalId = generateId(ID_PREFIX.proposal);
     const payload = { memoryId: mintedMemoryId, header, body, tags, kind: 'fact' as const };
@@ -362,9 +361,11 @@ export class MemoryService {
   /**
    * [DEV-ONLY] Wstawia approved memory BEZPOŚREDNIO do `memories`, z pominięciem kolejki akceptacji
    * i skanera sekretów. Wyłącznie do ręcznej weryfikacji search/get na żywo przez CLI `seed-memory`
-   * (kolejka akceptacji → Faza 4, human-create → Faza 5). NIE wystawiać przez MCP ani dashboard.
-   * Dokłada authoritative `embeddings` (fail-open, jak wszędzie) — żeby seedowane dane były od razu
-   * wektorowo wyszukiwalne bez osobnego `reembed` przy ręcznej weryfikacji.
+   * (human-create pozostaje Fazą 5). Od Fazy 4 kanoniczna ścieżka produkująca dane E2E-wiernie jest
+   * `save()` → `ProposalsService.approve()` (ćwiczy też promocję embeddingu) — `devSeedApproved`
+   * zostaje jako szybszy skrót do testów samego search/get, bez przechodzenia przez kolejkę.
+   * NIE wystawiać przez MCP ani dashboard. Dokłada authoritative `embeddings` (fail-open, jak
+   * wszędzie) — żeby seedowane dane były od razu wektorowo wyszukiwalne bez osobnego `reembed`.
    */
   async devSeedApproved(input: SeedApprovedInput): Promise<MemoryRow> {
     const header = normalizeHeader(input.header);

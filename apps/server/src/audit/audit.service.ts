@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { generateId, ID_PREFIX } from '../common/ids';
-import { DB, type Database } from '../db/db.tokens';
+import { DB, type Database, type Tx } from '../db/db.tokens';
 import { auditLog, type AuditEventType } from '../db/schema';
 
 export interface LogAuditInput {
@@ -20,8 +20,13 @@ export interface LogAuditInput {
 export class AuditService {
   constructor(@Inject(DB) private readonly db: Database) {}
 
-  async log(input: LogAuditInput): Promise<void> {
-    await this.db.insert(auditLog).values({
+  /**
+   * `executor` (opcjonalny): przekaż `tx` gdy wołasz wewnątrz `db.transaction(...)` (np.
+   * `ProposalsService.approve`) — wpis audytu wtedy współdzieli atomiczność z mutacją i znika razem
+   * z nią przy rollbacku (np. stale check). Domyślnie pisze przez wstrzykniętą globalną instancję.
+   */
+  async log(input: LogAuditInput, executor: Database | Tx = this.db): Promise<void> {
+    await executor.insert(auditLog).values({
       id: generateId(ID_PREFIX.audit),
       eventType: input.eventType,
       actor: input.actor,

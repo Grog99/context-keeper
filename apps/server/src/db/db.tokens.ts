@@ -9,3 +9,7 @@ export const PG_POOL = Symbol('PG_POOL');
 
 export type Database = NodePgDatabase<typeof schema>;
 export type PgPool = Pool;
+/** Handle przekazywany do callbacku `db.transaction(async (tx) => …)` — wyprowadzony wprost z typu
+ * `Database`, żeby serwisy mogły przyjmować `Database | Tx` (np. `AuditService.log`, wołany zarówno
+ * poza transakcją, jak i wewnątrz transakcyjnego rdzenia `ProposalsService.approve`). */
+export type Tx = Parameters<Database['transaction']>[0] extends (tx: infer T) => unknown ? T : never;

@@ -24,8 +24,13 @@ export const proposals = pgTable(
     status: proposalStatus('status').notNull().default('pending'),
 
     payload: jsonb('payload').notNull(),
+    // Wersja recenzenta z edit-before-approve (FR-Q6) — `payload` zostaje nietkniętym oryginałem
+    // agenta, `edited_payload` (gdy obecny) to treść, którą faktycznie materializuje `approve()`.
+    editedPayload: jsonb('edited_payload'),
     affectedIds: text('affected_ids').array().notNull().default(sql`'{}'::text[]`),
-    // Optimistic concurrency (§8bis): revision_id bazowy każdego affected_id (stan, względem którego liczono payload).
+    // Optimistic concurrency (§8bis): `{ [memoryId]: number }` — wartość `memories.version`, względem
+    // której liczono payload, per affected id. Rozjazd pod locka przy approve → ProposalError('stale')
+    // (Faza 4; patrz ProposalsService.assertNotStale). `create` ma zawsze `{}` (affectedIds=[]).
     baseVersions: jsonb('base_versions').notNull().default(sql`'{}'::jsonb`),
     // Idempotencja/dedup exact-match: hash(header+body+scope+project) (§5).
     contentHash: text('content_hash'),

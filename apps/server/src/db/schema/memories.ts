@@ -26,6 +26,10 @@ export const memories = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     approvedAt: timestamp('approved_at', { withTimezone: true }),
+    // Optimistic-concurrency token (§8bis) — bumpowany o 1 przy KAŻDEJ zatwierdzonej mutacji
+    // (update/merge/delete w ProposalsService). `proposals.base_versions` trzyma wartość, względem
+    // której liczono payload; rozjazd pod locka przy approve → ProposalError('stale').
+    version: integer('version').notNull().default(0),
   },
   (t) => [
     index('memories_project_idx').on(t.projectId),
