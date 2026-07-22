@@ -1,0 +1,39 @@
+import { pgEnum } from 'drizzle-orm/pg-core';
+
+// `kind` opisuje czym pamięć JEST (rozszerzalny — `event` dojdzie w v2 przez ALTER TYPE ... ADD VALUE).
+export const memoryKind = pgEnum('memory_kind', ['fact', 'document']);
+export const memoryScope = pgEnum('memory_scope', ['global', 'project']);
+export const memoryStatus = pgEnum('memory_status', ['approved', 'archived']);
+// `source` = autorstwo (kto utworzył), trzymane osobno od `kind`.
+export const memorySource = pgEnum('memory_source', ['agent', 'human', 'nightly']);
+
+export const proposalType = pgEnum('proposal_type', ['create', 'update', 'merge', 'delete']);
+export const proposalOrigin = pgEnum('proposal_origin', ['agent', 'human', 'nightly']);
+export const proposalStatus = pgEnum('proposal_status', ['pending', 'approved', 'rejected']);
+
+// Stan tokena projektu: none = jeszcze nie wygenerowany.
+export const projectTokenStatus = pgEnum('project_token_status', ['none', 'active', 'rotated']);
+
+export const revisionAction = pgEnum('revision_action', [
+  'created',
+  'edited',
+  'promote',
+  'archive',
+  'superseded_by',
+]);
+
+// Append-only audit (§4). Odczyty nie logowane per-event.
+export const auditEventType = pgEnum('audit_event_type', [
+  'proposal_created',
+  'proposal_approved',
+  'proposal_rejected',
+  'proposal_edited',
+  'human_edit',
+  'archive',
+  'promote',
+  'token_created',
+  'token_rotated',
+  'secret_blocked',
+  'purge_tombstone',
+  'nightly_run',
+]);

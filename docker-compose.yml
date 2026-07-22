@@ -1,0 +1,88 @@
+name: context-keeper
+
+services:
+  db:
+    image: pgvector/pgvector:pg18-trixie
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ck}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ck}
+      POSTGRES_DB: ${POSTGRES_DB:-context_keeper}
+    volumes:
+      # PG18+ zmienił konwencję: pojedyncze montowanie w /var/lib/postgresql
+      # (dane lądują w podkatalogu wersji), NIE /var/lib/postgresql/data jak w ≤17.
+      - pgdata:/var/lib/postgresql
+    ports:
+      # Publikacja na hosta dla dev/migracji z hosta; w produkcji można usunąć.
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ck} -d ${POSTGRES_DB:-context_keeper}"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  app:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      # DATABASE_URL składany z części — zawsze celuje w serwis `db` w sieci compose
+      # (niezależnie od DATABASE_URL w .env, które służy dev-owi na hoście).
+      DATABASE_URL: postgres://${POSTGRES_USER:-ck}:${POSTGRES_PASSWORD:-ck}@db:5432/${POSTGRES_DB:-context_keeper}
+      PORT_MCP: "3000"
+      PORT_DASHBOARD: "3001"
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-m3}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_SAVE_TIMEOUT_MS: ${EMBEDDING_SAVE_TIMEOUT_MS:-1500}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      NIGHTLY_CRON: ${NIGHTLY_CRON:-0 3 * * *}
+      NIGHTLY_TZ: ${NIGHTLY_TZ:-Europe/Warsaw}
+    ports:
+      - "${PORT_MCP:-3000}:3000"
+      - "${PORT_DASHBOARD:-3001}:3001"
+
+  # Sidecar lokalnych embeddingów (TEI/bge-m3). Startuje tylko przy profilu `local-embeddings`.
+  # UWAGA: realne wpięcie app → embeddings dochodzi w Fazie 3; tu tylko scaffold.
+  embeddings:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.8
+    profiles: ["local-embeddings"]
+    restart: unless-stopped
+    command: ["--model-id", "BAAI/bge-m3"]
+    volumes:
+      - tei-data:/data
+
+  # Bundled edge (tryb A). Startuje tylko przy profilu `edge-proxy`.
+  # Off = bring-your-own-proxy (homelab) — wtedy ustaw TRUST_PROXY=true (§9).
+  proxy:
+    image: caddy:2.11-alpine
+    profiles: ["edge-proxy"]
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      # Pusty ACME_DOMAIN -> lokalny fallback ":80" (HTTP). Domena -> auto-HTTPS (Let's Encrypt).
+      ACME_DOMAIN: ${ACME_DOMAIN:-:80}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  pgdata:
+  tei-data:
+  caddy-data:
+  caddy-config:

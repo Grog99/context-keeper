@@ -1,0 +1,12 @@
+# Normalizuj końce linii do LF w repo (cel wdrożenia = Linux/Docker; unikamy dryfu CRLF).
+* text=auto eol=lf
+
+# Binaria — git wykrywa sam, ale wskazujemy jawnie dla pewności.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pdf binary

@@ -1,0 +1,20 @@
+# Context Keeper — tryb A (bundled edge, compose profile `edge-proxy`).
+#
+# ACME_DOMAIN ustawiony  -> Caddy terminuje HTTPS + auto Let's Encrypt dla tej domeny.
+# ACME_DOMAIN pusty       -> lokalny fallback: HTTP na :80 (do testu, że proxy stoi przed app).
+#
+# Produkcja: dodaj email do ACME, odkomentowując blok globalny poniżej:
+#   {
+#       email {$ACME_EMAIL}
+#   }
+
+{$ACME_DOMAIN} {
+	encode zstd gzip
+
+	# v1: cała aplikacja na jednym origin (app:3000).
+	reverse_proxy app:3000
+
+	# Docelowy rozdział ekspozycji (do włączenia gdy powstanie dashboard, Faza 5):
+	#   handle /mcp* { reverse_proxy app:3000 }          # publiczny
+	#   handle *     { ... }                              # dashboard tylko za VPN / CF Access
+}

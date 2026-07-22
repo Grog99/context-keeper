@@ -1,0 +1,47 @@
+{
+  "name": "@context-keeper/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "Context Keeper host — NestJS (Express): MCP server + JSON API + SPA bundle.",
+  "scripts": {
+    "build": "nest build && node scripts/copy-migrations.mjs",
+    "start": "node dist/main.js",
+    "start:dev": "nest start --watch",
+    "cli": "node dist/cli.js",
+    "cli:dev": "ts-node -r tsconfig-paths/register src/cli.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node dist/db/migrate.js",
+    "db:migrate:dev": "ts-node src/db/migrate.ts",
+    "lint": "eslint \"src/**/*.ts\"",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.1.28",
+    "@nestjs/core": "^11.1.28",
+    "@nestjs/platform-express": "^11.1.28",
+    "drizzle-orm": "^0.45.2",
+    "nest-commander": "^3.20.1",
+    "nestjs-pino": "^4.6.1",
+    "pg": "^8.22.0",
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.24",
+    "@nestjs/schematics": "^11.1.0",
+    "@nestjs/testing": "^11.1.28",
+    "@testcontainers/postgresql": "^12.0.4",
+    "@types/node": "^22.20.1",
+    "@types/pg": "^8.20.0",
+    "drizzle-kit": "^0.31.10",
+    "testcontainers": "^12.0.4",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,0 +1,645 @@
+<title>Context Keeper — makieta dashboardu</title>
+<style>
+  /* ============ TOKENY (light) ============ */
+  :root{
+    --background:#FAFAF9; --foreground:#1C1917; --surface:#FFFFFF;
+    --muted:#F5F5F4; --muted-fg:#57534E; --faint:#A8A29E;
+    --border:#E7E5E4; --border-strong:#D6D3D1; --input:#E7E5E4;
+    --primary:#5B4BD6; --primary-hover:#4E3FC0; --primary-fg:#FFFFFF;
+    --accent-subtle:#EEEBFB; --ring:#5B4BD6;
+    --success:#16A34A; --success-subtle:#DCFCE7; --success-fg:#14532D;
+    --warning:#B45309; --warning-subtle:#FEF3C7; --warning-fg:#78350F;
+    --danger:#DC2626; --danger-subtle:#FEE2E2; --danger-fg:#7F1D1D;
+    --info:#5B4BD6; --info-subtle:#EEEBFB; --info-fg:#372F8C;
+    --neutral:#78716C; --neutral-subtle:#F5F5F4; --neutral-fg:#44403C;
+    --shadow-sm:0 1px 2px rgb(0 0 0 / .06);
+    --shadow-md:0 8px 24px -6px rgb(28 25 23 / .18);
+    --radius:6px;
+    --sans:'Inter',ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,"SFMono-Regular","Cascadia Code",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){ :root{ --background:#141312; --foreground:#F5F3F0; --surface:#1B1A18;
+    --muted:#232120; --muted-fg:#A8A29E; --faint:#78716C; --border:#2C2A27; --border-strong:#3A3633; --input:#2C2A27;
+    --primary:#8B7CF6; --primary-hover:#9E90F8; --primary-fg:#15131F; --accent-subtle:#221E3A; --ring:#8B7CF6;
+    --success:#4ADE80; --success-subtle:#0F2A18; --success-fg:#BBF7D0;
+    --warning:#FBBF24; --warning-subtle:#2A2008; --warning-fg:#FDE68A;
+    --danger:#F87171; --danger-subtle:#2A1414; --danger-fg:#FECACA;
+    --info:#8B7CF6; --info-subtle:#221E3A; --info-fg:#DDD6FE;
+    --neutral:#A8A29E; --neutral-subtle:#232120; --neutral-fg:#E7E5E4;
+    --shadow-md:0 10px 28px -8px rgb(0 0 0 / .5); }}
+  :root[data-theme="light"]{ --background:#FAFAF9; --foreground:#1C1917; --surface:#FFFFFF; --muted:#F5F5F4; --muted-fg:#57534E; --faint:#A8A29E; --border:#E7E5E4; --border-strong:#D6D3D1; --input:#E7E5E4; --primary:#5B4BD6; --primary-hover:#4E3FC0; --primary-fg:#FFFFFF; --accent-subtle:#EEEBFB; --ring:#5B4BD6; --success:#16A34A; --success-subtle:#DCFCE7; --success-fg:#14532D; --warning:#B45309; --warning-subtle:#FEF3C7; --warning-fg:#78350F; --danger:#DC2626; --danger-subtle:#FEE2E2; --danger-fg:#7F1D1D; --info:#5B4BD6; --info-subtle:#EEEBFB; --info-fg:#372F8C; --neutral:#78716C; --neutral-subtle:#F5F5F4; --neutral-fg:#44403C; --shadow-md:0 8px 24px -6px rgb(28 25 23 / .18); }
+  :root[data-theme="dark"]{ --background:#141312; --foreground:#F5F3F0; --surface:#1B1A18; --muted:#232120; --muted-fg:#A8A29E; --faint:#78716C; --border:#2C2A27; --border-strong:#3A3633; --input:#2C2A27; --primary:#8B7CF6; --primary-hover:#9E90F8; --primary-fg:#15131F; --accent-subtle:#221E3A; --ring:#8B7CF6; --success:#4ADE80; --success-subtle:#0F2A18; --success-fg:#BBF7D0; --warning:#FBBF24; --warning-subtle:#2A2008; --warning-fg:#FDE68A; --danger:#F87171; --danger-subtle:#2A1414; --danger-fg:#FECACA; --info:#8B7CF6; --info-subtle:#221E3A; --info-fg:#DDD6FE; --neutral:#A8A29E; --neutral-subtle:#232120; --neutral-fg:#E7E5E4; --shadow-md:0 10px 28px -8px rgb(0 0 0 / .5); }
+
+  *{box-sizing:border-box}
+  body{margin:0}
+  .app,.app *{font-family:var(--sans)}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .app{
+    background:var(--background); color:var(--foreground);
+    height:820px; max-height:88vh; display:grid; grid-template-columns:240px 1fr;
+    border:1px solid var(--border); border-radius:10px; overflow:hidden;
+    font-size:14px; line-height:1.45;
+  }
+  @media (max-width:760px){ .app{grid-template-columns:1fr} .rail{display:none} }
+  svg.i{width:1em;height:1em;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;fill:none;flex:none;vertical-align:-.14em}
+  .icon-fill svg.i{fill:currentColor;stroke:none}
+
+  /* ============ RAIL ============ */
+  .rail{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:16px 12px;gap:4px}
+  .brand{display:flex;align-items:center;gap:9px;padding:4px 8px 14px;font-weight:600;font-size:15px;letter-spacing:-.01em}
+  .brand .mark{width:22px;height:22px;color:var(--primary);display:grid;place-items:center}
+  .brand .mark svg{width:22px;height:22px;fill:currentColor;stroke:none}
+  .nav-label{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);padding:10px 8px 4px}
+  .nav-item{display:flex;align-items:center;gap:10px;height:36px;padding:0 8px;border-radius:var(--radius);color:var(--muted-fg);font-size:13.5px;cursor:pointer;border:none;background:none;width:100%;text-align:left;font-weight:450}
+  .nav-item svg.i{font-size:17px;color:var(--faint)}
+  .nav-item:hover{background:var(--muted);color:var(--foreground)}
+  .nav-item[aria-current="true"]{background:var(--accent-subtle);color:var(--foreground);font-weight:550}
+  .nav-item[aria-current="true"] svg.i{color:var(--primary)}
+  .nav-item .count{margin-left:auto;font-family:var(--mono);font-size:11px;background:var(--primary);color:var(--primary-fg);border-radius:20px;padding:1px 7px;font-weight:600}
+  .rail-sep{height:1px;background:var(--border);margin:10px 4px}
+  .btn-create{display:flex;align-items:center;gap:8px;justify-content:center;height:36px;border:1px dashed var(--border-strong);background:none;color:var(--muted-fg);border-radius:var(--radius);cursor:pointer;font-size:13px;font-weight:500}
+  .btn-create:hover{border-color:var(--primary);color:var(--primary);border-style:solid}
+  .rail-metrics{margin-top:auto;display:flex;flex-direction:column;gap:2px;padding:10px 8px 2px;border-top:1px solid var(--border)}
+  .rmini{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--muted-fg)}
+  .rmini b{font-family:var(--mono);font-weight:600;color:var(--foreground);font-size:12.5px}
+
+  /* ============ MAIN + TOPBAR ============ */
+  .main{display:flex;flex-direction:column;min-width:0}
+  .topbar{height:52px;flex:none;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px;padding:0 16px;background:var(--surface)}
+  .ctx{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--background);cursor:pointer;font-size:13px;font-weight:500}
+  .ctx .dot{width:7px;height:7px;border-radius:50%;background:var(--primary)}
+  .ctx svg.i{font-size:15px;color:var(--faint)}
+  .ctx .scope{font-family:var(--mono);font-size:12px;color:var(--muted-fg)}
+  .search{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--background);color:var(--faint);font-size:13px;min-width:210px}
+  .search svg.i{font-size:15px}
+  .search kbd{margin-left:auto;font-family:var(--mono);font-size:10.5px;border:1px solid var(--border);border-radius:4px;padding:1px 5px;color:var(--faint)}
+  .health{margin-left:auto;display:flex;align-items:stretch;gap:0}
+  .stat{display:flex;flex-direction:column;gap:1px;padding:0 14px;border-left:1px solid var(--border);justify-content:center}
+  .stat:first-child{border-left:none}
+  .stat .lbl{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);display:flex;align-items:center;gap:5px}
+  .stat .val{font-family:var(--mono);font-size:15px;font-weight:600;line-height:1.1;display:flex;align-items:center;gap:6px}
+  .sdot{width:7px;height:7px;border-radius:50%;flex:none}
+  .sdot.ok{background:var(--success)} .sdot.warn{background:var(--warning)} .sdot.bad{background:var(--danger)}
+  .val.good{color:var(--success)} .val.warnc{color:var(--warning)} .val.badc{color:var(--danger)}
+  .icon-btn{width:32px;height:32px;display:grid;place-items:center;border:1px solid var(--border);border-radius:var(--radius);background:var(--background);color:var(--muted-fg);cursor:pointer;font-size:16px}
+  .icon-btn:hover{background:var(--muted);color:var(--foreground)}
+
+  /* ============ SCREEN ============ */
+  .screen{flex:1;min-height:0;display:flex;flex-direction:column}
+  .screen[hidden]{display:none}
+  .split{flex:1;min-height:0;display:grid;grid-template-columns:minmax(320px,38%) 1fr}
+  @media (max-width:900px){ .split{grid-template-columns:1fr} .detail-pane{display:none} }
+  .list-pane{border-right:1px solid var(--border);display:flex;flex-direction:column;min-width:0}
+  .detail-pane{display:flex;flex-direction:column;min-width:0;background:var(--surface)}
+
+  .list-head{flex:none;height:46px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;padding:0 14px}
+  .filter{display:flex;align-items:center;gap:6px;height:28px;padding:0 9px;border:1px solid var(--border);border-radius:var(--radius);background:var(--background);font-size:12.5px;color:var(--muted-fg);cursor:pointer}
+  .filter svg.i{font-size:13px;color:var(--faint)}
+  .list-head .refresh{margin-left:auto;font-size:11px;color:var(--faint);display:flex;align-items:center;gap:6px}
+
+  .rows{overflow-y:auto;flex:1}
+  .row{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;height:auto;min-height:56px;padding:9px 14px;border-bottom:1px solid var(--border);cursor:pointer;position:relative}
+  .row:hover{background:var(--muted)}
+  .row[aria-selected="true"]{background:var(--accent-subtle)}
+  .row[aria-selected="true"]::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--primary)}
+  .row .rmain{min-width:0;display:flex;flex-direction:column;gap:5px}
+  .row .rtitle{font-size:13.5px;font-weight:500;color:var(--foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:7px}
+  .row .rtitle .ticon{font-size:14px;color:var(--faint);flex:none}
+  .row .rmeta{display:flex;align-items:center;gap:10px;min-width:0}
+  .row .rtime{font-family:var(--mono);font-size:11px;color:var(--faint);white-space:nowrap;align-self:flex-start;margin-top:2px}
+
+  /* ORIGIN PATH */
+  .origin{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:11px;color:var(--muted-fg);white-space:nowrap}
+  .origin svg.i{font-size:12px}
+  .origin.nightly{color:var(--info)}
+  .origin.nightly svg.i{color:var(--info)}
+
+  /* TAGS */
+  .tags{display:flex;gap:5px;min-width:0}
+  .tag{font-family:var(--mono);font-size:10.5px;color:var(--muted-fg);background:var(--muted);border:1px solid var(--border);border-radius:4px;padding:1px 6px;white-space:nowrap}
+
+  /* STATUS CHIP */
+  .chip{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:5px;font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;border:1px solid transparent}
+  .chip svg.i{font-size:12px}
+  .chip.pending{background:var(--warning-subtle);color:var(--warning-fg);border-color:color-mix(in srgb,var(--warning) 30%,transparent)}
+  .chip.approved{background:var(--success-subtle);color:var(--success-fg);border-color:color-mix(in srgb,var(--success) 30%,transparent)}
+  .chip.archived{background:var(--neutral-subtle);color:var(--neutral-fg);border-color:var(--border-strong)}
+  .chip.stale,.chip.danger{background:var(--danger-subtle);color:var(--danger-fg);border-color:color-mix(in srgb,var(--danger) 32%,transparent)}
+  .chip.info{background:var(--info-subtle);color:var(--info-fg);border-color:color-mix(in srgb,var(--info) 30%,transparent)}
+  .chip.kind{background:var(--background);color:var(--muted-fg);border-color:var(--border-strong);text-transform:none;letter-spacing:0;font-family:var(--mono);font-weight:500}
+
+  /* ============ DETAIL ============ */
+  .detail-scroll{overflow-y:auto;flex:1;padding:20px 24px}
+  .dhead{display:flex;align-items:flex-start;gap:12px;margin-bottom:4px}
+  .dhead h2{font-size:18px;font-weight:550;line-height:1.35;margin:0;letter-spacing:-.01em;text-wrap:balance}
+  .dhead .chip{margin-top:2px;flex:none}
+  .dmeta{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin:12px 0 16px;padding-bottom:16px;border-bottom:1px solid var(--border)}
+  .dmeta .mid{font-family:var(--mono);font-size:11.5px;color:var(--faint);display:inline-flex;align-items:center;gap:5px;cursor:pointer}
+  .dmeta .mid:hover{color:var(--muted-fg)}
+  .dmeta .sep{width:3px;height:3px;border-radius:50%;background:var(--border-strong)}
+
+  .hint{display:flex;align-items:flex-start;gap:9px;padding:9px 12px;background:var(--info-subtle);border:1px solid color-mix(in srgb,var(--info) 25%,transparent);border-radius:var(--radius);font-size:12.5px;color:var(--info-fg);margin-bottom:16px}
+  .hint svg.i{font-size:15px;color:var(--info);margin-top:1px}
+  .hint a{color:var(--info-fg);text-decoration:underline;font-family:var(--mono);font-size:11.5px;cursor:pointer}
+
+  .alert{display:flex;align-items:flex-start;gap:9px;padding:11px 12px;background:var(--danger-subtle);border:1px solid color-mix(in srgb,var(--danger) 30%,transparent);border-radius:var(--radius);font-size:12.5px;color:var(--danger-fg);margin-bottom:16px}
+  .alert svg.i{font-size:16px;color:var(--danger);margin-top:1px}
+  .alert b{font-weight:650}
+
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:16px}
+  .tab{padding:8px 12px;font-size:13px;font-weight:500;color:var(--muted-fg);border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tab:hover{color:var(--foreground)}
+  .tab[aria-selected="true"]{color:var(--foreground);border-bottom-color:var(--primary)}
+
+  /* DIFF */
+  .diff-lbl{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin:0 0 7px}
+  .block{border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;margin-bottom:14px}
+  .block .bhead{display:flex;align-items:center;gap:8px;padding:7px 12px;font-size:11px;font-family:var(--mono);border-bottom:1px solid var(--border);background:var(--muted);color:var(--muted-fg)}
+  .block .body{padding:12px 14px;font-size:14.5px;line-height:1.6;color:var(--foreground)}
+  .block.add{border-color:color-mix(in srgb,var(--success) 35%,transparent);border-left:3px solid var(--success)}
+  .block.add .bhead{background:var(--success-subtle);color:var(--success-fg)}
+  .block.del{border-color:color-mix(in srgb,var(--danger) 30%,transparent);border-left:3px solid var(--danger);opacity:.85}
+  .block.del .bhead{background:var(--danger-subtle);color:var(--danger-fg)}
+  .block.del .body{text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--danger) 45%,transparent);color:var(--muted-fg)}
+  .block.result{border-color:color-mix(in srgb,var(--success) 35%,transparent);border-left:3px solid var(--success)}
+  .block.result .bhead{background:var(--success-subtle);color:var(--success-fg)}
+  .merge-arrow{display:flex;align-items:center;justify-content:center;gap:8px;color:var(--faint);font-size:11px;font-family:var(--mono);margin:2px 0 12px;text-transform:uppercase;letter-spacing:.05em}
+  .merge-arrow svg.i{font-size:16px;color:var(--info)}
+  .tomb{opacity:.6;filter:grayscale(.3)}
+
+  .meta-grid{display:grid;grid-template-columns:auto 1fr;gap:8px 20px;font-size:13px}
+  .meta-grid dt{color:var(--muted-fg)}
+  .meta-grid dd{margin:0;font-family:var(--mono);font-size:12.5px}
+
+  /* TIMELINE */
+  .timeline{position:relative;padding-left:20px;margin:0}
+  .timeline::before{content:"";position:absolute;left:5px;top:4px;bottom:4px;width:1.5px;background:var(--border)}
+  .tl{position:relative;padding:0 0 16px}
+  .tl::before{content:"";position:absolute;left:-19px;top:3px;width:9px;height:9px;border-radius:50%;background:var(--surface);border:2px solid var(--border-strong)}
+  .tl.now::before{border-color:var(--primary);background:var(--primary)}
+  .tl .tlh{font-size:13px;font-weight:500;display:flex;gap:8px;align-items:center}
+  .tl .tls{font-size:12px;color:var(--muted-fg);margin-top:2px;font-family:var(--mono)}
+
+  /* ACTIONS */
+  .actions{flex:none;border-top:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;gap:8px;background:var(--surface)}
+  .btn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:var(--radius);font-size:13px;font-weight:550;cursor:pointer;border:1px solid transparent}
+  .btn svg.i{font-size:15px}
+  .btn kbd{font-family:var(--mono);font-size:10px;opacity:.7;border:1px solid currentColor;border-radius:3px;padding:0 4px;margin-left:2px}
+  .btn.primary{background:var(--primary);color:var(--primary-fg)}
+  .btn.primary:hover{background:var(--primary-hover)}
+  .btn.primary:disabled{opacity:.45;cursor:not-allowed}
+  .btn.secondary{background:var(--background);color:var(--foreground);border-color:var(--border-strong)}
+  .btn.secondary:hover{background:var(--muted)}
+  .btn.ghost-danger{background:none;color:var(--danger)}
+  .btn.ghost-danger:hover{background:var(--danger-subtle)}
+  .btn.split{background:var(--background);color:var(--foreground);border-color:var(--border-strong);padding-right:10px}
+  .btn.split:hover{background:var(--muted)}
+  .actions .spring{margin-left:auto;font-size:11px;color:var(--faint);font-family:var(--mono)}
+
+  /* ============ generic screen body ============ */
+  .pad{padding:22px 24px;overflow-y:auto}
+  .h1{font-size:22px;font-weight:600;letter-spacing:-.015em;margin:0 0 4px}
+  .sub{color:var(--muted-fg);font-size:13.5px;margin:0 0 20px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:8px}
+  table.tbl{width:100%;border-collapse:collapse;font-size:13px}
+  table.tbl th{text-align:left;font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);padding:9px 14px;border-bottom:1px solid var(--border)}
+  table.tbl td{padding:10px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+  table.tbl tr:last-child td{border-bottom:none}
+  table.tbl tr.danger-row{background:var(--danger-subtle)}
+  .cta-link{color:var(--danger);font-weight:600;font-size:12px;cursor:pointer;text-decoration:underline}
+
+  .empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--faint);text-align:center;padding:40px}
+  .empty svg.i{font-size:34px;color:var(--border-strong)}
+  .empty .et{font-size:15px;font-weight:500;color:var(--muted-fg)}
+
+  /* ============ TOAST + DIALOG ============ */
+  .toast-region{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;z-index:60;align-items:center}
+  .toast{display:flex;align-items:center;gap:9px;background:var(--surface);border:1px solid var(--border-strong);box-shadow:var(--shadow-md);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--foreground);animation:tin .16s ease-out}
+  .toast svg.i{font-size:16px}
+  .toast.ok svg.i{color:var(--success)} .toast.neutral svg.i{color:var(--muted-fg)}
+  @keyframes tin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  .backdrop{position:fixed;inset:0;background:rgb(20 19 18 / .5);display:grid;place-items:center;z-index:70;padding:20px}
+  .backdrop[hidden]{display:none}
+  .dialog{background:var(--surface);border:1px solid var(--border-strong);border-radius:10px;box-shadow:var(--shadow-md);width:min(480px,100%);padding:22px}
+  .dialog h3{margin:0 0 6px;font-size:17px;font-weight:600;display:flex;align-items:center;gap:9px}
+  .dialog h3 svg.i{color:var(--primary);font-size:19px}
+  .dialog p{margin:0 0 16px;font-size:13.5px;color:var(--muted-fg);line-height:1.55}
+  .token-box{display:flex;align-items:center;gap:10px;background:var(--muted);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:12px}
+  .token-box code{font-family:var(--mono);font-size:13.5px;color:var(--foreground);word-break:break-all;flex:1}
+  .warn-note{display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:var(--warning-fg);background:var(--warning-subtle);border:1px solid color-mix(in srgb,var(--warning) 28%,transparent);border-radius:var(--radius);padding:9px 11px;margin-bottom:18px}
+  .warn-note svg.i{color:var(--warning);font-size:15px;margin-top:1px}
+  .dialog-actions{display:flex;justify-content:flex-end;gap:8px}
+
+  :focus-visible{outline:2px solid var(--ring);outline-offset:2px;border-radius:4px}
+  @media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+</style>
+
+<!-- icon sprite -->
+<svg style="display:none" aria-hidden="true"><defs>
+  <symbol id="i-diamond" viewBox="0 0 24 24"><path d="M12 2 22 12 12 22 2 12z"/></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12.83 2.18 8.29 4.14a1 1 0 0 1 0 1.79l-8.29 4.14a2 2 0 0 1-1.66 0L2.88 8.11a1 1 0 0 1 0-1.79l8.29-4.14a2 2 0 0 1 1.66 0Z"/><path d="m2.5 12 8.67 4.34a2 2 0 0 0 1.66 0L21.5 12"/><path d="m2.5 16.5 8.67 4.34a2 2 0 0 0 1.66 0l8.67-4.34"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-scroll" viewBox="0 0 24 24"><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></symbol>
+  <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-archive" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M9.94 14.06 8.5 14 9.94 13.94 10 12.5 10.06 13.94 11.5 14 10.06 14.06 10 15.5Z"/><path d="M12 3l1.2 4.3L17.5 8.5 13.2 9.7 12 14l-1.2-4.3L6.5 8.5l4.3-1.2z"/><path d="M18 15l.6 1.9L20.5 17.5 18.6 18.1 18 20l-.6-1.9L15.5 17.5l1.9-.6z"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+  <symbol id="i-merge" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 14a8 8 0 0 1 8-8h6"/><path d="m16 3 3 3-3 3"/><path d="M20 10a8 8 0 0 1-8 8H6"/><path d="m8 21-3-3 3-3"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><path d="M2.6 17.4A2 2 0 0 0 2 18.8V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.2a2 2 0 0 0 1.4-.6l.8-.8a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".8"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+</defs></svg>
+
+<div class="app" id="app">
+  <!-- ============ RAIL ============ -->
+  <aside class="rail">
+    <div class="brand"><span class="mark"><svg viewBox="0 0 24 24"><use href="#i-diamond"/></svg></span>Context Keeper</div>
+    <div class="nav-label">Nawigacja</div>
+    <button class="nav-item" data-nav="kolejka" aria-current="true"><svg class="i"><use href="#i-inbox"/></svg>Kolejka<span class="count">7</span></button>
+    <button class="nav-item" data-nav="pamiec"><svg class="i"><use href="#i-layers"/></svg>Pamięć</button>
+    <button class="nav-item" data-nav="projekty"><svg class="i"><use href="#i-folder"/></svg>Projekty</button>
+    <button class="nav-item" data-nav="audyt"><svg class="i"><use href="#i-scroll"/></svg>Audyt</button>
+    <div class="rail-sep"></div>
+    <button class="btn-create" onclick="toast('neutral','Human-create — Dialog „Nowa pamięć” (FR-D5)')"><svg class="i"><use href="#i-plus"/></svg>Nowa pamięć</button>
+    <div class="rail-metrics">
+      <div class="rmini"><span>Kolejka</span><b>7</b></div>
+      <div class="rmini"><span>Embedding</span><b style="color:var(--success)">up</b></div>
+      <div class="rmini"><span>Nocny job</span><b style="color:var(--success)">✓ 03:02</b></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <!-- ============ TOPBAR ============ -->
+    <header class="topbar">
+      <button class="ctx" onclick="toast('neutral','Context switcher: Wszystkie / Global / projekt (FR-D6)')">
+        <span class="dot"></span>project<span class="scope">:acme</span><svg class="i"><use href="#i-chevron"/></svg>
+      </button>
+      <div class="search"><svg class="i"><use href="#i-search"/></svg>Szukaj pamięci…<kbd>⌘K</kbd></div>
+      <div class="health">
+        <div class="stat"><span class="lbl">Kolejka</span><span class="val">7</span></div>
+        <div class="stat"><span class="lbl">Embedding</span><span class="val good"><span class="sdot ok"></span>up</span></div>
+        <div class="stat"><span class="lbl">Nocny job</span><span class="val good">✓ 3</span></div>
+        <div class="stat"><span class="lbl">Sekrety /24h</span><span class="val">0</span></div>
+      </div>
+      <button class="icon-btn" id="themeBtn" title="Przełącz motyw" aria-label="Przełącz motyw"><svg class="i"><use href="#i-moon"/></svg></button>
+    </header>
+
+    <!-- ============ EKRAN: KOLEJKA ============ -->
+    <section class="screen" data-screen="kolejka">
+      <div class="split">
+        <div class="list-pane">
+          <div class="list-head">
+            <button class="filter"><svg class="i"><use href="#i-filter"/></svg>origin<svg class="i"><use href="#i-chevron"/></svg></button>
+            <button class="filter">type<svg class="i"><use href="#i-chevron"/></svg></button>
+            <span class="refresh"><svg class="i"><use href="#i-refresh"/></svg>2s temu</span>
+          </div>
+          <div class="rows" id="rows"></div>
+        </div>
+        <div class="detail-pane" id="detail"></div>
+      </div>
+    </section>
+
+    <!-- ============ EKRAN: PAMIĘĆ ============ -->
+    <section class="screen" data-screen="pamiec" hidden>
+      <div class="split">
+        <div class="list-pane">
+          <div class="list-head">
+            <button class="filter">kind<svg class="i"><use href="#i-chevron"/></svg></button>
+            <button class="filter">status<svg class="i"><use href="#i-chevron"/></svg></button>
+            <button class="filter">tagi<svg class="i"><use href="#i-chevron"/></svg></button>
+          </div>
+          <div class="rows">
+            <div class="row" aria-selected="true">
+              <span class="chip kind">document</span>
+              <div class="rmain"><div class="rtitle">PRD — Context Keeper (kanon projektu)</div>
+                <div class="rmeta"><span class="origin"><svg class="i"><use href="#i-user"/></svg>human · project:acme</span><span class="tags"><span class="tag">prd</span><span class="tag">canon</span></span></div></div>
+              <span class="rtime">acc 128</span>
+            </div>
+            <div class="row">
+              <span class="chip kind">fact</span>
+              <div class="rmain"><div class="rtitle">Klient acme używa PostgreSQL 16 na produkcji</div>
+                <div class="rmeta"><span class="origin"><svg class="i"><use href="#i-bot"/></svg>agent · project:acme</span><span class="tags"><span class="tag">infra</span><span class="tag">database</span></span></div></div>
+              <span class="rtime">acc 34</span>
+            </div>
+            <div class="row">
+              <span class="chip kind">fact</span>
+              <div class="rmain"><div class="rtitle">Standard commitów: Conventional Commits + scope</div>
+                <div class="rmeta"><span class="origin"><svg class="i"><use href="#i-user"/></svg>human · global</span><span class="tags"><span class="tag">git</span></span></div></div>
+              <span class="rtime">acc 61</span>
+            </div>
+            <div class="row" style="opacity:.55">
+              <span class="chip archived"><svg class="i"><use href="#i-archive"/></svg>archived</span>
+              <div class="rmain"><div class="rtitle">Node 18 na CI (nieaktualne — patrz mem_9f1c)</div>
+                <div class="rmeta"><span class="origin"><svg class="i"><use href="#i-moon"/></svg>nightly · project:acme</span></div></div>
+              <span class="rtime">acc 4</span>
+            </div>
+          </div>
+        </div>
+        <div class="detail-pane">
+          <div class="detail-scroll">
+            <div class="dhead"><h2>PRD — Context Keeper (kanon projektu)</h2><span class="chip approved"><svg class="i"><use href="#i-check-circle"/></svg>approved</span></div>
+            <div class="dmeta">
+              <span class="mid" onclick="toast('neutral','Skopiowano mem_7a1b0c')"><svg class="i"><use href="#i-copy"/></svg>mem_7a1b0c</span><span class="sep"></span>
+              <span class="mid">document · global-scope: project</span><span class="sep"></span>
+              <span class="mid">source: human</span><span class="sep"></span><span class="mid">access 128 · last 2h</span>
+            </div>
+            <div class="tabs"><button class="tab" aria-selected="true">Body</button><button class="tab">Metadane</button><button class="tab">Rewizje (4)</button></div>
+            <p class="diff-lbl">Treść (markdown)</p>
+            <div class="block"><div class="body" style="font-size:14px">
+              <b>Context Keeper</b> to samodzielna aplikacja pełniąca rolę czystej, autorytatywnej pamięci dla agentów AI. Kluczowa cecha: żadna treść nie trafia do pamięci bez zatwierdzenia przez człowieka (human-gated writes)…
+              <div style="margin-top:10px;color:var(--muted-fg);font-size:12.5px">Akcje człowieka = commit bezpośredni + revision: <b>Edytuj</b> · <b>Archiwizuj</b> · <b>Promuj do global</b> · <b>Zmień scope/kind</b>.</div>
+            </div></div>
+          </div>
+          <div class="actions">
+            <button class="btn secondary" onclick="toast('neutral','Edytuj — commit bezpośredni + revision')"><svg class="i"><use href="#i-pencil"/></svg>Edytuj</button>
+            <button class="btn secondary" onclick="confirmDlg('Archiwizować pamięć?','Soft-delete — pamięć zniknie z search, ale zostaje w audycie i da się odtworzyć z revisions.')"><svg class="i"><use href="#i-archive"/></svg>Archiwizuj</button>
+            <button class="btn secondary" onclick="toast('ok','Promuj do global (FR-D2)')"><svg class="i"><use href="#i-check-circle"/></svg>Promuj do global</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ EKRAN: PROJEKTY ============ -->
+    <section class="screen" data-screen="projekty" hidden>
+      <div class="pad">
+        <h1 class="h1">Projekty i tokeny</h1>
+        <p class="sub">CRUD projektów oraz generacja/rotacja bearer tokenów <span class="mono">ck_…</span>. Ten ekran żyje poza context switcherem — widzi wszystkie projekty. (FR-D3)</p>
+        <div class="card" style="overflow:hidden;max-width:820px">
+          <table class="tbl">
+            <thead><tr><th>Projekt</th><th>project_id</th><th>Pamięci</th><th>Token</th><th style="text-align:right">Akcje</th></tr></thead>
+            <tbody>
+              <tr>
+                <td style="font-weight:500"><svg class="i" style="color:var(--faint);margin-right:7px"><use href="#i-folder"/></svg>acme</td>
+                <td class="mono" style="color:var(--muted-fg);font-size:12px">proj_ac1e88</td>
+                <td class="mono">342</td>
+                <td><span class="chip approved" style="height:20px"><span class="sdot ok"></span>aktywny</span></td>
+                <td style="text-align:right"><button class="btn secondary" style="height:28px;font-size:12px" onclick="showToken()"><svg class="i"><use href="#i-key"/></svg>Rotuj token</button></td>
+              </tr>
+              <tr>
+                <td style="font-weight:500"><svg class="i" style="color:var(--faint);margin-right:7px"><use href="#i-folder"/></svg>wenet-internal</td>
+                <td class="mono" style="color:var(--muted-fg);font-size:12px">proj_we3f21</td>
+                <td class="mono">87</td>
+                <td><span class="chip approved" style="height:20px"><span class="sdot ok"></span>aktywny</span></td>
+                <td style="text-align:right"><button class="btn secondary" style="height:28px;font-size:12px" onclick="showToken()"><svg class="i"><use href="#i-key"/></svg>Rotuj token</button></td>
+              </tr>
+              <tr>
+                <td colspan="5" style="text-align:center;padding:14px"><button class="btn secondary" onclick="toast('ok','Nowy projekt (FR-D3)')"><svg class="i"><use href="#i-plus"/></svg>Nowy projekt</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ EKRAN: AUDYT ============ -->
+    <section class="screen" data-screen="audyt" hidden>
+      <div class="pad">
+        <h1 class="h1">Audyt</h1>
+        <p class="sub">Append-only log zdarzeń zmieniających stan + przegląd rewizji. Filtrowalny po <span class="mono">event_type</span>. (FR-D4, NFR-2)</p>
+        <div style="display:flex;gap:8px;margin-bottom:14px">
+          <button class="filter">event_type<svg class="i"><use href="#i-chevron"/></svg></button>
+          <button class="filter">zakres czasu<svg class="i"><use href="#i-chevron"/></svg></button>
+          <button class="filter">projekt<svg class="i"><use href="#i-chevron"/></svg></button>
+        </div>
+        <div class="card" style="overflow:hidden;max-width:920px">
+          <table class="tbl">
+            <thead><tr><th>Czas</th><th>Zdarzenie</th><th>Aktor</th><th>affected_ids</th><th style="text-align:right">Powiązane</th></tr></thead>
+            <tbody>
+              <tr class="danger-row">
+                <td class="mono" style="font-size:12px">14:07:33</td>
+                <td><span class="chip danger"><svg class="i"><use href="#i-shield"/></svg>secret_blocked</span></td>
+                <td class="mono" style="font-size:12px">agent · tok_ac…9f</td>
+                <td class="mono" style="color:var(--faint)">—</td>
+                <td style="text-align:right"><span class="cta-link" onclick="showToken()">Rotuj credential →</span></td>
+              </tr>
+              <tr>
+                <td class="mono" style="font-size:12px">11:42:10</td>
+                <td><span class="chip approved" style="text-transform:none"><svg class="i"><use href="#i-check-circle"/></svg>proposal_approved</span></td>
+                <td class="mono" style="font-size:12px">human-dashboard</td>
+                <td class="mono">mem_3f2a11</td>
+                <td class="mono" style="text-align:right;color:var(--muted-fg)">rev_0a91</td>
+              </tr>
+              <tr>
+                <td class="mono" style="font-size:12px">03:02:55</td>
+                <td><span class="chip info" style="text-transform:none"><svg class="i"><use href="#i-moon"/></svg>nightly_run</span></td>
+                <td class="mono" style="font-size:12px">system</td>
+                <td class="mono" style="color:var(--muted-fg)">created 3 · withdrawn 1</td>
+                <td class="mono" style="text-align:right;color:var(--muted-fg)">ok · 41s</td>
+              </tr>
+              <tr>
+                <td class="mono" style="font-size:12px">09:15:02</td>
+                <td><span class="chip archived" style="text-transform:none"><svg class="i"><use href="#i-archive"/></svg>promote</span></td>
+                <td class="mono" style="font-size:12px">human-dashboard</td>
+                <td class="mono">mem_88ac0f → global</td>
+                <td class="mono" style="text-align:right;color:var(--muted-fg)">rev_0a72</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div class="toast-region" id="toasts"></div>
+
+<div class="backdrop" id="backdrop" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" id="dlg"></div>
+</div>
+
+<script>
+(function(){
+  // ---------- theme ----------
+  var root=document.documentElement;
+  document.getElementById('themeBtn').addEventListener('click',function(){
+    var cur=root.getAttribute('data-theme');
+    if(!cur){ cur=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'; }
+    var next=cur==='dark'?'light':'dark';
+    root.setAttribute('data-theme',next);
+    this.querySelector('use').setAttribute('href',next==='dark'?'#i-sun':'#i-moon');
+  });
+
+  // ---------- nav ----------
+  document.querySelectorAll('.nav-item').forEach(function(b){
+    b.addEventListener('click',function(){
+      document.querySelectorAll('.nav-item').forEach(function(x){x.setAttribute('aria-current','false')});
+      b.setAttribute('aria-current','true');
+      var t=b.dataset.nav;
+      document.querySelectorAll('.screen').forEach(function(s){ s.hidden = s.dataset.screen!==t; });
+    });
+  });
+
+  // ---------- data: proposals ----------
+  var props=[
+    { id:'prop_9f21a0', mem:'mem_3f2a11', type:'create', origin:'agent', scope:'project:acme', chip:'pending',
+      title:'Klient acme używa PostgreSQL 16 na produkcji (upgrade z 15 w Q2)',
+      tags:['infra','database','postgres'], time:'2 min temu', kind:'fact',
+      hint:'mem_a41f · mem_88ac0f', body:'Produkcja acme migrowała z PostgreSQL 15 → 16 w kwietniu 2026. Rozszerzenia: pgvector 0.7, pg_trgm. Połączenia przez PgBouncer (transaction pooling).' },
+    { id:'prop_7b40c2', mem:'mem_4d0e77', type:'create', origin:'agent', scope:'project:acme', chip:'pending',
+      title:'Endpoint sesji to POST /api/v2/session, nie /login', tags:['api','auth'], time:'18 min temu', kind:'fact',
+      hint:null, body:'Uwierzytelnianie: POST /api/v2/session z body {email, otp}. Zwraca httpOnly cookie. Stary /login (v1) zdeprecjonowany, 410 od 2026-05.' },
+    { id:'prop_1c88ff', mem:null, type:'merge', origin:'nightly', scope:'project:acme', chip:'pending',
+      title:'Scal 2 fakty o wersji Node w jeden', tags:['ci','node'], time:'1 godz. temu', kind:'fact', hint:null,
+      merge:{ a:{id:'mem_2a10',t:'CI używa Node 20'}, b:{id:'mem_5f31',t:'Node 20.11 na runnerach GitHub Actions'}, c:'CI: Node 20.11 (GitHub Actions runners); pinned w .nvmrc.' } },
+    { id:'prop_5e02ab', mem:'mem_9c74d2', type:'prune', origin:'nightly', scope:'project:acme', chip:'stale',
+      title:'Prune: fakt bez dostępu 94 dni', tags:['stale'], time:'1 godz. temu', kind:'fact', hint:null,
+      reason:'last_accessed_at: 94 dni temu · access_count: 0 · wiek > grace (30 dni)',
+      body:'„Tymczasowy workaround dla bug #412 w bibliotece auth" — kandydat do archiwizacji.' }
+  ];
+
+  function originHtml(o,scope){
+    var ic=o==='agent'?'i-bot':o==='nightly'?'i-moon':'i-user';
+    return '<span class="origin '+(o==='nightly'?'nightly':'')+'"><svg class="i"><use href="#'+ic+'"/></svg>'+o+' · '+scope+'</span>';
+  }
+  function typeIcon(t){ return t==='merge'?'i-merge':t==='prune'?'i-trash':'i-plus'; }
+  function chipHtml(c){
+    if(c==='pending') return '<span class="chip pending"><svg class="i"><use href="#i-clock"/></svg>pending</span>';
+    if(c==='stale')   return '<span class="chip stale"><svg class="i"><use href="#i-lock"/></svg>stale</span>';
+    return '<span class="chip approved"><svg class="i"><use href="#i-check-circle"/></svg>approved</span>';
+  }
+
+  var rows=document.getElementById('rows'); var selected=props[0].id;
+  function renderRows(){
+    rows.innerHTML='';
+    props.forEach(function(p){
+      var el=document.createElement('div'); el.className='row'; el.setAttribute('aria-selected', p.id===selected);
+      var tagHtml=p.tags.slice(0,2).map(function(t){return '<span class="tag">'+t+'</span>';}).join('')+(p.tags.length>2?'<span class="tag">+'+(p.tags.length-2)+'</span>':'');
+      el.innerHTML=
+        chipHtml(p.chip)+
+        '<div class="rmain"><div class="rtitle"><svg class="i ticon"><use href="#'+typeIcon(p.type)+'"/></svg>'+p.title+'</div>'+
+          '<div class="rmeta">'+originHtml(p.origin,p.scope)+'<span class="tags">'+tagHtml+'</span></div></div>'+
+        '<span class="rtime">'+p.time+'</span>';
+      el.addEventListener('click',function(){ selected=p.id; renderRows(); renderDetail(); });
+      rows.appendChild(el);
+    });
+  }
+
+  var detail=document.getElementById('detail');
+  function renderDetail(){
+    var p=props.find(function(x){return x.id===selected;}); if(!p){ detail.innerHTML=''; return; }
+    var diff='';
+    if(p.type==='create'){
+      diff='<p class="diff-lbl">Diff — nowa pamięć (create)</p>'+
+        '<div class="block add"><div class="bhead"><svg class="i"><use href="#i-plus"/></svg>+ dodawana treść · '+p.kind+'</div><div class="body">'+p.body+'</div></div>';
+    } else if(p.type==='merge'){
+      diff='<p class="diff-lbl">Diff — scalenie (merge A + B → C)</p>'+
+        '<div class="block del"><div class="bhead"><svg class="i"><use href="#i-archive"/></svg>'+p.merge.a.id+' → archiwum</div><div class="body">'+p.merge.a.t+'</div></div>'+
+        '<div class="block del"><div class="bhead"><svg class="i"><use href="#i-archive"/></svg>'+p.merge.b.id+' → archiwum</div><div class="body">'+p.merge.b.t+'</div></div>'+
+        '<div class="merge-arrow"><svg class="i"><use href="#i-merge"/></svg>scala się w</div>'+
+        '<div class="block result"><div class="bhead"><svg class="i"><use href="#i-check-circle"/></svg>nowa pamięć C</div><div class="body">'+p.merge.c+'</div></div>';
+    } else if(p.type==='prune'){
+      diff='<p class="diff-lbl">Diff — do archiwizacji (prune)</p>'+
+        '<div class="block del tomb"><div class="bhead"><svg class="i"><use href="#i-trash"/></svg>'+p.mem+' → archiwum</div><div class="body">'+p.body+'</div></div>';
+    }
+    var alert = p.chip==='stale' ?
+      '<div class="alert"><svg class="i"><use href="#i-lock"/></svg><div><b>Stale — bazowa rewizja się zmieniła.</b> Ta propozycja liczona była względem starszego stanu <span class="mono">'+p.mem+'</span>. Approve zablokowany (optimistic concurrency). Przejrzyj różnicę lub zaktualizuj bazę ręcznie.</div></div>' : '';
+    var hint = p.hint ?
+      '<div class="hint"><svg class="i"><use href="#i-sparkles"/></svg><div>Podobne istniejące pamięci: <a onclick="return false">'+p.hint.split(' · ').join('</a>, <a onclick=\'return false\'>')+'</a>. Advisory — propozycja i tak powstała (embedding nie odróżnia korekty od duplikatu).</div></div>' : '';
+    var staleDis = p.chip==='stale';
+
+    detail.innerHTML=
+      '<div class="detail-scroll">'+
+        '<div class="dhead"><h2>'+p.title+'</h2>'+chipHtml(p.chip)+'</div>'+
+        '<div class="dmeta">'+
+          '<span class="mid" data-copy="'+p.id+'"><svg class="i"><use href="#i-copy"/></svg>'+p.id+'</span><span class="sep"></span>'+
+          originHtml(p.origin,p.scope)+'<span class="sep"></span>'+
+          '<span class="mid">type: '+p.type+'</span><span class="sep"></span>'+
+          '<span class="mid">'+p.tags.map(function(t){return '#'+t;}).join(' ')+'</span>'+
+        '</div>'+
+        hint+alert+
+        '<div class="tabs"><button class="tab" aria-selected="true">Diff</button><button class="tab">Metadane</button><button class="tab">Rewizje</button></div>'+
+        diff+
+        (p.reason?'<div style="font-size:12px;color:var(--muted-fg);font-family:var(--mono);margin-top:2px">powód: '+p.reason+'</div>':'')+
+      '</div>'+
+      '<div class="actions">'+
+        '<button class="btn primary" id="approveBtn" '+(staleDis?'disabled title="Zablokowane: stale"':'')+'><svg class="i"><use href="#i-check"/></svg>Zatwierdź<kbd>A</kbd></button>'+
+        '<button class="btn ghost-danger" id="rejectBtn"><svg class="i"><use href="#i-x"/></svg>Odrzuć<kbd>R</kbd></button>'+
+        '<button class="btn secondary" id="editBtn"><svg class="i"><use href="#i-pencil"/></svg>Edytuj<kbd>E</kbd></button>'+
+        '<button class="btn split" id="replaceBtn"><svg class="i"><use href="#i-swap"/></svg>Zatwierdź jako zamiennik<svg class="i" style="opacity:.6"><use href="#i-chevron"/></svg></button>'+
+        '<span class="spring">1 / '+props.length+'</span>'+
+      '</div>';
+
+    detail.querySelectorAll('.tab').forEach(function(t){ t.addEventListener('click',function(){
+      detail.querySelectorAll('.tab').forEach(function(x){x.setAttribute('aria-selected','false')}); t.setAttribute('aria-selected','true'); }); });
+    var mid=detail.querySelector('[data-copy]'); if(mid) mid.addEventListener('click',function(){ toast('neutral','Skopiowano '+this.dataset.copy); });
+    var ap=detail.querySelector('#approveBtn'); if(ap&&!staleDis) ap.addEventListener('click',function(){ resolve(p.id,'ok','Zatwierdzono — pamięć zmaterializowana'); });
+    detail.querySelector('#rejectBtn').addEventListener('click',function(){ confirmDlg('Odrzucić propozycję?','Trafi do audytu jako rejected. Nic nie wejdzie do pamięci.',function(){ resolve(p.id,'neutral','Odrzucono — zapisane w audycie'); }); });
+    detail.querySelector('#editBtn').addEventListener('click',function(){ toast('neutral','Edit-before-approve — header/body edytowalne inline'); });
+    detail.querySelector('#replaceBtn').addEventListener('click',function(){ toast('neutral','Zatwierdź jako zamiennik [X] — supersession (approve new + archive old)'); });
+  }
+
+  function resolve(id,kind,msg){
+    var i=props.findIndex(function(x){return x.id===id;}); if(i<0) return;
+    props.splice(i,1);
+    if(props.length){ selected=props[Math.min(i,props.length-1)].id; }
+    updateCount(); renderRows();
+    if(props.length){ renderDetail(); } else { detail.innerHTML='<div class="empty"><svg class="i"><use href="#i-inbox"/></svg><div class="et">Inbox zero — brak propozycji do przeglądu</div><div style="font-size:12.5px">Nowe zapisy agentów i propozycje nocnego jobu pojawią się tutaj.</div></div>'; }
+    toast(kind,msg);
+  }
+  function updateCount(){
+    var n=props.length;
+    document.querySelector('.nav-item[data-nav="kolejka"] .count').textContent=n;
+    document.querySelectorAll('.stat .val')[0].textContent=n;
+    document.querySelector('.rail-metrics .rmini b').textContent=n;
+  }
+
+  // ---------- toast ----------
+  window.toast=function(kind,msg){
+    var t=document.createElement('div'); t.className='toast '+kind;
+    var ic=kind==='ok'?'i-check-circle':'i-inbox';
+    t.innerHTML='<svg class="i"><use href="#'+ic+'"/></svg>'+msg;
+    document.getElementById('toasts').appendChild(t);
+    setTimeout(function(){ t.style.transition='opacity .2s,transform .2s'; t.style.opacity='0'; t.style.transform='translateY(6px)'; setTimeout(function(){t.remove();},220); },2400);
+  };
+
+  // ---------- dialogs ----------
+  var bd=document.getElementById('backdrop'), dlg=document.getElementById('dlg');
+  bd.addEventListener('click',function(e){ if(e.target===bd) bd.hidden=true; });
+  window.confirmDlg=function(title,text,onOk){
+    dlg.innerHTML='<h3><svg class="i" style="color:var(--danger)"><use href="#i-shield"/></svg>'+title+'</h3><p>'+text+'</p>'+
+      '<div class="dialog-actions"><button class="btn secondary" id="cx">Anuluj</button><button class="btn primary" id="ok" style="background:var(--danger)">Potwierdź</button></div>';
+    bd.hidden=false;
+    dlg.querySelector('#cx').onclick=function(){ bd.hidden=true; };
+    dlg.querySelector('#ok').onclick=function(){ bd.hidden=true; if(onOk) onOk(); };
+  };
+  window.showToken=function(){
+    dlg.innerHTML='<h3><svg class="i"><use href="#i-key"/></svg>Nowy token projektu</h3>'+
+      '<p>Skopiuj teraz — pokazujemy go tylko raz. W bazie trzymamy wyłącznie <span class="mono">SHA-256</span> hash.</p>'+
+      '<div class="token-box"><code>ck_7Qx2Vb9pL4mN8kR1sT6uW3yZ0aC5eH2jD4fG</code><button class="icon-btn" onclick="toast(\'neutral\',\'Token skopiowany\')"><svg class="i"><use href="#i-copy"/></svg></button></div>'+
+      '<div class="warn-note"><svg class="i"><use href="#i-shield"/></svg>Rotacja to hard-cutover — stary token przestaje działać natychmiast. Zaktualizuj konfigurację klientów MCP.</div>'+
+      '<div class="dialog-actions"><button class="btn primary" id="done">Zapisałem token</button></div>';
+    bd.hidden=false;
+    dlg.querySelector('#done').onclick=function(){ bd.hidden=true; toast('ok','Token wygenerowany'); };
+  };
+
+  // ---------- keyboard (kolejka) ----------
+  document.addEventListener('keydown',function(e){
+    if(document.querySelector('.screen[data-screen="kolejka"]').hidden) return;
+    if(!bd.hidden) return;
+    var i=props.findIndex(function(x){return x.id===selected;}); if(i<0) return;
+    if(e.key==='j'){ selected=props[Math.min(i+1,props.length-1)].id; renderRows(); renderDetail(); }
+    else if(e.key==='k'){ selected=props[Math.max(i-1,0)].id; renderRows(); renderDetail(); }
+    else if(e.key==='a'){ var b=detail.querySelector('#approveBtn'); if(b&&!b.disabled) b.click(); }
+    else if(e.key==='r'){ var rb=detail.querySelector('#rejectBtn'); if(rb) rb.click(); }
+  });
+
+  updateCount(); renderRows(); renderDetail();
+})();
+</script>

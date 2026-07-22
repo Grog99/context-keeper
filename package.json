@@ -1,0 +1,32 @@
+{
+  "name": "context-keeper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Context Keeper — human-gated, shared memory for AI agents (remote MCP server).",
+  "packageManager": "pnpm@10.33.2",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @context-keeper/server start:dev",
+    "build": "pnpm -r build",
+    "lint": "eslint .",
+    "test": "pnpm -r test",
+    "cli": "pnpm --filter @context-keeper/server cli",
+    "db:generate": "pnpm --filter @context-keeper/server db:generate",
+    "db:migrate": "pnpm --filter @context-keeper/server db:migrate",
+    "format": "prettier --write \"**/*.{ts,js,mjs,json,md,yaml,yml}\""
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.7.0",
+    "prettier": "^3.9.6",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.65.0"
+  }
+}

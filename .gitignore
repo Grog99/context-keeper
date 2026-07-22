@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Env / secrets — NIGDY do repo
+.env
+.env.*
+!.env.example
+
+# Docker volumes / local data
+pgdata/
+
+# Drizzle generated meta (migracje SQL trzymamy, meta cache nie)
+apps/server/src/db/migrations/meta/_journal_local.json
+
+# Logs
+*.log
+logs/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Test / coverage
+coverage/
+.vitest/
