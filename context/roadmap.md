@@ -37,7 +37,7 @@ Tabela `proposals`, transakcyjne zatwierdzanie, optimistic concurrency (stale = 
 Proposer (nie executor): dedup / merge / prune → do tej samej kolejki. Advisory lock, idempotentny re-scan.
 
 **7. Utwardzenie** ✅
-Audit log, observability (`/health`, metryki), backup (`pg_dump` + offsite), testy rdzenia (transakcja akceptacji, scope/IDOR, skaner sekretów).
+Audit log, observability (`/health`, metryki — w tym latencja embeddingu, FR-D7/NFR-4), backup (`pg_dump` + offsite, z audit event `backup_completed` przez CLI `record-backup` — sukces/porażka widoczne w audycie i na health strip), testy rdzenia (transakcja akceptacji, scope/IDOR, skaner sekretów).
 
 **8. Onboarding / instalator** ⬜
 `install.sh` — generacja `.env` + sekrety + wybór profili (preset embeddingów, tryb proxy); uruchomienie stacku opcjonalne (prompt). Kanon configu = `.env.example`.
