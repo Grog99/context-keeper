@@ -510,6 +510,67 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
     });
   });
 
+  describe('flood backstop + replacement pairing (Fix 2) — capped replacement nie osiera withdraw', () => {
+    it('stale merge replacement ucięty capem -> stary proposal ZOSTAJE pending (para odłożona w całości)', async () => {
+      const created = await projects.createProject('nightly-cap-replace-test');
+      const projectId = created.project.id;
+
+      const a = await seedFactWithVector(projectId, { header: 'RA', body: 'Tresc RA.' }, NEAR);
+      const b = await seedFactWithVector(projectId, { header: 'RB', body: 'Tresc RB duzo dluzsza.' }, NEAR);
+
+      const { nightly } = buildServices();
+      await nightly.run({ actor: 'tester' });
+
+      const before = await findNightlyProposal('merge', [a.id, b.id]);
+      expect(before).toBeDefined();
+
+      // Unieważnij istniejący proposal (bump version poza kolejką, jak w scenariuszu 3) -> przy
+      // kolejnym biegu wykryty jako "stale", wymaga PARY (withdraw stary + create świeży).
+      await db.update(memories).set({ version: 1 }).where(eq(memories.id, b.id));
+
+      // Niezależny, nowy warunek prune. conditionKey zaczyna się od "delete|" < "merge|" ->
+      // zawsze wygrywa deterministyczne sortowanie capa (localeCompare), niezależnie od id.
+      const pruneFact = await seedFact(projectId, {
+        header: 'Cap prune fakt',
+        body: 'Tresc prune.',
+        createdAt: daysAgo(40),
+        lastAccessedAt: null,
+        accessCount: 0,
+      });
+
+      const { nightly: cappedNightly } = buildServices({ NIGHTLY_MAX_PROPOSALS_PER_RUN: 1 });
+      const result = await cappedNightly.run({ actor: 'tester' });
+
+      expect(result.counters.created).toBe(1);
+      expect(result.counters.skippedCap).toBe(1);
+
+      // Nowy prune proposal powstał (wygrał cap dzięki sortowaniu po conditionKey).
+      const pruneProposal = await findNightlyProposal('delete', [pruneFact.id]);
+      expect(pruneProposal).toBeDefined();
+
+      // KLUCZOWA ASERCJA (Fix 2): stary merge proposal NIE został wycofany, mimo że jego warunek
+      // jest "stale" — para (withdraw+create) została odłożona w CAŁOŚCI, bo jej `create` przegrał
+      // cap. Bez fixa: stary proposal ginąłby z kolejki, a jego zastąpienie by nie powstało.
+      const [oldStillPending] = await db.select().from(proposals).where(eq(proposals.id, before!.id));
+      expect(oldStillPending.status).toBe('pending');
+
+      const stillTheOldOne = await findNightlyProposal('merge', [a.id, b.id], 'pending');
+      expect(stillTheOldOne!.id).toBe(before!.id);
+
+      // Kolejny bieg bez capa -> teraz para replace przechodzi w całości.
+      const { nightly: uncappedNightly } = buildServices();
+      await uncappedNightly.run({ actor: 'tester' });
+
+      const [oldAfter] = await db.select().from(proposals).where(eq(proposals.id, before!.id));
+      expect(oldAfter.status).toBe('withdrawn');
+
+      const fresh = await findNightlyProposal('merge', [a.id, b.id], 'pending');
+      expect(fresh).toBeDefined();
+      expect(fresh!.id).not.toBe(before!.id);
+      expect(fresh!.baseVersions).toEqual({ [a.id]: 0, [b.id]: 1 });
+    });
+  });
+
   describe('withdraw guard — origin/status', () => {
     it('proposal spoza nightly nigdy nie jest widoczny dla reconcile jako "existing nightly" (brak withdraw human proposala)', async () => {
       const created = await projects.createProject('nightly-guard-test');

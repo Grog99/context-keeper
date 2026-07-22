@@ -1,12 +1,13 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, ne } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { generateId, ID_PREFIX } from '../common/ids';
 import { AppConfigService } from '../config/config.service';
 import { DB, PG_POOL, type Database, type PgPool } from '../db/db.tokens';
 import { embeddings, memories, proposals, stagingEmbeddings } from '../db/schema';
 import type { MemoryKind, MemoryScope } from '../db/schema/enums';
-import { EmbeddingService, toPgVectorLiteral } from '../embeddings/embedding.service';
+import { findAnnNeighbors } from '../embeddings/ann-search';
+import { EmbeddingService } from '../embeddings/embedding.service';
 import { computeStaleIds } from '../proposals/proposals.service';
 import { buildClusters, pickCanonicalMerge, type NeighborPair } from './dedup-cluster';
 import {
@@ -52,7 +53,16 @@ interface FactRow {
   accessCount: number;
   createdAt: Date;
   lastAccessedAt: Date | null;
+  /** Wektor aktywnego modelu (LEFT JOIN embeddings w `loadApprovedFacts`) — `null`, gdy fakt nie ma
+   * jeszcze embeddingu dla `activeModel` (np. nie przeliczony przez `reembed`). Fakt bez wektora jest
+   * WCIĄŻ obecny w `facts` (nadal kandyduje do prune scoringu) — jedynie ANN/merge detection go
+   * pomija (Fix 4, code review commit d057871). */
+  vector: number[] | null;
 }
+
+/** Ile faktów jest przetwarzanych naraz w `findNeighborPairs` (Fix 4, code review commit d057871) —
+ * bounded concurrency zamiast ściśle sekwencyjnej pętli, bez nowej zależności (brak p-limit w repo). */
+const NEIGHBOR_SCAN_CONCURRENCY = 10;
 
 /**
  * Nocny job — proposer, NIE executor (plan Fazy 6 §1 "Overall shape"). Jedyny producent proposali
@@ -155,17 +165,32 @@ export class NightlyService {
   // ---- orkiestracja pod lockiem: detekcja -> reconcile -> apply ---------
 
   private async runLocked(actor: string): Promise<NightlyCounters> {
-    const facts = await this.loadApprovedFacts();
-    const factById = new Map(facts.map((f) => [f.id, f]));
-
     const activeModel = this.embedding.model;
+    const facts = await this.loadApprovedFacts(activeModel);
+    const factById = new Map(facts.map((f) => [f.id, f]));
+    // Snapshot id set (Fix 1, code review commit d057871): ANN musi być zawężone do TYCH SAMYCH
+    // faktów co `factById`, inaczej fakt zatwierdzony współbieżnie w trakcie przebiegu może wrócić
+    // jako sąsiad, mimo że nie ma go w snapshotcie -> `buildMergeCondition` rzucałby na
+    // `factById.get(id)` i wywalał CAŁY przebieg. Restrykcja na poziomie zapytania czyni ten crash
+    // strukturalnie niemożliwym (taki fakt po prostu nie zostanie rozważony w TYM biegu — złapie go
+    // kolejny stateless re-scan).
+    const snapshotIds = Array.from(factById.keys());
+
     const dedupDistance = this.config.get('NIGHTLY_DEDUP_DISTANCE');
     const annNeighbors = this.config.get('NIGHTLY_ANN_NEIGHBORS');
 
+    // Bounded concurrency zamiast ściśle sekwencyjnej pętli (Fix 4, code review commit d057871) —
+    // chunk po `NEIGHBOR_SCAN_CONCURRENCY`, `Promise.all` w obrębie chunku, wyniki akumulowane przed
+    // startem kolejnego chunku (bez nowej zależności typu p-limit).
     const pairs: NeighborPair[] = [];
-    for (const fact of facts) {
-      const found = await this.findNeighborPairs(fact, activeModel, annNeighbors, dedupDistance);
-      pairs.push(...found);
+    for (let i = 0; i < facts.length; i += NEIGHBOR_SCAN_CONCURRENCY) {
+      const chunk = facts.slice(i, i + NEIGHBOR_SCAN_CONCURRENCY);
+      const results = await Promise.all(
+        chunk.map((fact) =>
+          this.findNeighborPairs(fact, snapshotIds, activeModel, annNeighbors, dedupDistance),
+        ),
+      );
+      for (const found of results) pairs.push(...found);
     }
     const clusters = buildClusters(pairs);
     const clusteredIds = new Set(clusters.flat());
@@ -188,8 +213,8 @@ export class NightlyService {
     // Flood backstop (plan §5 pkt 6): limit NOWYCH proposali w jednym przebiegu. Obcięcie
     // deterministyczne (sort po conditionKey) — pominięte warunki NIE giną, zostają wykryte
     // ponownie przy kolejnym stateless re-scanie (żadnego cichego odrzucenia, tylko odłożenie w
-    // czasie). `toWithdraw` NIE podlega capowi: usunięcie nieaktualnego/osieroconego wpisu z
-    // kolejki to sprzątanie, nie "nowa propozycja" — backstop go nie dotyczy.
+    // czasie). Orphan `toWithdraw` NIE podlega capowi: usunięcie osieroconego wpisu z kolejki to
+    // sprzątanie, nie "nowa propozycja" — backstop go nie dotyczy.
     const cap = this.config.get('NIGHTLY_MAX_PROPOSALS_PER_RUN');
     const sortedToCreate = [...reconciled.toCreate].sort((a, b) =>
       a.conditionKey.localeCompare(b.conditionKey),
@@ -213,8 +238,18 @@ export class NightlyService {
       else pruneProposed++;
     }
 
+    // Sparowane withdraw (Fix 2, code review commit d057871): odpowiednik "replace" liczony WYŁĄCZNIE
+    // dla warunków, które przetrwały cap (są w `finalToCreate`) — jeśli `cond` danego `conditionKey`
+    // został ucięty przez cap, jego stary odpowiednik w `reconciled.replacements` NIE trafia do
+    // withdraw w tym przebiegu (para odkładana w całości, żeby nigdy nie osierocić warunku w
+    // kolejce — złapie ją kolejny stateless re-scan, znów jako "stale" albo już jako "fresh").
+    const pairedWithdraw = finalToCreate
+      .map((cond) => reconciled.replacements.get(cond.conditionKey))
+      .filter((id): id is string => id !== undefined);
+    const allToWithdraw = [...reconciled.toWithdraw, ...pairedWithdraw];
+
     let withdrawn = 0;
-    for (const proposalId of reconciled.toWithdraw) {
+    for (const proposalId of allToWithdraw) {
       const didWithdraw = await this.withdrawProposal(proposalId, actor);
       if (didWithdraw) withdrawn++;
     }
@@ -232,14 +267,29 @@ export class NightlyService {
 
   // ---- detekcja: dedup (ANN) ---------------------------------------------
 
-  /** Paginacja jak `reembed.command.ts` (ORDER BY id, LIMIT/OFFSET) — trzyma pamięć procesu pod
-   * kontrolą przy dużej liczbie approved facts (plan §3 "ANN query cost at scale"). Wyłącznie
-   * `kind='fact'`: dokumenty są wielo-chunkowe (`chunker.ts`), poza zakresem v1 nocnego joba
-   * (plan §1 "Candidate detection via ANN" — ANN dedup zakłada jeden wektor na pamięć). */
-  private async loadApprovedFacts(): Promise<FactRow[]> {
+  /** Paginacja typu keyset (`WHERE id > lastId ORDER BY id LIMIT`, Fix 3, code review commit
+   * d057871) — trzyma pamięć procesu pod kontrolą przy dużej liczbie approved facts (plan §3 "ANN
+   * query cost at scale") BEZ pułapki plain `OFFSET`: offsetowanie po round-tripach nie ma izolacji
+   * snapshotu, więc wiersz który zmienia pozycję w przefiltrowanym zbiorze między stronami (np.
+   * archiwizacja mid-scan) mógłby zostać całkowicie pominięty. Keyset (`id > lastId`) nie ma tej
+   * wady — każda strona zaczyna się dokładnie tam, gdzie skończyła się poprzednia, niezależnie od
+   * tego, co wypadło ze zbioru w międzyczasie. Wyłącznie `kind='fact'`: dokumenty są wielo-chunkowe
+   * (`chunker.ts`), poza zakresem v1 nocnego joba (plan §1 "Candidate detection via ANN" — ANN dedup
+   * zakłada jeden wektor na pamięć).
+   *
+   * LEFT JOIN embeddings (Fix 4, code review commit d057871) na `(memoryId, activeModel)`
+   * eliminuje osobne zapytanie "własny wektor" per fakt w `findNeighborPairs` (N+1). MUSI być LEFT,
+   * nie INNER — fakt bez embeddingu aktywnego modelu (jeszcze nie przeliczony przez `reembed`) wciąż
+   * jest potrzebny w `facts` dla prune scoringu (`buildPruneConditions` iteruje po wszystkich
+   * faktach niezależnie od statusu embeddingu); tylko ANN/merge detection go pomija. */
+  private async loadApprovedFacts(activeModel: string): Promise<FactRow[]> {
     const batchSize = this.config.get('NIGHTLY_BATCH_SIZE');
     const out: FactRow[] = [];
-    for (let offset = 0; ; offset += batchSize) {
+    let lastId: string | undefined;
+    for (;;) {
+      const conditions = [eq(memories.status, 'approved'), eq(memories.kind, 'fact')];
+      if (lastId !== undefined) conditions.push(gt(memories.id, lastId));
+
       const batch = await this.db
         .select({
           id: memories.id,
@@ -253,63 +303,76 @@ export class NightlyService {
           accessCount: memories.accessCount,
           createdAt: memories.createdAt,
           lastAccessedAt: memories.lastAccessedAt,
+          vector: embeddings.vector,
         })
         .from(memories)
-        .where(and(eq(memories.status, 'approved'), eq(memories.kind, 'fact')))
+        .leftJoin(
+          embeddings,
+          and(eq(embeddings.memoryId, memories.id), eq(embeddings.embeddingModel, activeModel)),
+        )
+        .where(and(...conditions))
         .orderBy(asc(memories.id))
-        .limit(batchSize)
-        .offset(offset);
+        .limit(batchSize);
       if (batch.length === 0) break;
       out.push(...batch);
+      lastId = batch[batch.length - 1].id;
       if (batch.length < batchSize) break;
     }
     return out;
   }
 
   /**
-   * ANN per-fact, mirroring `MemoryService.vectorArm()` (plan §1 "Candidate detection via ANN"):
-   * własny wektor jako query, `ORDER BY dist LIMIT NIGHTLY_ANN_NEIGHBORS`, tylko pary
-   * `<= NIGHTLY_DEDUP_DISTANCE`. W przeciwieństwie do `vectorArm` (który miesza `global OR
-   * project-tego-tokena` dla wyszukiwania) partycja tu jest ŚCISŁA — dokładnie ten sam
-   * `(scope, projectId)` co fakt źródłowy, nigdy unia — nocny job nigdy nie scala między
-   * projektami ani przez granicę global/project (plan §1). Fakt bez wektora aktywnego modelu
-   * (jeszcze nie przeliczony przez `reembed`) -> brak par, poza zakresem tego przebiegu.
+   * ANN per-fact przez współdzielony `findAnnNeighbors` (`embeddings/ann-search.ts`) — wcześniej
+   * hand-rollowane zapytanie identyczne w kształcie do `MemoryService.vectorArm()`, wydzielone jako
+   * osobny prymityw po code review finding "reuse" (commit d057871). Własny wektor faktu jako query,
+   * `ORDER BY dist LIMIT NIGHTLY_ANN_NEIGHBORS`, tylko pary `<= NIGHTLY_DEDUP_DISTANCE` (filtr
+   * progiem zostaje TUTAJ, nie w helperze — helper zwraca surowe pary). W przeciwieństwie do
+   * `vectorArm` (który miesza `global OR project-tego-tokena` dla wyszukiwania, `scopeCondition`
+   * permisywny) partycja tu jest ŚCISŁA — dokładnie ten sam `(scope, projectId)` co fakt źródłowy,
+   * nigdy unia — nocny job nigdy nie scala między projektami ani przez granicę global/project (plan
+   * §1). `groupByMemory: false` (w przeciwieństwie do `vectorArm`) — fakty mają dokładnie jeden
+   * wektor, bez kolapsowania multi-chunk. Fakt bez wektora aktywnego modelu (jeszcze nie przeliczony
+   * przez `reembed`) -> brak par, poza zakresem tego przebiegu.
+   *
+   * Wektor faktu przekazywany jako parametr (Fix 4, code review commit d057871) — pobrany raz przez
+   * LEFT JOIN w `loadApprovedFacts`, bez osobnego zapytania per fakt (eliminacja jednego z dwóch N+1
+   * round-tripów tej pętli).
+   *
+   * `snapshotIds` (Fix 1, code review commit d057871), przekazane przez `extraConditions`, zawęża
+   * wynik ANN do id-ów ze snapshotu przekazanego do `runLocked` — fakt zatwierdzony współbieżnie PO
+   * snapshotcie nigdy nie wróci jako sąsiad, mimo że jego embedding mógłby być blisko. Bez tego
+   * `buildMergeCondition` (który indeksuje WYŁĄCZNIE po snapshotcie przez `factById`) rzucałby na
+   * brakujący klucz i wywalał cały przebieg (TOCTOU) — taki fakt po prostu poczeka na kolejny
+   * stateless re-scan. `ne(memories.id, fact.id)` (też w `extraConditions`) wyklucza sam fakt z
+   * własnego wyniku ANN.
    */
   private async findNeighborPairs(
     fact: FactRow,
+    snapshotIds: string[],
     activeModel: string,
     annNeighbors: number,
     dedupDistance: number,
   ): Promise<NeighborPair[]> {
-    const [own] = await this.db
-      .select({ vector: embeddings.vector })
-      .from(embeddings)
-      .where(and(eq(embeddings.memoryId, fact.id), eq(embeddings.embeddingModel, activeModel)))
-      .limit(1);
-    if (!own?.vector) return [];
+    if (!fact.vector) return [];
 
-    const qvecLiteral = toPgVectorLiteral(own.vector);
     const scopeCondition =
       fact.scope === 'global'
         ? and(eq(memories.scope, 'global'))
         : and(eq(memories.scope, 'project'), eq(memories.projectId, fact.projectId as string));
-    const dist = sql<number>`${embeddings.vector} <=> ${qvecLiteral}::vector`;
 
-    const rows = await this.db
-      .select({ memoryId: embeddings.memoryId, dist })
-      .from(embeddings)
-      .innerJoin(memories, eq(memories.id, embeddings.memoryId))
-      .where(
-        and(
-          eq(embeddings.embeddingModel, activeModel),
-          eq(memories.status, 'approved'),
-          eq(memories.kind, 'fact'),
-          scopeCondition,
-          ne(memories.id, fact.id),
-        ),
-      )
-      .orderBy(asc(dist))
-      .limit(annNeighbors);
+    const rows = await findAnnNeighbors({
+      db: this.db,
+      queryVector: fact.vector,
+      embeddingModel: activeModel,
+      scopeCondition,
+      extraConditions: [
+        eq(memories.kind, 'fact'),
+        inArray(memories.id, snapshotIds),
+        ne(memories.id, fact.id),
+      ],
+      groupByMemory: false, // fakty mają dokładnie jeden wektor — bez kolapsowania multi-chunk
+      limit: annNeighbors,
+    });
 
     return rows
       .filter((r) => r.dist <= dedupDistance)

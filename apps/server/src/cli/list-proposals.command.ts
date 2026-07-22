@@ -8,7 +8,7 @@ interface ListProposalsOptions {
   project?: string;
 }
 
-const VALID_STATUSES: ProposalStatus[] = ['pending', 'approved', 'rejected'];
+const VALID_STATUSES: ProposalStatus[] = ['pending', 'approved', 'rejected', 'withdrawn'];
 const VALID_ORIGINS: ProposalOrigin[] = ['agent', 'human', 'nightly'];
 
 @Command({
@@ -47,7 +47,10 @@ export class ListProposalsCommand extends CommandRunner {
     return val as T;
   }
 
-  @Option({ flags: '--status <status>', description: 'pending | approved | rejected (domyślnie pending)' })
+  @Option({
+    flags: '--status <status>',
+    description: 'pending | approved | rejected | withdrawn (domyślnie pending)',
+  })
   parseStatus(val: string): string {
     return val;
   }

@@ -28,7 +28,7 @@ function existing(overrides: Partial<ExistingNightlyProposal> = {}): ExistingNig
 }
 
 describe('reconcile (Faza 6 — tabela decyzji self-cleaning re-scan)', () => {
-  it('dopasowany + aktualny (nie stale) -> skip, brak create/withdraw', () => {
+  it('dopasowany + aktualny (nie stale) -> skip, brak create/withdraw/replacements', () => {
     const cond = condition();
     const existingProp = existing({ stale: false });
 
@@ -36,41 +36,49 @@ describe('reconcile (Faza 6 — tabela decyzji self-cleaning re-scan)', () => {
 
     expect(result.toCreate).toEqual([]);
     expect(result.toWithdraw).toEqual([]);
+    expect(result.replacements.size).toBe(0);
     expect(result.skipped).toEqual(['prop_existing']);
   });
 
-  it('dopasowany + stale -> withdraw starego ORAZ create nowego', () => {
+  it('dopasowany + stale -> "replace" sparowany: create nowego + wpis w replacements (NIE w toWithdraw)', () => {
     const cond = condition();
     const existingProp = existing({ stale: true });
 
     const result = reconcile([cond], [existingProp]);
 
-    expect(result.toWithdraw).toEqual(['prop_existing']);
+    // Fix 2 (code review commit d057871): stary proposal NIE trafia bezpośrednio do `toWithdraw` —
+    // to wołający (NightlyService) decyduje, czy sparowany `create` przetrwał flood cap, zanim
+    // zastosuje odpowiadający mu withdraw.
+    expect(result.toWithdraw).toEqual([]);
+    expect(result.replacements.get(cond.conditionKey)).toBe('prop_existing');
+    expect(result.replacements.size).toBe(1);
     expect(result.toCreate).toEqual([cond]);
     expect(result.skipped).toEqual([]);
   });
 
-  it('brak dopasowania w existing -> create, żadnego withdraw', () => {
+  it('brak dopasowania w existing -> create, żadnego withdraw/replacements', () => {
     const cond = condition();
 
     const result = reconcile([cond], []);
 
     expect(result.toCreate).toEqual([cond]);
     expect(result.toWithdraw).toEqual([]);
+    expect(result.replacements.size).toBe(0);
     expect(result.skipped).toEqual([]);
   });
 
-  it('existing bez dopasowania w detected (orphan) -> withdraw, bez create', () => {
+  it('existing bez dopasowania w detected (orphan) -> withdraw bezwarunkowo, bez create', () => {
     const existingProp = existing({ id: 'prop_orphan' });
 
     const result = reconcile([], [existingProp]);
 
     expect(result.toWithdraw).toEqual(['prop_orphan']);
+    expect(result.replacements.size).toBe(0);
     expect(result.toCreate).toEqual([]);
     expect(result.skipped).toEqual([]);
   });
 
-  it('mieszany przebieg: jeden skip, jeden stale-replace, jeden nowy create, jeden orphan withdraw', () => {
+  it('mieszany przebieg: jeden skip, jeden stale-replace (sparowany), jeden nowy create, jeden orphan withdraw', () => {
     const skipCond = condition({ affectedIds: ['mem_1', 'mem_2'] });
     const staleCond = condition({ affectedIds: ['mem_3', 'mem_4'] });
     const newCond = condition({ affectedIds: ['mem_5', 'mem_6'] });
@@ -85,7 +93,10 @@ describe('reconcile (Faza 6 — tabela decyzji self-cleaning re-scan)', () => {
     );
 
     expect(result.skipped).toEqual(['prop_skip']);
-    expect([...result.toWithdraw].sort()).toEqual(['prop_orphan', 'prop_stale']);
+    // Tylko orphan trafia do toWithdraw — stale-replace jest w `replacements`, nie tu.
+    expect(result.toWithdraw).toEqual(['prop_orphan']);
+    expect(result.replacements.get(staleCond.conditionKey)).toBe('prop_stale');
+    expect(result.replacements.size).toBe(1);
     expect(result.toCreate).toEqual([staleCond, newCond]);
   });
 
@@ -105,9 +116,33 @@ describe('reconcile (Faza 6 — tabela decyzji self-cleaning re-scan)', () => {
 
     const result = reconcile([deleteCond], [mergeExisting]);
 
-    // Brak dopasowania -> istniejący merge staje się orphan (withdraw), delete jest nowy (create).
+    // Brak dopasowania -> istniejący merge staje się orphan (withdraw bezwarunkowo), delete jest
+    // nowy (create). To NIE jest "replace" (różny conditionKey), więc `replacements` zostaje pusty.
     expect(result.toWithdraw).toEqual(['prop_existing']);
+    expect(result.replacements.size).toBe(0);
     expect(result.toCreate).toEqual([deleteCond]);
     expect(result.skipped).toEqual([]);
+  });
+
+  it('capping symulowany przez wołającego: replacement, którego `cond` nie przetrwał capa, NIE jest stosowany (test kontraktu — realny cap żyje w NightlyService)', () => {
+    // reconcile() samo nie zna capa (pure, bez DB) — ten test dokumentuje kontrakt, na którym
+    // NightlyService buduje sparowany withdraw: `replacements` zwraca WSZYSTKIE pary niezależnie od
+    // capa, a to wołający filtruje je po tym, co przetrwało obcięcie `toCreate`.
+    const staleCond = condition({ affectedIds: ['mem_3', 'mem_4'] });
+    const staleExisting = existing({ id: 'prop_stale', affectedIds: ['mem_3', 'mem_4'], stale: true });
+
+    const result = reconcile([staleCond], [staleExisting]);
+    expect(result.replacements.get(staleCond.conditionKey)).toBe('prop_stale');
+
+    // Symulacja capa: `staleCond` zostaje ucięty (nie przetrwał do `finalToCreate`) -> wołający NIE
+    // powinien wyciągnąć jego pary z `replacements` do zastosowania w tym przebiegu.
+    const finalToCreate: typeof result.toCreate = [];
+    const pairedWithdraw = finalToCreate
+      .map((c) => result.replacements.get(c.conditionKey))
+      .filter((id): id is string => id !== undefined);
+    const allToWithdraw = [...result.toWithdraw, ...pairedWithdraw];
+
+    expect(pairedWithdraw).toEqual([]);
+    expect(allToWithdraw).toEqual([]); // stary "prop_stale" NIE jest wycofywany ten przebieg
   });
 });

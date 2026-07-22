@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, arrayOverlaps, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, arrayOverlaps, asc, desc, eq, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { computeContentHash } from '../common/content-hash';
 import { ToolError } from '../common/errors';
@@ -8,6 +8,7 @@ import { scanForSecrets } from '../common/secret-scanner';
 import { AppConfigService } from '../config/config.service';
 import { DB, type Database } from '../db/db.tokens';
 import { embeddings, memories, proposals, stagingEmbeddings, type MemoryRow } from '../db/schema';
+import { findAnnNeighbors } from '../embeddings/ann-search';
 import { EmbeddingService, toPgVectorLiteral } from '../embeddings/embedding.service';
 import type { ProjectContext } from '../projects/projects.service';
 import { classifyDedup } from './dedup';
@@ -261,7 +262,10 @@ export class MemoryService {
   /**
    * Ramię wektorowe (FR-R2, FR-R3, FR-R5): cosine ANN (`<=>`, HNSW) na `embeddings`, collapse
    * MIN(dystans) per `memory_id`, zawężone do aktywnego `embedding_model`. Ten sam
-   * scope/status/kind/tags predicate co ramię FTS.
+   * scope/status/kind/tags predicate co ramię FTS. Zapytanie ANN samo w sobie deleguje do
+   * współdzielonego `findAnnNeighbors` (`embeddings/ann-search.ts`, code review finding "reuse",
+   * commit d057871) — reużywanego też przez `NightlyService.findNeighborPairs` (dedup), tam z
+   * `scopeCondition` ŚCISŁYM zamiast permisywnej unii `global OR project` i `groupByMemory: false`.
    */
   private async vectorArm(
     qvec: number[],
@@ -270,30 +274,24 @@ export class MemoryService {
     tags: string[] | undefined,
     limit: number,
   ): Promise<string[]> {
-    const qvecLiteral = toPgVectorLiteral(qvec);
     const scopeCondition = or(
       eq(memories.scope, 'global'),
       and(eq(memories.scope, 'project'), eq(memories.projectId, ctx.projectId)),
     );
-    const conditions = [
-      eq(embeddings.embeddingModel, this.embedding.model),
-      eq(memories.status, 'approved'),
-      scopeCondition,
-      inArray(memories.kind, kinds),
-    ];
+    const extraConditions: SQL[] = [inArray(memories.kind, kinds)];
     if (tags && tags.length > 0) {
-      conditions.push(arrayOverlaps(memories.tags, tags));
+      extraConditions.push(arrayOverlaps(memories.tags, tags));
     }
 
-    const dist = sql<number>`min(${embeddings.vector} <=> ${qvecLiteral}::vector)`;
-    const rows = await this.db
-      .select({ memoryId: embeddings.memoryId, dist })
-      .from(embeddings)
-      .innerJoin(memories, eq(memories.id, embeddings.memoryId))
-      .where(and(...conditions))
-      .groupBy(embeddings.memoryId)
-      .orderBy(asc(dist))
-      .limit(limit);
+    const rows = await findAnnNeighbors({
+      db: this.db,
+      queryVector: qvec,
+      embeddingModel: this.embedding.model,
+      scopeCondition,
+      extraConditions,
+      groupByMemory: true, // FR-R3: MIN(dist) per memoryId — dokumenty mają wiele chunków
+      limit,
+    });
     return rows.map((r) => r.memoryId);
   }
 
