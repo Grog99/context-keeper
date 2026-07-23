@@ -3,11 +3,14 @@ import type { EmbeddingProvider } from './embedding-provider';
 const DEFAULT_TIMEOUT_MS = 8000;
 
 /**
- * Adapter zewnętrznego API embeddingów — kontrakt OpenAI `{input, model} -> data[].embedding`
- * (cel presetu `api`: `text-embedding-3-small`, 1536 wym.; Voyage i podobne API-compatible
- * providery pasują pod ten sam kształt). `apiKey` NIGDY nie trafia do logu ani treści błędu —
- * błędy HTTP niosą tylko status, błędy sieciowe tylko `err.message` (fetch nie wstrzykuje
- * nagłówków do komunikatu wyjątku).
+ * Adapter zewnętrznego API embeddingów — kontrakt OpenAI `{input, model, dimensions} ->
+ * data[].embedding` (cel presetu `api`: `text-embedding-3-small` skrócony do 1024 wym. przez
+ * parametr `dimensions` — model bazowo zwraca 1536, ale wspiera Matryoshka Representation
+ * Learning: obcięcie + renormalizacja wektora do żądanej długości bez utraty jakości na tyle
+ * dużej, żeby to bolało — dzięki temu pasuje pod fizyczną kolumnę `vector(1024)` bez migracji
+ * cross-dimension. Voyage i podobne API-compatible providery pasują pod ten sam kształt).
+ * `apiKey` NIGDY nie trafia do logu ani treści błędu — błędy HTTP niosą tylko status, błędy
+ * sieciowe tylko `err.message` (fetch nie wstrzykuje nagłówków do komunikatu wyjątku).
  */
 export class ApiEmbeddingProvider implements EmbeddingProvider {
   constructor(
@@ -26,7 +29,7 @@ export class ApiEmbeddingProvider implements EmbeddingProvider {
         'content-type': 'application/json',
         authorization: `Bearer ${this.apiKey}`,
       },
-      body: JSON.stringify({ input: texts, model: this.model }),
+      body: JSON.stringify({ input: texts, model: this.model, dimensions: this.dim }),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!res.ok) {

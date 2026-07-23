@@ -1,0 +1,103 @@
+# Context Keeper — przykład reverse proxy nginx dla wariantu "bring-your-own-proxy".
+# Pasuje do deploy/docker-compose.coolify-nginx.yml (host nginx za Pangolinem). Runbook:
+# docs/deploy-coolify-nginx.md. Odpowiednik infra/Caddyfile dla trybu A (bundled Caddy).
+#
+# Topologia:  internet → Pangolin (TLS + auth) → TEN nginx (host) → 127.0.0.1:app
+#
+# ── GDZIE CO WSTAWIĆ ─────────────────────────────────────────────────────────
+# Bloki `map` i `upstream` MUSZĄ być w kontekście `http { }` (główny /etc/nginx/nginx.conf).
+# Bloki `server` idą do /etc/nginx/conf.d/*.conf albo sites-available/ (są ładowane wewnątrz http).
+# Podmień `mcp.example.com` / `app.example.com` na swoje domeny i przeładuj: `nginx -t && nginx -s reload`.
+
+# ══════════════════════════════════════════════════════════════════════════════
+# http { }  ← te trzy bloki idą do głównego nginx.conf
+# ══════════════════════════════════════════════════════════════════════════════
+
+# WebSocket/SSE: ustaw nagłówek Connection zależnie od Upgrade.
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+# ZACHOWAJ X-Forwarded-* ustawione już przez Pangolin/Traefik (TLS terminuje się TAM).
+# Gdyby nginx nadpisał X-Forwarded-Proto wartością $scheme (=http, bo Traefik→nginx leci plain http),
+# aplikacja z `trust proxy` widziałaby http, NIE ustawiłaby Secure cookie i wpadła w pętlę logowania.
+map $http_x_forwarded_proto $fwd_proto {
+    default $scheme;
+    '~.+'   $http_x_forwarded_proto;
+}
+map $http_x_forwarded_host $fwd_host {
+    default $host;
+    '~.+'   $http_x_forwarded_host;
+}
+
+upstream ck_mcp { server 127.0.0.1:3000; }   # PORT_MCP        — /mcp* + /health*
+upstream ck_app { server 127.0.0.1:3001; }   # PORT_DASHBOARD  — SPA + /api/*
+
+# ══════════════════════════════════════════════════════════════════════════════
+# server { }  ← te bloki idą do conf.d/ (lub sites-available/)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Powierzchnia PUBLICZNA: MCP + /health (cel produktu — agenci łączą się tu) ──
+server {
+    listen 80;                      # TLS terminuje Pangolin/Traefik; ten nginx zostaje na http
+    server_name mcp.example.com;
+
+    location / {
+        proxy_pass http://ck_mcp;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $fwd_proto;
+        proxy_set_header X-Forwarded-Host  $fwd_host;
+
+        # MCP Streamable-HTTP / SSE — bez buforowania, HTTP/1.1, długie timeouty na strumień.
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_buffering off;
+        proxy_cache    off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+
+# ── Powierzchnia ADMIN: dashboard + /api (auth robi Pangolin PRZED tym nginx) ───
+# WAŻNE: ta domena MUSI być chroniona na Pangolinie (Badger SSO / access control).
+# nginx tu nie uwierzytelnia — zakłada, że Pangolin wpuścił tylko uprawniony ruch.
+server {
+    listen 80;
+    server_name app.example.com;
+
+    location / {
+        proxy_pass http://ck_app;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $fwd_proto;
+        proxy_set_header X-Forwarded-Host  $fwd_host;
+
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_buffering off;
+    }
+}
+
+# ── WARIANT ALTERNATYWNY: jedna domena, podział po ścieżce (jak infra/Caddyfile) ──
+# Zamiast dwóch domen powyżej — jeśli wolisz jeden host. Uwaga: wtedy trudniej nałożyć auth
+# Pangolina tylko na dashboard (musiałbyś użyć resource'ów per-ścieżka w Pangolinie), więc dla
+# ochrony admina rekomendowany jest wariant dwu-domenowy powyżej.
+#
+# server {
+#     listen 80;
+#     server_name ck.example.com;
+#     # /mcp* i /health* → 3000 (publiczne); reszta → 3001 (dashboard).
+#     location /mcp    { proxy_pass http://ck_mcp; include /etc/nginx/snippets/ck-proxy.conf; }
+#     location /health { proxy_pass http://ck_mcp; include /etc/nginx/snippets/ck-proxy.conf; }
+#     location /       { proxy_pass http://ck_app; include /etc/nginx/snippets/ck-proxy.conf; }
+#     # ck-proxy.conf = te same proxy_set_header + proxy_http_version 1.1 + proxy_buffering off
+#     # (proxy_set_header NIE dziedziczy się do location, który definiuje własne — dołącz w każdym).
+# }

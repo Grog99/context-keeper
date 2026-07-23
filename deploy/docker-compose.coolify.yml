@@ -1,0 +1,60 @@
+# Context Keeper — deploy na Coolify (BUILD Z REPO, nie GHCR).
+# Różnice vs docker-compose.yml:
+#   - brak serwisu `proxy`/profilu edge-proxy — Coolify ma własny reverse-proxy (80/443)
+#   - `expose:` zamiast `ports:` — nic nie publikujemy na hosta (Coolify routuje siecią dockerową)
+#   - TRUST_PROXY=true — Coolify terminuje TLS upstream (tryb B, §9)
+#   - dwie domeny dla dwóch portów jednego procesu (Coolify magic-env SERVICE_FQDN_APP_<port>)
+#   - EMBEDDING_PROVIDER=api — sekrety ustawiane w UI Coolify (bez defaultów w compose)
+#   - brak serwisu `migrate` — auto-migracja przy boot-cie appki (DB_AUTO_MIGRATE=true)
+name: context-keeper
+
+services:
+  db:
+    image: pgvector/pgvector:pg18-trixie
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ck}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-context_keeper}
+    volumes:
+      - pgdata:/var/lib/postgresql
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ck} -d ${POSTGRES_DB:-context_keeper}"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  app:
+    build:
+      # Kontekst = root monorepo. Plik leży w deploy/, więc `..`; Dockerfile jest relatywny do kontekstu.
+      context: ..
+      dockerfile: apps/server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER:-ck}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-context_keeper}
+      PORT_MCP: "3000"
+      PORT_DASHBOARD: "3001"
+      TRUST_PROXY: "true"
+      DB_AUTO_MIGRATE: "true"
+      # Dwie domeny (Coolify magic-env) dla jednego procesu, dwóch portów:
+      SERVICE_FQDN_APP_3000: ${SERVICE_FQDN_APP_3000}   # publiczny: /mcp + /health
+      SERVICE_FQDN_APP_3001: ${SERVICE_FQDN_APP_3001}   # admin: dashboard + /api
+      EMBEDDING_PROVIDER: "api"
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIM: "1024"
+      EMBEDDING_API_URL: ${EMBEDDING_API_URL}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY}
+      SESSION_SECRET: ${SESSION_SECRET}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+    expose:
+      - "3000"
+      - "3001"
+
+volumes:
+  pgdata:

@@ -208,7 +208,7 @@ set_embedding_trio() {
     api)
       OUT_EMBEDDING_PROVIDER=api
       OUT_EMBEDDING_MODEL=text-embedding-3-small
-      OUT_EMBEDDING_DIM=1536
+      OUT_EMBEDDING_DIM=1024
       ;;
     *)
       printf 'internal error: unknown embedding preset "%s"\n' "$1" >&2
@@ -351,7 +351,7 @@ if [ "$ENV_ACTION" = "regenerate" ]; then
   printf '\n2) Embedding preset:\n' >&2
   printf '   1 = multilingual (default, recommended) — local bge-m3, DIM=1024. Works end-to-end today.\n' >&2
   printf '   2 = english (lean) — local bge-small-en-v1.5, DIM=384. NOT fully wired end-to-end yet.\n' >&2
-  printf '   3 = api — OpenAI-compatible text-embedding-3-small, DIM=1536. NOT fully wired end-to-end yet.\n' >&2
+  printf '   3 = api — OpenAI-compatible text-embedding-3-small, DIM=1024 (Matryoshka via the dimensions param). Works end-to-end today.\n' >&2
   ask_choice 'Embedding preset' "$PRESET_DEFAULT" '1 2 3'
   case "$ANSWER" in
     1) EMBEDDING_PRESET=multilingual ;;
@@ -360,11 +360,11 @@ if [ "$ENV_ACTION" = "regenerate" ]; then
   esac
 
   case "$EMBEDDING_PRESET" in
-    english|api)
-      printf '\n[install] WARNING: the "%s" preset is not fully wired end-to-end yet — the DB vector\n' "$EMBEDDING_PRESET" >&2
-      printf '           column is a fixed vector(1024) and there is no cross-dimension migration yet\n' >&2
-      printf '           (see .env.example / env.ts). Only "multilingual" (DIM=1024) works end-to-end today.\n\n' >&2
-      if confirm "Proceed with the \"$EMBEDDING_PRESET\" preset anyway?" n; then
+    english)
+      printf '\n[install] WARNING: the "english" preset (DIM=384) is not fully wired end-to-end yet — the DB\n' >&2
+      printf '           vector column is a fixed vector(1024) and there is no cross-dimension migration yet\n' >&2
+      printf '           (see .env.example / env.ts). Use "multilingual" (local, 1024) or "api" (1024) instead.\n\n' >&2
+      if confirm "Proceed with the \"english\" preset anyway?" n; then
         :
       else
         printf '[install] Falling back to the "multilingual" preset.\n' >&2

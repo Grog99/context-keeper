@@ -47,13 +47,21 @@ jest blokowany ostrzeżeniem (wskazuje na CLI `reembed`).
 ```bash
 cp .env.example .env          # dostosuj sekrety (SESSION_SECRET, DASHBOARD_PASSWORD)
 docker compose up -d db       # Postgres + pgvector
-docker compose run --rm app node dist/db/migrate.js   # migracje (schema + pgvector + FTS/HNSW)
-docker compose up -d app      # serwer
+docker compose up -d app      # serwer — auto-migruje przy starcie (DB_AUTO_MIGRATE=true, domyślnie)
 curl localhost:3000/health    # -> {"status":"ok","db":"up"}
 
 # Pierwszy projekt + bearer token (token pokazywany RAZ):
 docker compose run --rm app node dist/cli.js create-project acme
 ```
+
+> Domyślnie (`DB_AUTO_MIGRATE=true`) `app` sam migruje bazę **in-process, przed nasłuchem** —
+> nie musisz odpalać osobnego kroku migracji, krok wyżej to celowo pominięty (skippable) case.
+> Jeśli ustawisz `DB_AUTO_MIGRATE=false` (migrujesz sam, np. chcesz kontrolować moment migracji
+> niezależnie od restartu appki), odpal migrację ręcznie PRZED `docker compose up -d app`:
+>
+> ```bash
+> docker compose run --rm app node dist/db/migrate.js   # migracje (schema + pgvector + FTS/HNSW)
+> ```
 
 > W kontenerze uruchamiamy `node dist/...` bezpośrednio — bez pośredniczącego procesu pnpm.
 > Skrót `pnpm cli <cmd>` też działa w kontenerze (woła to samo `dist/cli.js`), `node dist/cli.js` jest po prostu bardziej bezpośredni.
@@ -99,8 +107,14 @@ apps/server/           NestJS host (MCP + JSON API + bundle SPA)
   src/health/          /health
   src/cli/             komendy nest-commander
 infra/Caddyfile        bundled edge (tryb A)
+infra/nginx.conf.example  przykład reverse proxy nginx (bring-your-own-proxy / Pangolin)
 infra/backup.sh         pg_dump + retencja tiered + offsite (NFR-5, patrz "Backup / Restore")
 infra/restore.sh        restore dumpa do scratch DB + runbook promocji
+deploy/                warianty compose pod Coolify (PaaS, build z repo):
+  docker-compose.coolify.yml        pod wbudowany proxy Coolify — docs/deploy-coolify.md
+  docker-compose.coolify-nginx.yml  za własnym nginx + Pangolin — docs/deploy-coolify-nginx.md
+docs/deploy-coolify.md  runbook: Coolify (wbudowany proxy)
+docs/deploy-coolify-nginx.md  runbook: Coolify za nginx + Pangolin
 context/               specyfikacja (PRD, tech-stack, design system, roadmap)
 ```
 

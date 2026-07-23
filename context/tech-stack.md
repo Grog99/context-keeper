@@ -248,7 +248,7 @@ Trzy zwalidowane presety zamiast surowego knoba `EMBEDDING_MODEL` — każdy spi
 |---|---|---|---|---|---|
 | `multilingual` (**default**) | local (TEI) | bge-m3 | 1024 | ~8 GB | treść mieszana PL/EN — najbezpieczniejszy |
 | `english` (lean) | local (TEI) | bge-small-en-v1.5 / gte-small | 384 | ~4 GB | treść EN-only — szybszy, mniejszy indeks/HNSW |
-| `api` | api | OpenAI 3-small / Voyage | 1536 | ~2 GB | offload compute, kosztem egressu treści query |
+| `api` | api | OpenAI 3-small (przez param `dimensions`) / Voyage | 1024 | ~2 GB | offload compute, kosztem egressu treści query |
 
 - **Decyzja deploy-time, nie runtime-toggle ani per-request** (jak wyżej: różne modele = różny wymiar, nieporównywalna przestrzeń). Preset `english` to legalna optymalizacja dla treści pewnie angielskiej; dev-memory bywa jednak mieszane (identyfikatory, snippety) → `multilingual` zostaje domyślny, a hybrydowy FTS (`simple`, §6) łapie dokładne tokeny techniczne niezależnie od modelu.
 - **Zmiana presetu po zapisaniu danych = migracja re-embed**, nie edycja env: `ALTER` kolumny `vector` + przeliczenie wszystkich wektorów + rebuild HNSW. Wystawione jako **CLI `reembed`** (§9), żeby była to operacja wspierana, nie ręczny `ALTER`. Instalator (§9) odmawia cichej zmiany `EMBEDDING_DIM` pod istniejącymi danymi i kieruje na `reembed`.
@@ -316,6 +316,7 @@ Wektor liczony przy `save` (dla dedup) → `staging_embeddings` (powiązany z pr
   - **`TRUST_PROXY=true`** — `app` honoruje `X-Forwarded-Proto` (cookie sesji dalej `Secure`), `X-Forwarded-For` (realny IP do rate-limitera i audytu), poprawny scheme w redirectach. Najważniejszy szczegół trybu B.
   - **Rozdzielne porty `PORT_MCP` / `PORT_DASHBOARD`** — zewnętrzny proxy wystawia `/mcp` publicznie, dashboard trzyma wewnętrznie. Egzekwowanie „dashboard za VPN" przechodzi na edge operatora — kontrakt nazwany wprost (bez tego dashboard byłby publiczny).
   - **ACME off** — certy po stronie proxy operatora.
+  - Konkretny przykład tego trybu na Coolify (host nginx za Pangolinem): `infra/nginx.conf.example` + runbook `docs/deploy-coolify-nginx.md`.
 
 ### Instalator / onboarding
 
