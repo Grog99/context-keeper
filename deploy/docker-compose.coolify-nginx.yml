@@ -34,8 +34,11 @@ services:
 
   app:
     build:
-      # Kontekst = root monorepo. Plik leży w deploy/, więc `..`; Dockerfile jest relatywny do kontekstu.
-      context: ..
+      # Coolify uruchamia compose z `--project-directory <root repo>`, więc ścieżki względne
+      # (kontekst budowania) liczą się od ROOTA repo, a NIE od katalogu tego pliku (deploy/).
+      # Dlatego kontekst = `.` (root monorepo); `..` uciekłoby poza repo (błąd lstat /artifacts/apps).
+      # Dockerfile jest relatywny do kontekstu.
+      context: .
       dockerfile: apps/server/Dockerfile
     restart: unless-stopped
     depends_on:

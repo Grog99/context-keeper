@@ -14,8 +14,9 @@ na tej samej maszynie (np. **nginx za Pangolinem**) i nie używasz proxy Coolify
 2. Wskaż repo Context Keepera i branch do deployu.
 3. **Base Directory**: root repo. **Docker Compose Location**: `deploy/docker-compose.coolify.yml`
    (NIE domyślny `docker-compose.yml` — ten drugi ma `ports:`/profile `edge-proxy` myślane pod
-   bring-your-own-proxy, nie pod Coolify). Compose leży w `deploy/`, a jego `build.context: ..`
-   celuje w root monorepo — **Base Directory zostaw na root repo** (nie na `deploy/`).
+   bring-your-own-proxy, nie pod Coolify). Compose leży w `deploy/`, ale Coolify uruchamia go
+   z `--project-directory` = **Base Directory**, względem którego liczony jest `build.context: .`
+   — dlatego **Base Directory zostaw na root repo** (nie na `deploy/`).
 4. Coolify zbuduje obraz `app` z `apps/server/Dockerfile` (kontekst = root repo, tak jak w
    Compose) — pierwszy build może potrwać kilka minut (dashboard SPA + server w jednym multi-stage).
 
