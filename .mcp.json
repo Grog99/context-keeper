@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "context-keeper": {
+      "type": "http",
+      "url": "https://ck-mcp.dgolczewski.pl/mcp",
+      "headers": {
+        "Authorization": "Bearer ${CONTEXT_KEEPER_TOKEN}"
+      }
+    }
+  }
+}

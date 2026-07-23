@@ -85,6 +85,32 @@ pnpm dev                      # nest start --watch  (http://localhost:3000)
 pnpm --filter @context-keeper/server cli:dev create-project acme
 ```
 
+## Pamięć projektu (dogfooding)
+
+Repo używa **własnej wdrożonej instancji** jako trwałej pamięci projektu, wystawionej jako serwer
+MCP `context-keeper` (config w commitowanym [`.mcp.json`](.mcp.json)). Jak agenci mają z niej
+korzystać (proaktywne `search_memory`, human-gated `save_memory`, higiena zapisów) opisuje
+[`AGENTS.md`](AGENTS.md) — Claude Code zaciąga go przez [`CLAUDE.md`](CLAUDE.md) (`@AGENTS.md`).
+
+Żeby włączyć pamięć na swojej maszynie: `.mcp.json` jedzie z repo, ale token trzymasz lokalnie w
+zmiennej środowiskowej `CONTEXT_KEEPER_TOKEN` (nie ma go w repo):
+
+```powershell
+setx CONTEXT_KEEPER_TOKEN "ck_...twoj_klucz_z_dashboardu..."   # Windows (user env)
+```
+
+```bash
+export CONTEXT_KEEPER_TOKEN=ck_...                             # Linux/macOS: profil powłoki
+```
+
+Potem zrestartuj terminal i klienta MCP (np. Claude Code — żeby wczytał zmienną i `.mcp.json`) oraz
+zaakceptuj serwer `context-keeper` przy pierwszym uruchomieniu. Health jest publiczny (bez tokenu),
+więc endpoint zweryfikujesz od razu:
+
+```bash
+curl https://ck-mcp.dgolczewski.pl/health    # -> {"status":"ok","db":"up","embeddings":"up"}
+```
+
 ## Skrypty (root)
 
 | Skrypt | Rola |
