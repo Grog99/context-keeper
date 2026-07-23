@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, arrayOverlaps, asc, desc, eq, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { computeContentHash } from '../common/content-hash';
@@ -11,6 +11,7 @@ import { embeddings, memories, proposals, stagingEmbeddings, type MemoryRow } fr
 import { findAnnNeighbors } from '../embeddings/ann-search';
 import { EmbeddingService, toPgVectorLiteral } from '../embeddings/embedding.service';
 import type { ProjectContext } from '../projects/projects.service';
+import { UsageService } from '../usage/usage.service';
 import { classifyDedup } from './dedup';
 import type {
   GetMemoryResult,
@@ -36,11 +37,14 @@ const EXCERPT_MAX_LEN = 280;
  */
 @Injectable()
 export class MemoryService {
+  private readonly logger = new Logger(MemoryService.name);
+
   constructor(
     @Inject(DB) private readonly db: Database,
     private readonly config: AppConfigService,
     private readonly audit: AuditService,
     private readonly embedding: EmbeddingService,
+    private readonly usage: UsageService,
   ) {}
 
   /**
@@ -165,6 +169,10 @@ export class MemoryService {
    * do aktywnego modelu (FR-R5). Query-embed fail-open: provider down/timeout → pomijamy ramię
    * wektorowe, RRF degeneruje się do samej listy FTS (identyczne z zachowaniem sprzed Fazy 3).
    * "Dwufazowo" (§6.7) to istniejący split search(nagłówki)/get(body), NIE osobny re-rank pass.
+   *
+   * Instrumentacja (roadmap v1.1, "Pomiary", plan §5(e)): dokładnie JEDEN zapis `search_events`
+   * na wywołanie, przez wspólny tail (jeden punkt `return`, celowo — dawniej dwa return-y). Fail-open
+   * (`recordSearchSafe`) — awaria zapisu instrumentacji NIGDY nie zamienia dobrego wyniku w błąd.
    */
   async search(input: SearchMemoryInput, ctx: ProjectContext): Promise<SearchResultItem[]> {
     const query = input.query?.trim();
@@ -191,33 +199,53 @@ export class MemoryService {
       0,
       this.config.get('SEARCH_TOP_K'),
     );
-    if (fused.length === 0) return [];
 
-    const fusedIds = fused.map((f) => f.id);
-    const rows = await this.db
-      .select({ id: memories.id, header: memories.header, tags: memories.tags, kind: memories.kind })
-      .from(memories)
-      .where(inArray(memories.id, fusedIds));
-    const byId = new Map(rows.map((r) => [r.id, r]));
+    let results: SearchResultItem[] = [];
+    if (fused.length > 0) {
+      const fusedIds = fused.map((f) => f.id);
+      const rows = await this.db
+        .select({ id: memories.id, header: memories.header, tags: memories.tags, kind: memories.kind })
+        .from(memories)
+        .where(inArray(memories.id, fusedIds));
+      const byId = new Map(rows.map((r) => [r.id, r]));
 
-    // Excerpt tylko dla document (FR-M1) i tylko gdy mamy query-vector do wyboru najlepszego chunku
-    // (bez niego nie ma czym rankować chunków — pole zostaje po prostu nieobecne, additive).
-    const documentIds = fusedIds.filter((id) => byId.get(id)?.kind === 'document');
-    const excerpts = qvec ? await this.documentExcerpts(documentIds, qvec) : new Map<string, string>();
+      // Excerpt tylko dla document (FR-M1) i tylko gdy mamy query-vector do wyboru najlepszego chunku
+      // (bez niego nie ma czym rankować chunków — pole zostaje po prostu nieobecne, additive).
+      const documentIds = fusedIds.filter((id) => byId.get(id)?.kind === 'document');
+      const excerpts = qvec ? await this.documentExcerpts(documentIds, qvec) : new Map<string, string>();
 
-    return fused
-      .filter((f) => byId.has(f.id))
-      .map((f) => {
-        const row = byId.get(f.id)!;
-        const excerpt = excerpts.get(f.id);
-        return {
-          id: row.id,
-          header: row.header,
-          tags: row.tags,
-          score: f.score,
-          ...(excerpt !== undefined ? { excerpt } : {}),
-        };
-      });
+      results = fused
+        .filter((f) => byId.has(f.id))
+        .map((f) => {
+          const row = byId.get(f.id)!;
+          const excerpt = excerpts.get(f.id);
+          return {
+            id: row.id,
+            header: row.header,
+            tags: row.tags,
+            score: f.score,
+            ...(excerpt !== undefined ? { excerpt } : {}),
+          };
+        });
+    }
+
+    await this.recordSearchSafe(ctx.projectId, results.length, qvec === null);
+    return results;
+  }
+
+  /**
+   * Fail-open (plan §1b "Hot-path safety", §5(e)): instrumentacja NIGDY nie może zamienić dobrego
+   * `search()` w błąd — awaria insertu jest złapana i zalogowana, nie propagowana. `degraded` = brak
+   * query-vectora (embedding provider down/timeout) — patrz komentarz przy `search_events` w
+   * `db/schema/search-events.ts`.
+   */
+  private async recordSearchSafe(projectId: string, resultCount: number, degraded: boolean): Promise<void> {
+    try {
+      await this.usage.recordSearch({ projectId, resultCount, degraded });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`[usage] recordSearch nie powiódł się (fail-open, wynik search() nietknięty): ${message}`);
+    }
   }
 
   /** Ramię FTS (FR-R2): `plainto_tsquery('simple', …)` + `ts_rank`, zwraca id-y w kolejności rankingu. */

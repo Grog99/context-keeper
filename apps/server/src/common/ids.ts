@@ -25,4 +25,5 @@ export const ID_PREFIX = {
   project: 'proj',
   embedding: 'emb',
   audit: 'evt',
+  searchEvent: 'sev',
 } as const;

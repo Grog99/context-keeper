@@ -87,6 +87,11 @@ export interface NightlyCounters {
   /** Warunki pominięte przez `NIGHTLY_MAX_PROPOSALS_PER_RUN` (§5 pkt 6) — nie zgubione, tylko
    * odłożone: wykryte ponownie przy kolejnym stateless re-scanie. */
   skippedCap: number;
+  /** Wiersze `search_events` starsze niż `SEARCH_EVENTS_RETENTION_DAYS` usunięte w tym przebiegu
+   * (roadmap v1.1, "Pomiary" — retencja piggyback na nocnym jobie, plan §5(b/g)). Addytywne pole,
+   * jak `skippedPoliteness`/`skippedCap` powyżej — nie jest częścią oryginalnego kontraktu §2 planu
+   * Fazy 6. */
+  searchEventsPruned: number;
 }
 
 export interface NightlyRunResult {

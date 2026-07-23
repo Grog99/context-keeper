@@ -7,3 +7,4 @@ export * from './embeddings';
 export * from './proposals';
 export * from './revisions';
 export * from './audit-log';
+export * from './search-events';

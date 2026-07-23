@@ -16,8 +16,11 @@ services:
       # (dane lądują w podkatalogu wersji), NIE /var/lib/postgresql/data jak w ≤17.
       - pgdata:/var/lib/postgresql
     ports:
-      # Publikacja na hosta dla dev/migracji z hosta; w produkcji można usunąć.
-      - "${DB_PORT:-5432}:5432"
+      # Bind TYLKO do 127.0.0.1 (nie 0.0.0.0) — Postgres dostępny lokalnie dla dev/migracji z hosta,
+      # ale NIGDY nie wystawiony na publiczny interfejs (review bezpieczeństwa E1: default hasło ck/ck
+      # + publiczny 5432 = baza w internecie). W sieci compose `app` i tak łączy się po `db:5432`.
+      # W produkcji ustaw mocne POSTGRES_PASSWORD (.env) i rozważ całkowite usunięcie tej publikacji.
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ck} -d ${POSTGRES_DB:-context_keeper}"]
       interval: 5s
@@ -63,10 +66,13 @@ services:
       NIGHTLY_PRUNE_MAX_ACCESS: ${NIGHTLY_PRUNE_MAX_ACCESS:-0}
       NIGHTLY_MAX_PROPOSALS_PER_RUN: ${NIGHTLY_MAX_PROPOSALS_PER_RUN:-200}
     ports:
-      # Lewa strona = port na hoście (zmień PORT_MCP/PORT_DASHBOARD w .env gdy 3000/3001 zajęte);
-      # prawa strona = stały port procesu w kontenerze.
-      - "${PORT_MCP:-3000}:3000"
-      - "${PORT_DASHBOARD:-3001}:3001"
+      # Bind TYLKO do 127.0.0.1 (nie 0.0.0.0) — review bezpieczeństwa E2: w trybie `edge-proxy`
+      # Caddy sięga `app:3000/3001` po sieci compose (host-publish zbędny); w trybie bring-your-own-proxy
+      # host-owy nginx/reverse-proxy dobija do 127.0.0.1:3000/3001. Publikacja na 0.0.0.0 wystawiałaby
+      # dashboard/admin (3001) wprost na IP hosta, omijając model "admin za proxy/VPN".
+      # Lewa strona = port na hoście (zmień PORT_MCP/PORT_DASHBOARD w .env gdy 3000/3001 zajęte).
+      - "127.0.0.1:${PORT_MCP:-3000}:3000"
+      - "127.0.0.1:${PORT_DASHBOARD:-3001}:3001"
 
   # Sidecar lokalnych embeddingów (TEI/bge-m3). Startuje tylko przy profilu `local-embeddings`.
   # UWAGA: realne wpięcie app → embeddings dochodzi w Fazie 3; tu tylko scaffold.

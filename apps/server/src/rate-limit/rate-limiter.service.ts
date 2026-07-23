@@ -1,10 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { AppConfigService } from '../config/config.service';
-import { TokenBucket } from './token-bucket';
+import { sweepStaleBuckets, TokenBucket } from './token-bucket';
 
 export type RateLimitedTool = 'search_memory' | 'get_memory' | 'save_memory';
 
 export type ConsumeResult = { allowed: true } | { allowed: false; retryAfterSec: number };
+
+// Bucket per-minutowy jest w pełni dopełniony po 60s bezczynności → wtedy bezpieczny do usunięcia.
+const BUCKET_TTL_MS = 60_000;
+// Powyżej tylu wpisów robimy oportunistyczny sweep przy tworzeniu nowego bucketu (mapa jest
+// ograniczona liczbą aktywnych par projekt×narzędzie, ale bez sweepu nigdy nie malała — C2).
+const SWEEP_THRESHOLD = 10_000;
 
 /**
  * Rate limiting per token × narzędzie (§10 tech-stack, NFR-3). Token-bucket **in-memory**,
@@ -20,6 +26,7 @@ export class RateLimiterService {
     const key = `${projectId}:${tool}`;
     let bucket = this.buckets.get(key);
     if (!bucket) {
+      if (this.buckets.size >= SWEEP_THRESHOLD) sweepStaleBuckets(this.buckets, BUCKET_TTL_MS);
       const limitPerMin = this.limitFor(tool);
       bucket = new TokenBucket(limitPerMin, limitPerMin / 60_000);
       this.buckets.set(key, bucket);

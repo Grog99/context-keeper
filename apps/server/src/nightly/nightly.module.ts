@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { UsageModule } from '../usage/usage.module';
 import { NightlyService } from './nightly.service';
 import { PRUNE_SCORER } from './nightly.types';
 import { RecencyPruneScorer } from './prune-scorer';
@@ -11,7 +12,7 @@ import { RecencyPruneScorer } from './prune-scorer';
  * jawnie (tak samo jak w `MemoryModule`/`ProposalsModule`).
  */
 @Module({
-  imports: [AuditModule],
+  imports: [AuditModule, UsageModule],
   providers: [NightlyService, { provide: PRUNE_SCORER, useClass: RecencyPruneScorer }],
   exports: [NightlyService],
 })

@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
 import { json, urlencoded } from 'express';
+import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { AppConfigService } from './config/config.service';
@@ -43,6 +44,31 @@ async function bootstrap(): Promise<void> {
     app.set('trust proxy', true);
   }
 
+  // Nagłówki bezpieczeństwa (review bezpieczeństwa, E3). `x-powered-by` off — nie zdradzaj stacku.
+  // Helmet globalnie (nieszkodliwy dla JSON-owego /mcp; klienci MCP są nie-przeglądarkowi, więc
+  // nagłówki egzekwowane przez przeglądarkę są tam no-opem). CSP dostrojony pod zbudowaną SPA
+  // dashboardu: skrypt/styl z zewnętrznych, hashowanych assetów (`scriptSrc 'self'`), ale React/
+  // recharts ustawiają inline-style w DOM → `styleSrc 'unsafe-inline'`. Zero inline `<script>` w
+  // buildzie, więc `scriptSrc` bez `'unsafe-inline'`.
+  app.getHttpAdapter().getInstance().disable('x-powered-by');
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:'],
+          fontSrc: ["'self'", 'data:'],
+          connectSrc: ["'self'"],
+          objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+          frameAncestors: ["'none'"],
+        },
+      },
+    }),
+  );
+
   app.use('/api', json({ limit: DASHBOARD_JSON_LIMIT }));
   app.use('/api', urlencoded({ extended: true, limit: DASHBOARD_JSON_LIMIT }));
   app.use(json());
@@ -62,7 +88,10 @@ async function bootstrap(): Promise<void> {
   // Dwa porty, jeden Express instance (Faza 5 — §9 tech-stack): pozwala proxy publicznie
   // wystawić tylko /mcp, trzymając dashboard za VPN/CF Access.
   const expressInstance = app.getHttpAdapter().getInstance() as RequestListener;
-  const servers = await Promise.all([listen(expressInstance, portMcp), listen(expressInstance, portDashboard)]);
+  const servers = await Promise.all([
+    listen(expressInstance, portMcp),
+    listen(expressInstance, portDashboard),
+  ]);
 
   const closeAll = (): void => {
     for (const server of servers) server.close();
@@ -70,7 +99,12 @@ async function bootstrap(): Promise<void> {
   process.on('SIGTERM', closeAll);
   process.on('SIGINT', closeAll);
 
-  app.get(Logger).log(`Context Keeper listening on :${portMcp} (mcp) i :${portDashboard} (dashboard)`, 'Bootstrap');
+  app
+    .get(Logger)
+    .log(
+      `Context Keeper listening on :${portMcp} (mcp) i :${portDashboard} (dashboard)`,
+      'Bootstrap',
+    );
 }
 
 bootstrap().catch((err) => {

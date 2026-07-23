@@ -28,6 +28,7 @@ import { RecencyPruneScorer } from '../src/nightly/prune-scorer';
 import type { ProjectContext } from '../src/projects/projects.service';
 import { ProjectsService } from '../src/projects/projects.service';
 import { ProposalsService } from '../src/proposals/proposals.service';
+import { UsageService } from '../src/usage/usage.service';
 
 /** Jak w `proposals.integration.spec.ts` — testcontainers nie odpala prawdziwego sidecara TEI.
  * Nightly nigdy nie woła `embed()` podczas detekcji (czyta wektory z `embeddings` bezpośrednio) —
@@ -88,7 +89,15 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
       envSchema.parse({ DATABASE_URL: 'postgres://unused', ...envOverrides }),
     );
     const embeddingService = new EmbeddingService(new StubEmbeddingProvider(ACTIVE_MODEL), config);
-    const nightly = new NightlyService(db, pool, config, audit, embeddingService, new RecencyPruneScorer());
+    const nightly = new NightlyService(
+      db,
+      pool,
+      config,
+      audit,
+      embeddingService,
+      new RecencyPruneScorer(),
+      new UsageService(db),
+    );
     const proposalsService = new ProposalsService(db, config, audit, embeddingService);
     return { config, nightly, proposalsService };
   }
@@ -205,6 +214,7 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
         pruneProposed: 0,
         skippedPoliteness: 0,
         skippedCap: 0,
+        searchEventsPruned: 0,
       });
 
       const proposalRow = await findNightlyProposal('merge', [factA.id, factB.id]);
@@ -237,6 +247,7 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
         pruneProposed: 0,
         skippedPoliteness: 0,
         skippedCap: 0,
+        searchEventsPruned: 0,
       });
     });
 
@@ -392,6 +403,7 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
           pruneProposed: 0,
           skippedPoliteness: 0,
           skippedCap: 0,
+          searchEventsPruned: 0,
         });
 
         const auditRow = await audit.latestByEventType('nightly_run');
