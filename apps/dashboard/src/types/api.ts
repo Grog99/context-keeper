@@ -131,6 +131,9 @@ export interface DashboardLimits {
   bodyMaxDocument: number;
   tagsMax: number;
   tagMaxLen: number;
+  /** Ekran "Onboarding" (roadmap v1.2) — publiczny origin `/mcp`, `null` gdy operator nie
+   * skonfigurował ani `PUBLIC_MCP_URL`, ani `ACME_DOMAIN`. */
+  mcpPublicUrl: string | null;
 }
 
 /** Ekran "Pomiary" (roadmap v1.1) — lustro `UsageMetricsDto`

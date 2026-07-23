@@ -11,6 +11,9 @@ export interface DashboardLimits {
   bodyMaxDocument: number;
   tagsMax: number;
   tagMaxLen: number;
+  /** Publiczny origin powierzchni `/mcp` (bez ścieżki), do snippetu ekranu "Onboarding" (roadmap
+   * v1.2) — `null` gdy operator nie skonfigurował ani `PUBLIC_MCP_URL`, ani `ACME_DOMAIN`. */
+  mcpPublicUrl: string | null;
 }
 
 /**
@@ -33,6 +36,17 @@ export class ConfigController {
       bodyMaxDocument: this.config.get('BODY_MAX_DOCUMENT'),
       tagsMax: this.config.get('TAGS_MAX'),
       tagMaxLen: this.config.get('TAG_MAX_LEN'),
+      mcpPublicUrl: this.resolveMcpPublicUrl(),
     };
+  }
+
+  /** Roadmap v1.2 (ekran "Onboarding") — `PUBLIC_MCP_URL` (już znormalizowany w `env.ts`) ma
+   * pierwszeństwo; inaczej `ACME_DOMAIN` (tylko tryb A, bundled Caddy); inaczej `null` — frontend
+   * wtedy renderuje placeholder `https://<your-mcp-host>` + polską notatkę. */
+  private resolveMcpPublicUrl(): string | null {
+    const explicit = this.config.get('PUBLIC_MCP_URL');
+    if (explicit) return explicit;
+    const acmeDomain = this.config.get('ACME_DOMAIN');
+    return acmeDomain ? `https://${acmeDomain}` : null;
   }
 }

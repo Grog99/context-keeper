@@ -141,6 +141,18 @@ export const envSchema = z
     COMPOSE_PROFILES: z.string().optional(),
     ACME_DOMAIN: z.string().optional(),
     ACME_EMAIL: z.string().optional(),
+    // Kanoniczny publiczny origin powierzchni `/mcp` (bez ścieżki) — używany WYŁĄCZNIE do
+    // renderowania snippetu ekranu "Onboarding" (roadmap v1.2, `ConfigController`), nie do
+    // routingu appki (ta sama plain-HTTP zasada co PORT_MCP — publiczny host konfiguruje się
+    // na proxy/Coolify, §9). Nieustawione -> `ConfigController` spada na `ACME_DOMAIN` (tylko
+    // tryb A, bundled Caddy), a bez niego zwraca `null` (frontend renderuje placeholder).
+    // Trailing `/` i trailing `/mcp` są tu przycinane, żeby frontend mógł bezpiecznie doklejać
+    // `/mcp`/`/health` bez ryzyka `//mcp` albo `/mcp/mcp`.
+    PUBLIC_MCP_URL: z
+      .string()
+      .url()
+      .optional()
+      .transform((v) => v?.replace(/\/+$/, '').replace(/\/mcp$/, '')),
   })
   .superRefine((env, ctx) => {
     if (env.EMBEDDING_PROVIDER === 'api' && !env.EMBEDDING_API_KEY) {
