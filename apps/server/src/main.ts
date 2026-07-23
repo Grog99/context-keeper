@@ -7,6 +7,7 @@ import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { AppConfigService } from './config/config.service';
 import { createSurfaceMiddleware } from './dashboard/surface.middleware';
+import { runMigrations } from './db/migrate';
 
 // Body dashboardu (dokumenty do ~256 KB) potrzebuje wyższego limitu niż domyślny express.json();
 // skopowany tylko do /api, żeby nie poluzować limitu na /mcp.
@@ -30,6 +31,12 @@ async function bootstrap(): Promise<void> {
   app.useLogger(app.get(Logger));
 
   const config = app.get(AppConfigService);
+
+  // Auto-migracja in-process PRZED nasłuchem (§A). Błąd migracji = twardy fail boot-u
+  // (nie startujemy serwera na wpół-zmigrowanej bazie). Advisory-lock w runMigrations serializuje repliki.
+  if (config.get('DB_AUTO_MIGRATE')) {
+    await runMigrations(config.get('DATABASE_URL'));
+  }
 
   // Tryb B (bring-your-own-proxy): honoruj X-Forwarded-* (Secure cookie, realny IP, scheme) — §9.
   if (config.get('TRUST_PROXY')) {
@@ -66,4 +73,7 @@ async function bootstrap(): Promise<void> {
   app.get(Logger).log(`Context Keeper listening on :${portMcp} (mcp) i :${portDashboard} (dashboard)`, 'Bootstrap');
 }
 
-void bootstrap();
+bootstrap().catch((err) => {
+  console.error('[bootstrap] fatal:', err);
+  process.exit(1);
+});

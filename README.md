@@ -47,13 +47,21 @@ jest blokowany ostrzeżeniem (wskazuje na CLI `reembed`).
 ```bash
 cp .env.example .env          # dostosuj sekrety (SESSION_SECRET, DASHBOARD_PASSWORD)
 docker compose up -d db       # Postgres + pgvector
-docker compose run --rm app node dist/db/migrate.js   # migracje (schema + pgvector + FTS/HNSW)
-docker compose up -d app      # serwer
+docker compose up -d app      # serwer — auto-migruje przy starcie (DB_AUTO_MIGRATE=true, domyślnie)
 curl localhost:3000/health    # -> {"status":"ok","db":"up"}
 
 # Pierwszy projekt + bearer token (token pokazywany RAZ):
 docker compose run --rm app node dist/cli.js create-project acme
 ```
+
+> Domyślnie (`DB_AUTO_MIGRATE=true`) `app` sam migruje bazę **in-process, przed nasłuchem** —
+> nie musisz odpalać osobnego kroku migracji, krok wyżej to celowo pominięty (skippable) case.
+> Jeśli ustawisz `DB_AUTO_MIGRATE=false` (migrujesz sam, np. chcesz kontrolować moment migracji
+> niezależnie od restartu appki), odpal migrację ręcznie PRZED `docker compose up -d app`:
+>
+> ```bash
+> docker compose run --rm app node dist/db/migrate.js   # migracje (schema + pgvector + FTS/HNSW)
+> ```
 
 > W kontenerze uruchamiamy `node dist/...` bezpośrednio — bez pośredniczącego procesu pnpm.
 > Skrót `pnpm cli <cmd>` też działa w kontenerze (woła to samo `dist/cli.js`), `node dist/cli.js` jest po prostu bardziej bezpośredni.
@@ -101,6 +109,8 @@ apps/server/           NestJS host (MCP + JSON API + bundle SPA)
 infra/Caddyfile        bundled edge (tryb A)
 infra/backup.sh         pg_dump + retencja tiered + offsite (NFR-5, patrz "Backup / Restore")
 infra/restore.sh        restore dumpa do scratch DB + runbook promocji
+docker-compose.coolify.yml  deploy na Coolify (PaaS, build z repo) — patrz docs/deploy-coolify.md
+docs/deploy-coolify.md  runbook: deploy na Coolify
 context/               specyfikacja (PRD, tech-stack, design system, roadmap)
 ```
 

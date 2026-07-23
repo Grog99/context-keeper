@@ -208,7 +208,7 @@ set_embedding_trio() {
     api)
       OUT_EMBEDDING_PROVIDER=api
       OUT_EMBEDDING_MODEL=text-embedding-3-small
-      OUT_EMBEDDING_DIM=1536
+      OUT_EMBEDDING_DIM=1024
       ;;
     *)
       printf 'internal error: unknown embedding preset "%s"\n' "$1" >&2

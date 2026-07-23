@@ -2,27 +2,34 @@ import { existsSync } from 'node:fs';
 import { z } from 'zod';
 
 /**
- * Boolean z env: pusty/undefined -> false; "1"/"true"/"yes"/"on" -> true.
- * (z.coerce.boolean() traktuje "false" jako true — dlatego własny preprocess.)
+ * Fabryka boolean z env: pusty/undefined/null -> `defaultValue`; "1"/"true"/"yes"/"on" -> true;
+ * inny string -> false. (z.coerce.boolean() traktuje "false" jako true — dlatego własny preprocess.)
+ * Fabryka (nie stały schemat) bo preprocess koerciuje undefined->false SAM, zanim jakikolwiek
+ * `.default()` na zewnątrz zdąży zadziałać — jedyny sposób na non-false default to wpiąć go
+ * w sam preprocess.
  */
-const zBool = z.preprocess((v) => {
-  if (v === undefined || v === null) return false;
-  if (typeof v === 'boolean') return v;
-  if (typeof v === 'string') return ['1', 'true', 'yes', 'on'].includes(v.trim().toLowerCase());
-  return Boolean(v);
-}, z.boolean());
+function zBool(defaultValue = false) {
+  return z.preprocess((v) => {
+    if (v === undefined || v === null || v === '') return defaultValue;
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'string') return ['1', 'true', 'yes', 'on'].includes(v.trim().toLowerCase());
+    return Boolean(v);
+  }, z.boolean());
+}
 
 /**
  * Trójka implikowana przez preset (§7 tech-stack) — PRESET jest tylko wygodą instalatora,
  * PROVIDER/MODEL/DIM zostają autorytatywne (walidacja w superRefine niżej).
- * `english`/`api` implikują wymiar inny niż fizyczna kolumna `vector(1024)` (Faza 3 nie robi
- * cross-dimension migracji — patrz decyzja w planie Fazy 3) — dozwolone do skonfigurowania na
- * poziomie env/interfejsu providera, ale realny re-embed pod nimi czeka na tę migrację.
+ * `api` celuje w DIM=1024 (Matryoshka — `text-embedding-3-*` zwraca skrócony/renormalizowany
+ * wektor przez parametr `dimensions`, patrz `api.provider.ts`), więc pasuje pod fizyczną kolumnę
+ * `vector(1024)` bez migracji. `english` (DIM=384) NADAL implikuje wymiar inny niż kolumna — Faza 3
+ * nie robi cross-dimension migracji (ALTER COLUMN + rebuild HNSW) — dozwolone do skonfigurowania,
+ * ale realny re-embed pod nim czeka na tę migrację.
  */
 const EMBEDDING_PRESET_TRIO = {
   multilingual: { provider: 'local', model: 'bge-m3', dim: 1024 },
   english: { provider: 'local', model: 'bge-small-en-v1.5', dim: 384 },
-  api: { provider: 'api', model: 'text-embedding-3-small', dim: 1536 },
+  api: { provider: 'api', model: 'text-embedding-3-small', dim: 1024 },
 } as const;
 
 /**
@@ -37,10 +44,12 @@ export const envSchema = z
     PORT_MCP: z.coerce.number().int().positive().default(3000),
     PORT_DASHBOARD: z.coerce.number().int().positive().default(3001),
     // true gdy TLS terminowany upstream (tryb B) — honoruj X-Forwarded-* (§9).
-    TRUST_PROXY: zBool,
+    TRUST_PROXY: zBool(),
 
     // Baza
     DATABASE_URL: z.string().min(1, 'DATABASE_URL jest wymagany'),
+    // Auto-migracja przy starcie appki (in-process, przed nasłuchem) — §A. Default TRUE.
+    DB_AUTO_MIGRATE: zBool(true),
 
     // Embeddingi — provider + preset (Faza 3). Trójka PROVIDER+MODEL+DIM jest autorytatywna;
     // PRESET to tylko wygoda instalatora (§7 tech-stack) — walidowana przeciw trójce w superRefine.
@@ -138,6 +147,15 @@ export const envSchema = z
         code: 'custom',
         path: ['EMBEDDING_API_URL'],
         message: 'EMBEDDING_API_URL jest wymagany gdy EMBEDDING_PROVIDER=api',
+      });
+    }
+    if (env.EMBEDDING_PROVIDER === 'api' && env.EMBEDDING_DIM !== 1024) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['EMBEDDING_DIM'],
+        message:
+          'EMBEDDING_DIM musi być 1024 dla EMBEDDING_PROVIDER=api — kolumna wektorowa jest na sztywno ' +
+          'vector(1024); text-embedding-3-* zwraca skrócony/renormalizowany wektor przez parametr `dimensions`.',
       });
     }
     if (env.EMBEDDING_PRESET) {
