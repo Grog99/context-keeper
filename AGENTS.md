@@ -27,16 +27,7 @@ Narzędzia: `mcp__context-keeper__search_memory`, `get_memory`, `save_memory`.
 - **Nigdy sekretów** (klucze, hasła, tokeny) w treści — serwer odrzuca je jako `secret_blocked`.
   Odnoś się do sekretu po nazwie/przeznaczeniu, nie po wartości.
 
-## Setup na nowym urządzeniu
+---
 
-`.mcp.json` jedzie z repo, ale token musisz podać lokalnie (nie ma go w repo — leży w zmiennej
-środowiskowej `CONTEXT_KEEPER_TOKEN`):
-
-```powershell
-setx CONTEXT_KEEPER_TOKEN "ck_...twoj_klucz_z_dashboardu..."
-```
-
-Potem zrestartuj terminal i Claude Code (żeby wczytał zmienną i `.mcp.json`) oraz zaakceptuj serwer
-`context-keeper` przy pierwszym uruchomieniu. Endpoint: `https://ck-mcp.dgolczewski.pl/mcp`
-(health, publiczny: `https://ck-mcp.dgolczewski.pl/health`). Na Linux/macOS ustaw zmienną w profilu
-powłoki (`export CONTEXT_KEEPER_TOKEN=...`).
+> **Setup połączenia** (token w zmiennej `CONTEXT_KEEPER_TOKEN`, restart, akceptacja serwera) —
+> to czynności dla człowieka, opisane w [`README.md`](README.md), sekcja „Pamięć projektu (dogfooding)".
