@@ -10,8 +10,10 @@ import {
   type MemoryListItem,
   type WithWarnings,
 } from '../memory/memory-admin.service';
+import { PurgeService, type PurgePreview, type PurgeResult } from '../purge/purge.service';
 import { CsrfGuard } from './auth/csrf.guard';
 import { SessionGuard } from './auth/session.guard';
+import { DASHBOARD_ACTOR } from './dashboard.constants';
 import { DashboardErrorFilter } from './dashboard-error.filter';
 
 function toStringArray(value: string | string[] | undefined): string[] | undefined {
@@ -22,12 +24,17 @@ function toStringArray(value: string | string[] | undefined): string[] | undefin
 /**
  * FR-D2 Przeglądarka pamięci + FR-D5 Human-create, na `MemoryAdminService` (§Ryzyka planu — NIE
  * `MemoryService.get()`, żeby nigdy nie bumpować `access_count`/`last_accessed_at` z przeglądarki).
+ * Od roadmap v1.1 dokłada też hard-purge (`:id/purge-preview`/`:id/purge`) — cienki wrapper nad
+ * `PurgeService`, ta sama logika co CLI `purge` (§Guiding principle planu dashboard-nightly-purge).
  */
 @Controller('api/memories')
 @UseGuards(SessionGuard, CsrfGuard)
 @UseFilters(DashboardErrorFilter)
 export class MemoriesController {
-  constructor(private readonly memoryAdmin: MemoryAdminService) {}
+  constructor(
+    private readonly memoryAdmin: MemoryAdminService,
+    private readonly purgeService: PurgeService,
+  ) {}
 
   @Get()
   async list(
@@ -89,5 +96,19 @@ export class MemoriesController {
   async promote(@Param('id') id: string): Promise<{ ok: true }> {
     await this.memoryAdmin.promoteToGlobal(id);
     return { ok: true };
+  }
+
+  /** Read-only dry-run (roadmap v1.1) — skala hard-purge PRZED potwierdzeniem, jak `purge` CLI bez
+   * `--confirm`. `PurgeService.preview()` sam rzuca `PurgeError('not_found')`, gdy id nie istnieje. */
+  @Get(':id/purge-preview')
+  async purgePreview(@Param('id') id: string): Promise<PurgePreview> {
+    return this.purgeService.preview(id);
+  }
+
+  /** Wymaga `reason` (§Resolved design decisions planu — CLI parity, bez typed-id confirmation).
+   * `PurgeService.purge()` waliduje pusty `reason` sam (`validation_error`) — nie duplikujemy tu. */
+  @Post(':id/purge')
+  async purge(@Param('id') id: string, @Body() body: { reason: string }): Promise<PurgeResult> {
+    return this.purgeService.purge(id, { reason: body?.reason ?? '', actor: DASHBOARD_ACTOR });
   }
 }

@@ -6,10 +6,13 @@ import { PRUNE_SCORER } from './nightly.types';
 import { RecencyPruneScorer } from './prune-scorer';
 
 /**
- * Rejestrowany WYŁĄCZNIE w `CliModule` (plan Fazy 6 §1 "Overall shape") — nocny job to standalone
- * `nest-commander` context, nigdy część `AppModule`/procesu HTTP. `DB`, `PG_POOL`, `EmbeddingService`,
- * `AppConfigService` przychodzą z globalnych modułów — tylko `AuditModule` trzeba zaimportować
- * jawnie (tak samo jak w `MemoryModule`/`ProposalsModule`).
+ * Rejestrowany w `CliModule` (plan Fazy 6 §1 "Overall shape", standalone `nest-commander` context)
+ * ORAZ od roadmap v1.1 w `DashboardModule` (ręczny trigger z ekranu "Operacje", `NightlyController`,
+ * `POST /api/nightly/run`). Import modułu tylko rejestruje providery — `NightlyService.run()`
+ * startuje wyłącznie na explicit wywołanie (CLI `run-nightly` albo ten endpoint), nigdy sam z siebie
+ * przy starcie procesu HTTP. `DB`, `PG_POOL`, `EmbeddingService`, `AppConfigService` przychodzą z
+ * globalnych modułów — tylko `AuditModule` trzeba zaimportować jawnie (tak samo jak w
+ * `MemoryModule`/`ProposalsModule`).
  */
 @Module({
   imports: [AuditModule, UsageModule],

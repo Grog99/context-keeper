@@ -65,8 +65,11 @@ wynik tej fazy decyduje, czy plugin Claude Code jest potrzebny (patrz backlog).
   w czasie, searche z **0 wyników** (rate), stosunek accept/reject/edit propozycji. Nowa tabela
   `search_events` (zapis fail-open w `search()`), endpoint `GET /api/metrics/usage`, wykresy recharts.
   Warstwa, na której podejmiemy decyzję o pluginie na danych, nie na oko.
-- **Dashboard: ręczny trigger nocnego jobu + hard-purge** — wystawienie w UI istniejących CLI
-  `run-nightly` i `purge` (mała robota, domyka pozycje przesunięte z v1).
+- **Dashboard: ręczny trigger nocnego jobu + hard-purge** ✅ — ekran „Operacje" (`/operacje`) z ręcznym
+  triggerem nocnego joba (`POST /api/nightly/run`, wynik jako toast z licznikami) + hard-purge jako akcja
+  per-pamięć w przeglądarce (`GET :id/purge-preview` + `POST :id/purge`, AlertDialog z podglądem skali
+  i wymaganym powodem). Cienkie wrappery nad istniejącymi serwisami CLI `run-nightly`/`purge` — te same
+  gwarancje, guardy kontroler-scoped, `PurgeError` mapowany w filtrze.
 - **Review bezpieczeństwa publicznego MCP** ✅ — pass utwardzający po token-gated endpoincie. Auth,
   scope/IDOR i redakcja tokenu potwierdzone bez dziur; wdrożone utwardzenia: throttle **pre-auth
   per-IP** na `/mcp` przed `BearerGuard` (`RATE_LIMIT_MCP_IP_PER_MIN`), `helmet` + CSP + `x-powered-by`

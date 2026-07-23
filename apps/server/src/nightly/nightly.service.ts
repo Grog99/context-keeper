@@ -72,10 +72,10 @@ const NEIGHBOR_SCAN_CONCURRENCY = 10;
  * Nocny job — proposer, NIE executor (plan Fazy 6 §1 "Overall shape"). Jedyny producent proposali
  * `origin='nightly'` (`type` ograniczony do merge/delete); NIGDY nie woła `ProposalsService.approve()`
  * i nigdy nie pisze do `memories`/`embeddings` — wyłącznie do `proposals`/`staging_embeddings`/
- * `audit_log`. Uruchamiany WYŁĄCZNIE przez CLI `run-nightly` (standalone context — `NightlyModule`
- * nie jest wpięty w `AppModule`, żeby przypadkiem nie ożył w procesie HTTP). Scheduling
- * (`NIGHTLY_CRON`/`NIGHTLY_TZ`) to kontrakt dla zewnętrznego schedulera (Faza 8) — ten serwis go
- * nie konsumuje.
+ * `audit_log`. Uruchamiany przez CLI `run-nightly` ALBO ręcznie z dashboardu (roadmap v1.1, ekran
+ * "Operacje" → `POST /api/nightly/run`, `NightlyController`) — oba wejścia wołają dokładnie ten sam
+ * `run()`, więc CLI/UI parity jest strukturalna. Scheduling (`NIGHTLY_CRON`/`NIGHTLY_TZ`) to kontrakt
+ * dla zewnętrznego schedulera (Faza 8) — ten serwis go nie konsumuje.
  *
  * `run()` jest bezstanowe (stateless self-cleaning re-scan, plan §1): każdy przebieg wykrywa
  * warunki OD ZERA z aktualnego stanu `memories`, porównuje z pending `origin='nightly'` proposalami

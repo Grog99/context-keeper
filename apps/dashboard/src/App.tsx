@@ -11,6 +11,7 @@ import { AuditScreen } from './screens/AuditScreen';
 import { DevPreviewScreen } from './screens/DevPreviewScreen';
 import { LoginScreen } from './screens/LoginScreen';
 import { MemoryBrowserScreen } from './screens/MemoryBrowserScreen';
+import { OperacjeScreen } from './screens/OperacjeScreen';
 import { PomiaryScreen } from './screens/PomiaryScreen';
 import { ProjectsScreen } from './screens/ProjectsScreen';
 import { QueueScreen } from './screens/QueueScreen';
@@ -41,6 +42,7 @@ function Gate() {
         <Route path="/projekty" element={<ProjectsScreen />} />
         <Route path="/audyt" element={<AuditScreen />} />
         <Route path="/pomiary" element={<PomiaryScreen />} />
+        <Route path="/operacje" element={<OperacjeScreen />} />
         <Route path="*" element={<Navigate to="/kolejka" replace />} />
       </Route>
     </Routes>

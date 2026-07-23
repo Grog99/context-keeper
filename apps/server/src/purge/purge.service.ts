@@ -57,8 +57,10 @@ function redactPayloadContent(raw: unknown): unknown {
 
 /**
  * Hard-purge (FR-S3, §10 tech-stack) — uprzywilejowana, rzadka, NIEODWRACALNA remediacja dla
- * treści, które soft-delete (`archived`, NFR-6) nie umie usunąć: wycieki sekretów/PII. Wyłącznie
- * CLI (`cli/purge.command.ts`) — nigdy MCP, nigdy dashboard (v1.1 wg roadmapy).
+ * treści, które soft-delete (`archived`, NFR-6) nie umie usunąć: wycieki sekretów/PII. Wywoływana
+ * z CLI (`cli/purge.command.ts`) albo od roadmap v1.1 z dashboardu (`MemoriesController`,
+ * `PurgeMemoryDialog`) — NIGDY przez MCP: `preview()`/`purge()` żyją wyłącznie za
+ * `SessionGuard`/`CsrfGuard` kontroler-scoped na powierzchni dashboardu, nie za publicznym `/mcp`.
  *
  * Nie łamie zasady soft-delete — jeździ NA archive'owaniu (status='purged', budowany na tej samej
  * mechanice co `ProposalsService.archiveMemory`/`MemoryAdminService.archiveMemory`), tylko

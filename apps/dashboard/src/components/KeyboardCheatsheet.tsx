@@ -7,6 +7,7 @@ const GLOBAL_SHORTCUTS: [string, string][] = [
   ['g p', 'Idź do: Pamięć'],
   ['g t', 'Idź do: Projekty'],
   ['g a', 'Idź do: Audyt'],
+  ['g o', 'Idź do: Operacje'],
   ['?', 'Ta ściągawka'],
 ];
 

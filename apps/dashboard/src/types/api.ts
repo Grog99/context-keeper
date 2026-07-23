@@ -170,3 +170,44 @@ export interface UsageMetrics {
     totals: { approved: number; rejected: number; approvedWithEdits: number };
   };
 }
+
+/** Ekran "Operacje" (roadmap v1.1) — lustro `NightlyCounters`/`NightlyRunResult`
+ * (`apps/server/src/nightly/nightly.types.ts`). */
+export interface NightlyCounters {
+  created: number;
+  withdrawn: number;
+  skippedAsDup: number;
+  mergeProposed: number;
+  pruneProposed: number;
+  skippedPoliteness: number;
+  skippedCap: number;
+  /** Wiersze `search_events` usunięte retencją, piggyback na tym samym przebiegu (roadmap v1.1
+   * "Pomiary"). */
+  searchEventsPruned: number;
+}
+
+export interface NightlyRunResult {
+  status: 'success' | 'failed' | 'skipped-locked';
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  counters: NightlyCounters;
+}
+
+/** Hard-purge (roadmap v1.1) — lustro `PurgePreview`/`PurgeResult` (`apps/server/src/purge/purge.service.ts`). */
+export interface PurgePreview {
+  id: string;
+  status: MemoryStatus;
+  header: string;
+  embeddingsCount: number;
+  relatedProposalsCount: number;
+  revisionsWithContentCount: number;
+}
+
+export interface PurgeResult {
+  id: string;
+  embeddingsDeleted: number;
+  stagingEmbeddingsDeleted: number;
+  proposalsRedacted: number;
+  revisionsRedacted: number;
+}
