@@ -63,6 +63,8 @@ services:
       NIGHTLY_PRUNE_MAX_ACCESS: ${NIGHTLY_PRUNE_MAX_ACCESS:-0}
       NIGHTLY_MAX_PROPOSALS_PER_RUN: ${NIGHTLY_MAX_PROPOSALS_PER_RUN:-200}
     ports:
+      # Lewa strona = port na hoście (zmień PORT_MCP/PORT_DASHBOARD w .env gdy 3000/3001 zajęte);
+      # prawa strona = stały port procesu w kontenerze.
       - "${PORT_MCP:-3000}:3000"
       - "${PORT_DASHBOARD:-3001}:3001"
 
@@ -85,9 +87,11 @@ services:
     depends_on:
       - app
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+      # Porty na hoście — zmień HTTP_PORT/HTTPS_PORT w .env gdy 80/443 są zajęte
+      # (np. inny reverse-proxy już nasłuchuje). Prawa strona = port w kontenerze (stały).
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
     environment:
       # Pusty ACME_DOMAIN -> lokalny fallback ":80" (HTTP). Domena -> auto-HTTPS (Let's Encrypt).
       ACME_DOMAIN: ${ACME_DOMAIN:-:80}
