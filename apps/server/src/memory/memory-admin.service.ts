@@ -10,7 +10,7 @@ import { DB, type Database, type Tx } from '../db/db.tokens';
 import { embeddings, memories, revisions, type MemoryRow, type RevisionRow } from '../db/schema';
 import type { MemoryKind, MemoryScope, MemoryStatus, RevisionAction } from '../db/schema/enums';
 import { EmbeddingService } from '../embeddings/embedding.service';
-import { normalizeHeader, normalizeTags, validateBody } from './validation';
+import { normalizeHeader, normalizeTags, validateBody, validateEventTime } from './validation';
 
 export interface ListMemoriesFilter {
   /** `undefined`/`'all'` = brak filtra scope/projectId (FR-D6 "Wszystkie" — dashboard trusted, NFR-1).
@@ -22,6 +22,15 @@ export interface ListMemoriesFilter {
   status?: MemoryStatus;
   tags?: string[];
   q?: string;
+  limit?: number;
+}
+
+/** Ekran "Oś czasu" (roadmap v1.2, "kind=event episodic") — ten sam kształt scope co
+ * `ListMemoriesFilter`, ale `kind='event'` jest wymuszony wewnątrz `listEvents`, nie filtrem
+ * wywołującego. */
+export interface ListEventsFilter {
+  scope?: 'all' | 'global' | 'project';
+  projectId?: string;
   limit?: number;
 }
 
@@ -39,6 +48,8 @@ export interface MemoryListItem {
   createdAt: string;
   updatedAt: string;
   version: number;
+  /** Tylko `kind=event` (roadmap v1.2) — null dla fact/document. */
+  eventTime: string | null;
 }
 
 export interface MemoryDetail extends MemoryListItem {
@@ -53,6 +64,9 @@ export interface HumanCreateInput {
   tags?: string[];
   scope: MemoryScope;
   projectId?: string | null;
+  /** Wymagany gdy `kind='event'` (ISO timestamp, backdatable, przyszłe daty dozwolone) — patrz
+   * `validateEventTime`. Ignorowany dla fact/document. */
+  eventTime?: string;
 }
 
 export interface EditMemoryInput {
@@ -83,12 +97,14 @@ function toListItem(row: {
   createdAt: Date;
   updatedAt: Date;
   version: number;
+  eventTime: Date | null;
 }): MemoryListItem {
   return {
     ...row,
     lastAccessedAt: row.lastAccessedAt ? row.lastAccessedAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    eventTime: row.eventTime ? row.eventTime.toISOString() : null,
   };
 }
 
@@ -150,10 +166,49 @@ export class MemoryAdminService {
         createdAt: memories.createdAt,
         updatedAt: memories.updatedAt,
         version: memories.version,
+        eventTime: memories.eventTime,
       })
       .from(memories)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(memories.updatedAt))
+      .limit(filter.limit ?? 200);
+
+    return rows.map(toListItem);
+  }
+
+  /** Ekran "Oś czasu" (roadmap v1.2, "kind=event episodic") — WYŁĄCZNIE `kind='event'` status
+   * `approved` (widok kuratorski, nie admin-browse-all — archived/purged nie mają miejsca w
+   * chronologii "co się wydarzyło"), sortowane `event_time DESC`. Scope STRICT jak `listMemories`
+   * (§9.6 design-systemu) — `project` nigdy nie przecieka global/inny projekt. */
+  async listEvents(filter: ListEventsFilter = {}): Promise<MemoryListItem[]> {
+    const conditions = [eq(memories.kind, 'event' as const), eq(memories.status, 'approved' as const)];
+    if (filter.scope === 'global') {
+      conditions.push(eq(memories.scope, 'global'));
+    } else if (filter.scope === 'project' && filter.projectId) {
+      conditions.push(eq(memories.scope, 'project'));
+      conditions.push(eq(memories.projectId, filter.projectId));
+    }
+
+    const rows = await this.db
+      .select({
+        id: memories.id,
+        header: memories.header,
+        kind: memories.kind,
+        tags: memories.tags,
+        scope: memories.scope,
+        projectId: memories.projectId,
+        status: memories.status,
+        source: memories.source,
+        accessCount: memories.accessCount,
+        lastAccessedAt: memories.lastAccessedAt,
+        createdAt: memories.createdAt,
+        updatedAt: memories.updatedAt,
+        version: memories.version,
+        eventTime: memories.eventTime,
+      })
+      .from(memories)
+      .where(and(...conditions))
+      .orderBy(desc(memories.eventTime))
       .limit(filter.limit ?? 200);
 
     return rows.map(toListItem);
@@ -179,6 +234,9 @@ export class MemoryAdminService {
     const header = normalizeHeader(input.header);
     const body = validateBody(input.body, input.kind, this.config);
     const tags = normalizeTags(input.tags, this.config);
+    // `event` (roadmap v1.2, "kind=event episodic") — event_time wymagany, backdatable, przyszłe
+    // daty dozwolone bez blokady; null dla fact/document (validateEventTime sam to rozstrzyga).
+    const eventTime = validateEventTime(input.eventTime, input.kind);
     const warnings = this.scanWarn(header, body);
 
     const memoryId = generateId(ID_PREFIX.memory);
@@ -198,6 +256,7 @@ export class MemoryAdminService {
         source: 'human',
         version: 0,
         approvedAt: new Date(),
+        eventTime,
       });
       await this.writeRevision(tx, memoryId, 'created', undefined);
       if (embedded) {

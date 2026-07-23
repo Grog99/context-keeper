@@ -1,7 +1,7 @@
 /** Typy domenowe SPA — lustro kontraktu `apps/server` (enumy `db/schema/enums.ts` + kody błędów),
  * NIE import cross-package (§Approach planu: toolchainy Vite/ESM i Nest/CommonJS celowo rozdzielone). */
 
-export type MemoryKind = 'fact' | 'document';
+export type MemoryKind = 'fact' | 'document' | 'event';
 export type MemoryScope = 'global' | 'project';
 export type MemoryStatus = 'approved' | 'archived' | 'purged';
 export type MemorySource = 'agent' | 'human' | 'nightly';
@@ -25,4 +25,5 @@ export type AuditEventType =
   | 'secret_blocked'
   | 'purge_tombstone'
   | 'nightly_run'
-  | 'backup_completed';
+  | 'backup_completed'
+  | 'project_settings_changed';

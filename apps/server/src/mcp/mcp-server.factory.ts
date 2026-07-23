@@ -47,9 +47,12 @@ export function createMcpServer(memory: MemoryService, ctx: ProjectContext): Mcp
           .optional()
           .describe('Optional tag filter — matches memories sharing at least one tag.'),
         kind: z
-          .enum(['fact', 'document'])
+          .enum(['fact', 'document', 'event'])
           .optional()
-          .describe('Optional kind filter; default is fact + document.'),
+          .describe(
+            'Optional kind filter. Default is fact + document; event is excluded from the default ' +
+              'unless enabled for your project by an operator. Pass kind="event" to target it explicitly.',
+          ),
       },
     },
     async ({ query, tags, kind }) =>

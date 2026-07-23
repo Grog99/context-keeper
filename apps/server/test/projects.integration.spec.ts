@@ -75,4 +75,38 @@ describe('ProjectsService (integration, testcontainers)', () => {
     expect(await service.resolveProjectByToken(oldToken)).toBeNull();
     expect((await service.resolveProjectByToken(newToken))?.id).toBe(project.id);
   });
+
+  describe('updateProject (roadmap v1.2, "kind=event episodic" — dialog szczegółów projektu)', () => {
+    it('default includeEventsInDefaultSearch=false dla nowo utworzonego projektu', async () => {
+      const { project } = await service.createProject('delta-default');
+      expect(project.includeEventsInDefaultSearch).toBe(false);
+    });
+
+    it('przełącza includeEventsInDefaultSearch true/false, listProjects odzwierciedla nową wartość', async () => {
+      const { project } = await service.createProject('delta-toggle');
+
+      const enabled = await service.updateProject(project.id, { includeEventsInDefaultSearch: true });
+      expect(enabled.includeEventsInDefaultSearch).toBe(true);
+
+      const listed = await service.listProjects();
+      expect(listed.find((p) => p.id === project.id)?.includeEventsInDefaultSearch).toBe(true);
+
+      const disabled = await service.updateProject(project.id, { includeEventsInDefaultSearch: false });
+      expect(disabled.includeEventsInDefaultSearch).toBe(false);
+    });
+
+    it('pole pominięte (undefined) -> no-op, zwraca bieżący wiersz bez zmian', async () => {
+      const { project } = await service.createProject('delta-noop');
+      await service.updateProject(project.id, { includeEventsInDefaultSearch: true });
+
+      const result = await service.updateProject(project.id, {});
+      expect(result.includeEventsInDefaultSearch).toBe(true); // niezmienione przez no-op wywołanie
+    });
+
+    it('nieznane id -> NotFoundException', async () => {
+      await expect(
+        service.updateProject('proj_doesnotexist0', { includeEventsInDefaultSearch: true }),
+      ).rejects.toThrow();
+    });
+  });
 });

@@ -358,16 +358,25 @@ Bazujemy na shadcn (kopiowane do repo → pełna kontrola). Poniżej — bazowe 
 
 ### 9.2 Przeglądarka pamięci (FR-D2) — list/detail
 
-- **Filtry:** `scope` (toggle group: wg kontekstu), `kind` (`fact`/`document`), status (`approved`/`archived`), tagi (multi), search.
+- **Filtry:** `scope` (toggle group: wg kontekstu), `kind` (`fact`/`document`/`event`, v1.2), status (`approved`/`archived`), tagi (multi), search.
 - **Lista:** wiersze jak kolejka, ale zamiast StatusChip pending → `kind` + `scope` + `access_count`/`last_accessed` (mono, tabular). `archived` przygaszone.
 - **Detal:** `header`, `body` (proza `text-md`, ~65 zn.), metadane (id, scope, kind, source, created/updated/approved, `access_count`, `last_accessed`), `RevisionTimeline`. Akcje człowieka = **commit bezpośredni** + revision: `Edytuj`, `Archiwizuj`, `Promuj do global`, `Zmień scope/kind`. Wszystkie destrukcyjne → AlertDialog.
 - **document vs fact:** `document` dostaje szerszy obszar czytania i (v1.1) lepszy edytor; `fact` kompaktowo.
+- **`kind=event` (v1.2):** badge **neutralny mono** (`variant="kind"`, jak fact/document — P3: kolor
+  zarezerwowany dla statusu, nie typu). `event_time` wyróżnia wpis samodzielnie — renderowany z ikoną
+  zegara (`Clock`, `lucide-react`) w pasku metadanych detalu i w tabie „Metadane". `event_time` **nie**
+  jest edytowalny z formularza edycji (ustawiany raz przy tworzeniu, v1) — `Edytuj` zmienia tylko
+  header/body/tagi jak dla fact/document.
 
 ### 9.3 Projekty / tokeny (FR-D3) — poza context switcherem (lista wszystkich)
 
 - **Lista projektów:** nazwa, `project_id` (mono), liczba pamięci, data utworzenia, status tokena (aktywny/rotowany).
-- **Akcje:** `Nowy projekt`, `Generuj token`, `Rotuj token` (AlertDialog: „stary token przestanie działać natychmiast — hard-cutover").
+- **Akcje:** `Nowy projekt`, `Generuj token`, `Rotuj token` (AlertDialog: „stary token przestanie działać natychmiast — hard-cutover"), ikona ⚙ → `ProjectSettingsDialog`.
 - **`TokenReveal`:** po generacji/rotacji — Dialog jednorazowy z `ck_…`, `Kopiuj`, ostrzeżenie „widoczny raz, w bazie tylko hash".
+- **`ProjectSettingsDialog` (v1.2):** osobny dialog szczegółów projektu (NIE inline switch w wierszu
+  tabeli) — dziś jedno pole: `Switch` „Dołączaj zdarzenia do domyślnego wyszukiwania"
+  (`include_events_in_default_search`). Zmiana audytowana jako `project_settings_changed`, widoczna
+  na ekranie „Audyt" bez dodatkowej pracy UI.
 - Ten ekran **ignoruje** ContextSwitcher (zarządza kontekstami, nie żyje w jednym).
 
 ### 9.4 Audyt (FR-D4) — tabela zdarzeń + rewizje
@@ -380,7 +389,9 @@ Bazujemy na shadcn (kopiowane do repo → pełna kontrola). Poniżej — bazowe 
 ### 9.5 Human-create (FR-D5) — Dialog/drawer „Nowa pamięć"
 
 - Wyzwalane z railu; dostępne tylko gdy kontekst = konkretny projekt lub `Global` (w `Wszystkie` — disabled + wyjaśnienie).
-- Pola: `kind` (segmented `fact`/`document`), `header` (licznik ~200 zn.), `body` (`textarea`, licznik per-kind cap; dla `document` większy obszar), `tags` (chip-input z normalizacją na blur: trim+lowercase+collapse, walidacja charset/limit).
+- Pola: `kind` (segmented `fact`/`document`/`event`, v1.2), `header` (licznik ~200 zn.), `body` (`textarea`, licznik per-kind cap; dla `document` większy obszar), `tags` (chip-input z normalizacją na blur: trim+lowercase+collapse, walidacja charset/limit).
+- **`kind=event` (v1.2):** dodatkowe pole „Kiedy się wydarzyło" (`datetime-local`, domyślnie teraz) —
+  backdatable, przyszłe daty dozwolone bez walidacji blokującej (decay je traktuje jak „teraz").
 - **Import:** zakładka „Wklej" / „Wgraj `.md`" (drop-zone, bez bulk).
 - Miękkie „similar existing memories" (opcjonalnie) — `DedupHint` przed zapisem.
 - Zapis = commit bezpośredni (`source=human`), toast „Utworzono".
@@ -389,6 +400,17 @@ Bazujemy na shadcn (kopiowane do repo → pełna kontrola). Poniżej — bazowe 
 
 - W top barze, `Command`-search. `Wszystkie` = zunifikowany inbox recenzenta (create off). Widok projektu **strict** (tylko pamięci projektu; `global` osobno). Zmiana kontekstu przeładowuje listy, ale zachowuje aktywny ekran.
 
+### 9.7 Oś czasu (v1.2, `kind=event`) — chronologiczna lista, grupowana wg dnia
+
+- **Route/label:** `/os-czasu`, „Oś czasu" — spójne z polskimi slugami (`/kolejka`, `/pamiec`, `/operacje`). Skrót klawiaturowy `g c`.
+- **Zawartość:** WYŁĄCZNIE `kind=event`, status `approved`, sortowane `event_time DESC`. Scoped przez `ContextSwitcher` jak przeglądarka pamięci (§9.6) — `project` strict, bez leakage.
+- **Grupowanie: wg dnia kalendarzowego** (lokalna strefa przeglądarki) — nagłówek dnia (np. „środa,
+  22 lipca 2026", ruled-ledger styl jak reszta ekranów) + wpisy pod spodem, każdy z godziną (mono,
+  tabular), headerem, originem (`OriginPath`) i tagami. Bez osobnego panelu detalu — klik na wiersz
+  otwiera pełny szczegół w „Pamięć" (`/pamiec?id=`).
+- **Tworzenie:** wyłącznie przez `HumanCreateDialog` (`kind=Zdarzenie`) — patrz §9.5.
+- **Puste/loading:** `EmptyState`/`Skeleton` jak reszta list (§10).
+
 ---
 
 ## 10. Stany, dostępność, klawiatura
@@ -396,7 +418,7 @@ Bazujemy na shadcn (kopiowane do repo → pełna kontrola). Poniżej — bazowe 
 - **Focus:** zawsze widoczny `focus-visible` — ring 2px iris + offset 2px. Nawigacja Tab przez wszystkie interaktywne.
 - **Kontrast:** cel **WCAG AA** (tekst ≥4.5:1, UI/ikony ≥3:1). Palety §2 dobrane pod to w obu motywach; status-fg na status-subtle spełnia AA.
 - **Kolor nie jest jedynym sygnałem** (P2): każdy status = kolor **+ ikona + label**.
-- **Klawiatura (kolejka):** `j/k` góra/dół, `Enter` detal, `A` approve, `R` reject, `E` edit, `S` zamiennik, `/` search, `⌘K` paleta poleceń, `g` potem `k/p/t/a` — skok do ekranu (Kolejka/Pamięć/proTokeny/Audyt). Skróty widoczne w tooltipach i „?" cheatsheet.
+- **Klawiatura (kolejka):** `j/k` góra/dół, `Enter` detal, `A` approve, `R` reject, `E` edit, `S` zamiennik, `/` search, `⌘K` paleta poleceń, `g` potem `k/p/c/t/a/m/o/w` — skok do ekranu (Kolejka/Pamięć/Oś czasu/Projekty/Audyt/Pomiary/Operacje/Onboarding). Skróty widoczne w tooltipach i „?" cheatsheet.
 - **Reduced motion:** `prefers-reduced-motion` → bez translate/shimmer.
 - **Empty / loading / error:** każdy list ma `EmptyState`, `Skeleton`, i inline error (nie modal) z akcją „Ponów".
 - **Live vs polling:** v1 kolejka odświeżana pollingiem — pokaż „ostatnia aktualizacja Xs temu" + ręczny refresh; bez fałszywego „real-time".

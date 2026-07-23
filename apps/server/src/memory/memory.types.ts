@@ -13,8 +13,10 @@ export interface SaveMemoryResult {
   status: SaveStatus;
 }
 
-/** Filtr `kind` w search_memory — fact|document; brak = domyślnie oba (FR-M1). */
-export type MemoryKindFilter = Extract<MemoryKind, 'fact' | 'document'>;
+/** Filtr `kind` w search_memory — fact|document|event; brak = domyślnie fact+document (FR-M1),
+ * `event` dokłada się do domyślnego zestawu tylko gdy projekt ma włączony
+ * `includeEventsInDefaultSearch` (roadmap v1.2, "kind=event episodic"). */
+export type MemoryKindFilter = Extract<MemoryKind, 'fact' | 'document' | 'event'>;
 
 export interface SearchMemoryInput {
   query: string;
@@ -44,6 +46,8 @@ export interface GetMemoryResult {
   lastAccessedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Tylko `kind=event` (roadmap v1.2) — null dla fact/document. */
+  eventTime: string | null;
 }
 
 /** [DEV-ONLY] Wejście dla `MemoryService.devSeedApproved` (CLI `seed-memory`, patrz zadanie pkt D). */

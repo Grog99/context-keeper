@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Clock } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
@@ -176,6 +177,7 @@ export function MemoryBrowserScreen() {
               <SelectItem value="all">kind: wszystkie</SelectItem>
               <SelectItem value="fact">fact</SelectItem>
               <SelectItem value="document">document</SelectItem>
+              <SelectItem value="event">event</SelectItem>
             </SelectContent>
           </Select>
           <Select value={status} onValueChange={(v) => setStatus(v as StatusFilter)}>
@@ -243,6 +245,15 @@ export function MemoryBrowserScreen() {
                 <MonoId value={detail.id} />
                 <Dot />
                 <span className="font-mono text-faint">{detail.kind}</span>
+                {detail.kind === 'event' && detail.eventTime && (
+                  <>
+                    <Dot />
+                    <span className="inline-flex items-center gap-1 font-mono text-faint">
+                      <Clock className="size-3" />
+                      {formatAbsoluteTime(detail.eventTime)}
+                    </span>
+                  </>
+                )}
                 <Dot />
                 <OriginPath
                   origin={detail.source}
@@ -294,6 +305,12 @@ export function MemoryBrowserScreen() {
                     <dd className="font-mono text-xs">{formatAbsoluteTime(detail.updatedAt)}</dd>
                     <dt className="text-muted-foreground">Zatwierdzono</dt>
                     <dd className="font-mono text-xs">{detail.approvedAt ? formatAbsoluteTime(detail.approvedAt) : '—'}</dd>
+                    {detail.kind === 'event' && (
+                      <>
+                        <dt className="text-muted-foreground">event_time</dt>
+                        <dd className="font-mono text-xs">{detail.eventTime ? formatAbsoluteTime(detail.eventTime) : '—'}</dd>
+                      </>
+                    )}
                     <dt className="text-muted-foreground">Tagi</dt>
                     <dd className="font-mono text-xs">{detail.tags.join(', ') || '—'}</dd>
                   </dl>

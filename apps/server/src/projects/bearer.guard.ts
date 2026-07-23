@@ -27,7 +27,11 @@ export class BearerGuard implements CanActivate {
     if (!project) {
       throw new UnauthorizedException('Nieprawidłowy token');
     }
-    req.projectContext = { projectId: project.id, projectName: project.name };
+    req.projectContext = {
+      projectId: project.id,
+      projectName: project.name,
+      includeEventsInDefaultSearch: project.includeEventsInDefaultSearch,
+    };
     return true;
   }
 }

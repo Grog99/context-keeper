@@ -69,10 +69,17 @@ export const envSchema = z
     RRF_K: z.coerce.number().int().positive().default(60),
     SEARCH_TOP_K: z.coerce.number().int().positive().default(10),
     SEARCH_VECTOR_CANDIDATES: z.coerce.number().int().positive().default(50),
+    // Age-decay dla kind=event w rankingu (roadmap v1.2, "kind=event episodic") — wykładniczy
+    // half-life w dniach, aplikowany post-RRF WYŁĄCZNIE do kind=event (zero wpływu na fact/document,
+    // patrz `memory/decay.ts`).
+    EVENT_DECAY_HALFLIFE_DAYS: z.coerce.number().int().positive().default(30),
 
     // Limity wejścia (FR-V1)
     BODY_MAX_FACT: z.coerce.number().int().positive().default(8192),
     BODY_MAX_DOCUMENT: z.coerce.number().int().positive().default(262144),
+    // `event` (roadmap v1.2, "kind=event episodic") — symetryczny z BODY_MAX_FACT (krótkie notatki,
+    // nie dokumenty).
+    BODY_MAX_EVENT: z.coerce.number().int().positive().default(8192),
     TAGS_MAX: z.coerce.number().int().positive().default(10),
     TAG_MAX_LEN: z.coerce.number().int().positive().default(40),
 

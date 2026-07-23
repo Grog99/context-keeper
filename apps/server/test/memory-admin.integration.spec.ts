@@ -172,6 +172,130 @@ describe('MemoryAdminService (integration, testcontainers) — przeglądarka pam
         admin.humanCreate({ kind: 'fact', header: 'X', body: 'Y', scope: 'project' }),
       ).rejects.toMatchObject({ code: 'validation_error' });
     });
+
+    describe('kind=event (roadmap v1.2, "kind=event episodic")', () => {
+      it('zapisuje event_time, kind=event w wierszu', async () => {
+        const { admin } = buildAdmin(new StubEmbeddingProvider('human-create-event-model'));
+        const eventTime = '2026-01-15T10:30:00Z';
+
+        const result = await admin.humanCreate({
+          kind: 'event',
+          header: 'Zdarzenie human-create',
+          body: 'Cos sie wydarzylo.',
+          scope: 'project',
+          projectId: projectA.projectId,
+          eventTime,
+        });
+
+        const [row] = await db.select().from(memories).where(eq(memories.id, result.id));
+        expect(row.kind).toBe('event');
+        expect(row.eventTime?.toISOString()).toBe('2026-01-15T10:30:00.000Z');
+        expect(row.status).toBe('approved');
+      });
+
+      it('brak eventTime dla kind=event -> validation_error, NIC nie jest zapisane', async () => {
+        const { admin } = buildAdmin(new StubEmbeddingProvider('human-create-event-missing-model'));
+        await expect(
+          admin.humanCreate({
+            kind: 'event',
+            header: 'Zdarzenie bez czasu',
+            body: 'Brak event_time.',
+            scope: 'project',
+            projectId: projectA.projectId,
+          }),
+        ).rejects.toMatchObject({ code: 'validation_error' });
+      });
+
+      it('eventTime ignorowany (pozostaje null) dla kind=fact', async () => {
+        const { admin } = buildAdmin(new StubEmbeddingProvider('human-create-event-ignored-model'));
+        const result = await admin.humanCreate({
+          kind: 'fact',
+          header: 'Fakt z ignorowanym eventTime',
+          body: 'To jest fakt, nie event.',
+          scope: 'project',
+          projectId: projectA.projectId,
+          eventTime: '2026-01-15T10:30:00Z',
+        });
+
+        const [row] = await db.select().from(memories).where(eq(memories.id, result.id));
+        expect(row.eventTime).toBeNull();
+      });
+    });
+  });
+
+  describe('listEvents — ekran "Oś czasu" (roadmap v1.2, "kind=event episodic")', () => {
+    async function seedEvent(overrides: Partial<NewMemoryRow> & { eventTime: Date }): Promise<MemoryRow> {
+      const [row] = await db
+        .insert(memories)
+        .values({
+          id: generateId(ID_PREFIX.memory),
+          header: 'Seed event header',
+          body: 'Seed event body.',
+          kind: 'event',
+          tags: [],
+          scope: 'project',
+          status: 'approved',
+          source: 'human',
+          version: 0,
+          approvedAt: new Date(),
+          ...overrides,
+        })
+        .returning();
+      return row;
+    }
+
+    it('zwraca WYŁĄCZNIE kind=event, posortowane event_time DESC', async () => {
+      const marker = `listevents-order-${generateId('m')}`;
+      const older = await seedEvent({
+        header: `${marker} starszy`,
+        projectId: projectA.projectId,
+        eventTime: new Date('2026-01-01T00:00:00Z'),
+      });
+      const newer = await seedEvent({
+        header: `${marker} nowszy`,
+        projectId: projectA.projectId,
+        eventTime: new Date('2026-01-10T00:00:00Z'),
+      });
+      const nonEvent = await seedApprovedMemory({
+        header: `${marker} fakt`,
+        body: 'To jest fakt, nie event.',
+        projectId: projectA.projectId,
+      });
+
+      const { admin } = buildAdmin(new StubEmbeddingProvider('list-events-order-model'));
+      const results = await admin.listEvents({ scope: 'project', projectId: projectA.projectId });
+      const ids = results.map((r) => r.id);
+      expect(ids).not.toContain(nonEvent.id); // strict kind=event, żaden fact się nie wkrada
+      expect(ids.indexOf(newer.id)).toBeLessThan(ids.indexOf(older.id));
+      for (const r of results) expect(r.kind).toBe('event');
+    });
+
+    it('scope=project jest STRICT — brak przecieku eventów innego projektu ani global', async () => {
+      const marker = `listevents-scope-${generateId('m')}`;
+      const inA = await seedEvent({
+        header: `${marker} w A`,
+        projectId: projectA.projectId,
+        eventTime: new Date(),
+      });
+      const inB = await seedEvent({
+        header: `${marker} w B`,
+        projectId: projectB.projectId,
+        eventTime: new Date(),
+      });
+      const global = await seedEvent({
+        header: `${marker} global`,
+        scope: 'global',
+        projectId: null,
+        eventTime: new Date(),
+      });
+
+      const { admin } = buildAdmin(new StubEmbeddingProvider('list-events-scope-model'));
+      const results = await admin.listEvents({ scope: 'project', projectId: projectA.projectId });
+      const ids = results.map((r) => r.id);
+      expect(ids).toContain(inA.id);
+      expect(ids).not.toContain(inB.id);
+      expect(ids).not.toContain(global.id);
+    });
   });
 
   describe('editMemory', () => {

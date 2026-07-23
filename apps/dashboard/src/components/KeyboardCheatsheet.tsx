@@ -5,6 +5,7 @@ const GLOBAL_SHORTCUTS: [string, string][] = [
   ['/', 'To samo co ⌘K'],
   ['g k', 'Idź do: Kolejka'],
   ['g p', 'Idź do: Pamięć'],
+  ['g c', 'Idź do: Oś czasu'],
   ['g t', 'Idź do: Projekty'],
   ['g a', 'Idź do: Audyt'],
   ['g m', 'Idź do: Pomiary'],

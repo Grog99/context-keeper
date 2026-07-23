@@ -5,6 +5,7 @@ import {
   MemoryAdminService,
   type EditMemoryInput,
   type HumanCreateInput,
+  type ListEventsFilter,
   type ListMemoriesFilter,
   type MemoryDetail,
   type MemoryListItem,
@@ -48,6 +49,17 @@ export class MemoriesController {
     return this.memoryAdmin.listMemories({ scope, projectId, kind, status, tags: toStringArray(tags), q });
   }
 
+  /** Ekran "Oś czasu" (roadmap v1.2, "kind=event episodic") — deklarowane PRZED `:id` (Express
+   * matchuje w kolejności rejestracji; literalne `events` musi wygrać przed dynamicznym `:id`, inaczej
+   * `GET /api/memories/events` trafiłby w `get(id='events')`). */
+  @Get('events')
+  async events(
+    @Query('scope') scope?: ListEventsFilter['scope'],
+    @Query('projectId') projectId?: string,
+  ): Promise<MemoryListItem[]> {
+    return this.memoryAdmin.listEvents({ scope, projectId });
+  }
+
   @Get(':id')
   async get(@Param('id') id: string): Promise<MemoryDetail> {
     return this.memoryAdmin.getMemoryDetail(id);
@@ -68,6 +80,8 @@ export class MemoriesController {
       tags?: string[];
       scope: MemoryScope;
       projectId?: string | null;
+      /** Wymagany gdy `kind='event'` (roadmap v1.2) — ISO timestamp, backdatable. */
+      eventTime?: string;
     },
   ): Promise<{ id: string } & WithWarnings> {
     const input: HumanCreateInput = {
@@ -77,6 +91,7 @@ export class MemoriesController {
       tags: body.tags,
       scope: body.scope,
       projectId: body.projectId,
+      eventTime: body.eventTime,
     };
     return this.memoryAdmin.humanCreate(input);
   }

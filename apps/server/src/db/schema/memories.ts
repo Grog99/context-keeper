@@ -30,12 +30,19 @@ export const memories = pgTable(
     // (update/merge/delete w ProposalsService). `proposals.base_versions` trzyma wartość, względem
     // której liczono payload; rozjazd pod locka przy approve → ProposalError('stale').
     version: integer('version').notNull().default(0),
+    // Backdatable znacznik zdarzenia (roadmap v1.2, "kind=event episodic") — WYŁĄCZNIE `kind=event`
+    // go wypełnia (nullable; fact/document zostają null). Osobny od `created_at` (kiedy wpis
+    // POWSTAŁ w pamięci) — `event_time` to kiedy zdarzenie się WYDARZYŁO, ustawiane raz przy
+    // tworzeniu (edycja po fakcie poza zakresem v1). Napędza sortowanie ekranu "Oś czasu" i
+    // age-decay w rankingu retrievalu (`MemoryService.search`).
+    eventTime: timestamp('event_time', { withTimezone: true }),
   },
   (t) => [
     index('memories_project_idx').on(t.projectId),
     index('memories_kind_idx').on(t.kind),
     index('memories_status_idx').on(t.status),
     index('memories_scope_idx').on(t.scope),
+    index('memories_event_time_idx').on(t.eventTime),
   ],
 );
 

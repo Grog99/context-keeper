@@ -634,6 +634,143 @@ describe('MemoryService (integration, testcontainers)', () => {
     });
   });
 
+  describe('search — default-kind toggle dla kind=event (roadmap v1.2, "kind=event episodic")', () => {
+    let projectToggle: ProjectContext;
+
+    beforeAll(async () => {
+      const created = await projects.createProject('memory-test-event-toggle');
+      projectToggle = { projectId: created.project.id, projectName: created.project.name };
+    });
+
+    /** `devSeedApproved` nie zna jeszcze `eventTime` (poza zakresem tego DEV-ONLY helpera) — insert
+     * bezpośredni, jak istniejący test 'archived memory -> not_found' wyżej w tym pliku. */
+    async function seedEvent(header: string, eventTime: Date, projectId: string) {
+      const [row] = await db
+        .insert(schema.memories)
+        .values({
+          id: generateId(ID_PREFIX.memory),
+          header,
+          body: 'Treść zdarzenia testowego (toggle default-kind).',
+          kind: 'event',
+          tags: [],
+          scope: 'project',
+          projectId,
+          status: 'approved',
+          source: 'human',
+          approvedAt: new Date(),
+          eventTime,
+        })
+        .returning();
+      return row;
+    }
+
+    it('toggle=false (default): event NIEOBECNY w domyślnym search, OBECNY przy jawnym kind=event', async () => {
+      const marker = 'eventtoggledefaultmarker1';
+      const seeded = await seedEvent(`Zdarzenie ${marker}`, new Date(), projectToggle.projectId);
+
+      const defaultResults = await memory.search({ query: marker }, projectToggle);
+      expect(defaultResults.some((r) => r.id === seeded.id)).toBe(false);
+
+      const explicitResults = await memory.search({ query: marker, kind: 'event' }, projectToggle);
+      expect(explicitResults.some((r) => r.id === seeded.id)).toBe(true);
+    });
+
+    it('toggle=true: event POJAWIA SIĘ w domyślnym search obok fact/document', async () => {
+      const marker = 'eventtoggleenabledmarker2';
+      const seeded = await seedEvent(`Zdarzenie ${marker}`, new Date(), projectToggle.projectId);
+      const ctxWithToggle: ProjectContext = { ...projectToggle, includeEventsInDefaultSearch: true };
+
+      const results = await memory.search({ query: marker }, ctxWithToggle);
+      expect(results.some((r) => r.id === seeded.id)).toBe(true);
+    });
+
+    it('izolacja: toggle=true w projekcie A nie ujawnia eventów A w domyślnym search projektu B', async () => {
+      const marker = 'eventtoggleisolationmarker3';
+      const seededA = await seedEvent(`Zdarzenie A ${marker}`, new Date(), projectToggle.projectId);
+      const ctxAWithToggle: ProjectContext = { ...projectToggle, includeEventsInDefaultSearch: true };
+
+      // projectB (top-level beforeAll) — cudzy projekt, BEZ togglea — nie widzi eventu A wcale
+      // (scope), niezależnie od tego że projekt A ma toggle włączony.
+      const resultsFromB = await memory.search({ query: marker }, projectB);
+      expect(resultsFromB.some((r) => r.id === seededA.id)).toBe(false);
+
+      // sanity: ten sam event faktycznie widoczny z własnego kontekstu z włączonym togglem.
+      const resultsFromA = await memory.search({ query: marker }, ctxAWithToggle);
+      expect(resultsFromA.some((r) => r.id === seededA.id)).toBe(true);
+    });
+  });
+
+  describe('search — age-decay dla kind=event (roadmap v1.2, "kind=event episodic")', () => {
+    let projectDecay: ProjectContext;
+
+    beforeAll(async () => {
+      const created = await projects.createProject('memory-test-event-decay');
+      projectDecay = {
+        projectId: created.project.id,
+        projectName: created.project.name,
+        includeEventsInDefaultSearch: true,
+      };
+    });
+
+    async function seedEvent(header: string, eventTime: Date) {
+      const [row] = await db
+        .insert(schema.memories)
+        .values({
+          id: generateId(ID_PREFIX.memory),
+          header,
+          body: header,
+          kind: 'event',
+          tags: [],
+          scope: 'project',
+          projectId: projectDecay.projectId,
+          status: 'approved',
+          source: 'human',
+          approvedAt: new Date(),
+          eventTime,
+        })
+        .returning();
+      return row;
+    }
+
+    it('event świeży rankuje wyżej niż event ~2 half-life stary, dla tego samego zapytania', async () => {
+      const marker = 'eventdecayorderingmarker1';
+      const fresh = await seedEvent(`Zdarzenie swieze ${marker}`, new Date());
+      const stale = await seedEvent(`Zdarzenie stare ${marker}`, new Date(Date.now() - 2 * 30 * 86_400_000));
+
+      const results = await memory.search({ query: marker }, projectDecay);
+      const ids = results.map((r) => r.id);
+      expect(ids).toContain(fresh.id);
+      expect(ids).toContain(stale.id);
+      expect(ids.indexOf(fresh.id)).toBeLessThan(ids.indexOf(stale.id));
+    });
+
+    it('event z przyszłą datą nie jest karany — bez konkurencji rankingowej score = DOKŁADNIE 1/(RRF_K+1), jak decayFactor=1', async () => {
+      const marker = 'eventdecayfuturemarker2';
+      await seedEvent(`Zdarzenie przyszle ${marker}`, new Date(Date.now() + 10 * 86_400_000));
+
+      const results = await memory.search({ query: marker }, projectDecay);
+      expect(results.length).toBe(1);
+      // Gdyby clamp nie działał, faktor>1 (ujemny wiek) PODNIÓSŁBY score powyżej 1/(RRF_K+1) — clamp
+      // do 1 gwarantuje dokładnie tę samą wartość co dla age=0 (regression-guard test niżej).
+      expect(results[0].score).toBeCloseTo(1 / (config.get('RRF_K') + 1), 10);
+    });
+
+    it('regression guard: fact bez eventów w zakresie ma DOKŁADNIE score = 1/(RRF_K+1) (decayFactor=1, zero wpływu)', async () => {
+      const marker = 'eventdecayregressionmarker3';
+      await memory.devSeedApproved({
+        header: `Fakt regresyjny ${marker}`,
+        body: 'Trescy bez konkurencji rankingowej dla tego markera.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectDecay.projectId,
+      });
+
+      const results = await memory.search({ query: marker }, projectDecay);
+      expect(results.length).toBe(1);
+      expect(results[0].score).toBeCloseTo(1 / (config.get('RRF_K') + 1), 10);
+    });
+  });
+
   describe('save — staged embedding (Faza 3, best-effort fail-open)', () => {
     let projectS: ProjectContext;
 

@@ -69,6 +69,8 @@ export interface MemoryListItem {
   createdAt: string;
   updatedAt: string;
   version: number;
+  /** Tylko `kind=event` (roadmap v1.2, "kind=event episodic") — null dla fact/document. */
+  eventTime: string | null;
 }
 
 export interface MemoryDetail extends MemoryListItem {
@@ -100,6 +102,10 @@ export interface ProjectListItem {
   createdAt: string;
   tokenRotatedAt: string | null;
   memoryCount: number;
+  /** Per-projektowy toggle (roadmap v1.2, "kind=event episodic") — czy `event` dokłada się do
+   * domyślnego `kind` w `search_memory` gdy agent go nie poda jawnie. Edytowany w
+   * `ProjectSettingsDialog`. */
+  includeEventsInDefaultSearch: boolean;
 }
 
 export interface CreatedProject {
@@ -129,6 +135,8 @@ export interface DashboardLimits {
   headerMaxLen: number;
   bodyMaxFact: number;
   bodyMaxDocument: number;
+  /** `kind=event` (roadmap v1.2, "kind=event episodic") — licznik znaków w `HumanCreateDialog`. */
+  bodyMaxEvent: number;
   tagsMax: number;
   tagMaxLen: number;
   /** Ekran "Onboarding" (roadmap v1.2) — publiczny origin `/mcp`, `null` gdy operator nie

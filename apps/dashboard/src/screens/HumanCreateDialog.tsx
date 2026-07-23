@@ -17,12 +17,14 @@ import type { MemoryKind, MemoryScope } from '../types/domain';
 const KINDS: { value: MemoryKind; label: string }[] = [
   { value: 'fact', label: 'Fakt' },
   { value: 'document', label: 'Dokument' },
+  { value: 'event', label: 'Zdarzenie' },
 ];
 
 const DEFAULT_LIMITS: DashboardLimits = {
   headerMaxLen: 200,
   bodyMaxFact: 8192,
   bodyMaxDocument: 262144,
+  bodyMaxEvent: 8192,
   tagsMax: 10,
   tagMaxLen: 40,
   mcpPublicUrl: null,
@@ -30,6 +32,18 @@ const DEFAULT_LIMITS: DashboardLimits = {
 
 function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).length;
+}
+
+/** Wartość startowa `<input type="datetime-local">` — "teraz" w LOKALNEJ strefie (roadmap v1.2,
+ * "kind=event episodic": `event_time` domyślnie teraz, backdatable, przyszłe daty dozwolone bez
+ * walidacji blokującej — patrz `validateEventTime` po stronie serwera). `datetime-local` nie ma
+ * strefy — budujemy string ręcznie z lokalnych składowych `Date`, żeby uniknąć przesunięcia UTC,
+ * które dałoby `toISOString()` na maszynie z inną strefą niż przeglądarka.
+ */
+function nowForDatetimeLocal(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function deriveHeaderFromFilename(filename: string): string {
@@ -79,6 +93,7 @@ function HumanCreateForm({ onOpenChange, scope, projectId, projectName }: HumanC
   const [kind, setKind] = useState<MemoryKind>('fact');
   const [header, setHeader] = useState('');
   const [body, setBody] = useState('');
+  const [eventTime, setEventTime] = useState(nowForDatetimeLocal);
   const [tags, setTags] = useState<string[]>([]);
   const [tagDraft, setTagDraft] = useState('');
   const [importTab, setImportTab] = useState<'paste' | 'upload'>('paste');
@@ -114,11 +129,13 @@ function HumanCreateForm({ onOpenChange, scope, projectId, projectName }: HumanC
     return () => clearTimeout(handle);
   }, [header, scope, projectId]);
 
-  const bodyCap = kind === 'fact' ? limits.bodyMaxFact : limits.bodyMaxDocument;
+  const bodyCap = kind === 'fact' ? limits.bodyMaxFact : kind === 'event' ? limits.bodyMaxEvent : limits.bodyMaxDocument;
   const bodyBytes = utf8Bytes(body);
   const headerOverLimit = header.length > limits.headerMaxLen;
   const bodyOverLimit = bodyBytes > bodyCap;
-  const canSave = header.trim().length > 0 && body.trim().length > 0 && !headerOverLimit && !bodyOverLimit;
+  const eventTimeInvalid = kind === 'event' && Number.isNaN(new Date(eventTime).getTime());
+  const canSave =
+    header.trim().length > 0 && body.trim().length > 0 && !headerOverLimit && !bodyOverLimit && !eventTimeInvalid;
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -129,6 +146,7 @@ function HumanCreateForm({ onOpenChange, scope, projectId, projectName }: HumanC
         tags: commitTagDraft(tagDraft, tags),
         scope,
         projectId: scope === 'project' ? projectId : undefined,
+        eventTime: kind === 'event' ? new Date(eventTime).toISOString() : undefined,
       }),
     onSuccess: (result) => {
       toast.success('Utworzono');
@@ -225,6 +243,21 @@ function HumanCreateForm({ onOpenChange, scope, projectId, projectName }: HumanC
           </span>
           <Input value={header} onChange={(e) => setHeader(e.target.value)} autoFocus />
         </label>
+
+        {kind === 'event' && (
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Kiedy się wydarzyło</span>
+            <Input
+              type="datetime-local"
+              value={eventTime}
+              onChange={(e) => setEventTime(e.target.value)}
+              className={eventTimeInvalid ? 'border-danger' : undefined}
+            />
+            <span className="text-2xs text-faint">
+              Backdatable — możesz cofnąć na dowolną wcześniejszą datę. Przyszłe daty też są dozwolone.
+            </span>
+          </label>
+        )}
 
         <Tabs value={importTab} onValueChange={(v) => setImportTab(v as 'paste' | 'upload')}>
           <TabsList>

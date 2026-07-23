@@ -110,7 +110,7 @@ Jeden dyskryminator `kind` na tabeli `memories` (nie osobne tabele — reużycie
 | `id` | krótki, opaque, URL-safe (nanoid, np. `mem_a1b2c3`); stabilny — to dostaje agent w search i podaje do get |
 | `header` | krótki tytuł/streszczenie; to zwraca search. **Limit ~200 znaków, jednolinijkowy** (strip newline) |
 | `body` | pełna treść (markdown). **Limit per `kind`:** `fact` ~8 KB (~2k tok.), `document` ~256 KB (§5) |
-| `kind` | `fact` \| `document` (rozszerzalny enum; `event` → v2) |
+| `kind` | `fact` \| `document` \| `event` (rozszerzalny enum; `event` zaimplementowane w v1.2) |
 | `tags` | lista stringów. **Normalizacja:** trim + lowercase + collapse whitespace; max ~10, każdy ≤ ~40 zn., charset `[a-z0-9-_/]` |
 | `scope` | `global` \| `project` |
 | `project_id` | z credentialu przy zapisie (agent) lub z aktywnego kontekstu UI (human-create); pusty dla `global` |
@@ -118,9 +118,11 @@ Jeden dyskryminator `kind` na tabeli `memories` (nie osobne tabele — reużycie
 | `source` | `agent` \| `human` \| `nightly` (kto utworzył) |
 | `created_at` / `updated_at` / `approved_at` | znaczniki czasu |
 | `last_accessed_at` / `access_count` | feed dla prune; zbierane od dnia zero, nie do odtworzenia wstecz |
+| `event_time` | (v1.2) **wyłącznie `kind=event`** — nullable, backdatable znacznik KIEDY zdarzenie się wydarzyło (osobny od `created_at` = kiedy wpis powstał w pamięci). Ustawiany raz przy tworzeniu (edycja po fakcie poza zakresem v1). Napędza sortowanie ekranu „Oś czasu" i age-decay w rankingu retrievalu. |
 
 - `fact` = fakty accreted przez agenta (mutowalne, podlegają dedup/supersession/prune).
 - `document` = dokumenty authored przez człowieka (PRD, roadmap) — kanon, permanentne, poza zasięgiem nocnego joba. **W v1 tworzone i edytowane wyłącznie przez człowieka** (agent-proposed edycje dokumentu wymagają agent-update → v2).
+- `event` = zdarzenia ze stemplem czasu (v1.2) — **tworzone wyłącznie przez człowieka** w dashboardzie (`save_memory` agenta go nie eksponuje). W rankingu retrievalu podlegają age-decay (wykładniczy half-life, `EVENT_DECAY_HALFLIFE_DAYS`, aplikowany post-RRF, zero wpływu na fact/document). Domyślnie **wyłączone** z domyślnego `kind` w `search_memory` — per-projektowy boolean `projects.include_events_in_default_search` (dialog szczegółów projektu, §9.3) je włącza; `kind=event` jawny w zapytaniu działa zawsze niezależnie od togglea.
 - Model 2D: `scope` × `kind` (`document` może być `global` = glossary/standard, lub `project` = PRD tego projektu).
 
 ### `embeddings` (jeden-do-wielu — chunking)
@@ -149,11 +151,13 @@ Wektory policzone przy `save` (dla dedup), zanim proposal zostanie zatwierdzony.
 
 `id`, `event_type`, `actor` (token+`project_id` albo `"human-dashboard"`), `affected_ids`, `revision_id` (opcjonalnie, before/after), `created_at`. Odczyty **nie** logowane per-event — zostają liczniki.
 
-- **event_type:** `proposal_created`/`approved`/`rejected`/`edited`, `human_edit`, `archive`, `promote`, `token_created`/`rotated`, **`secret_blocked`** (metadane: typ sekretu, token, czas — bez materiału sekretu; sygnał rotacji, §10), **`purge_tombstone`** (content wymazany, powód, czas — §10), **`nightly_run`** (status/liczniki, §8).
+- **event_type:** `proposal_created`/`approved`/`rejected`/`edited`, `human_edit`, `archive`, `promote`, `token_created`/`rotated`, **`secret_blocked`** (metadane: typ sekretu, token, czas — bez materiału sekretu; sygnał rotacji, §10), **`purge_tombstone`** (content wymazany, powód, czas — §10), **`nightly_run`** (status/liczniki, §8), **`project_settings_changed`** (v1.2 — zmiana ustawień projektu z dialogu szczegółów, np. `include_events_in_default_search`; metadane `{field, from, to}`).
 
 ### `projects`
 
 Projekty i tokeny. **Token: `ck_` + 256-bit losowość (base64url); w bazie `token_hash` = SHA-256 (deterministyczny, indeksowany), bez pepper.** Lookup token→`project_id` = jeden trafiony indeks (§10). Dodanie projektu bez redeployu.
+
+- `include_events_in_default_search` (v1.2) — boolean, default `false`. Per-projektowy toggle: czy `kind=event` dokłada się do domyślnego zestawu `kind` w `search_memory` (agent nadal może zawsze poprosić o `kind=event` jawnie). Edytowany w dialogu szczegółów projektu (§9.3); zmiana audytowana jako `project_settings_changed`.
 
 ### Ścieżka human-create (nowe)
 
@@ -162,7 +166,10 @@ Projekty i tokeny. **Token: `ck_` + 256-bit losowość (base64url); w bazie `tok
 ### Forward-compat (v2, miejsce w schemie już teraz)
 
 - Tabela `outcome` (analogicznie do `embeddings`/`revisions`) — dla Memory Worth (`report_outcome`).
-- Tabela relacji + `kind=event` — schema i `revisions` zaprojektowane tak, żeby doszły bez bolesnej migracji.
+- Tabela relacji (memory-relations + 1-hop graph boost, roadmap) — schema i `revisions`
+  zaprojektowane tak, żeby doszła bez bolesnej migracji; kluczowana `memory_id`, ortogonalna do
+  `event_time` (v1.2, już zaimplementowane — patrz §4 `kind=event`). Graph boost komponowałby się
+  post-fuzją z age-decay, nie konkurował.
 - Pole `confidence`/`auto_eligible` w `proposals` — anti-fatigue.
 
 ---
@@ -176,7 +183,7 @@ Projekty i tokeny. **Token: `ck_` + 256-bit losowość (base64url); w bazie `tok
 
 | Narzędzie | Sygnatura | Uwagi |
 |---|---|---|
-| `search_memory` | `(query, tags?, kind?)` → `[{id, header, tags, score}]` | Scope z tokena. Domyślnie `fact`+`document`; opcjonalny filtr `kind`. Dla `document` dokłada excerpt dopasowanego chunku. Przy embedding-down → **FTS-only** (§6), ciche. |
+| `search_memory` | `(query, tags?, kind?)` → `[{id, header, tags, score}]` | Scope z tokena. Domyślnie `fact`+`document` (+ `event`, v1.2, TYLKO gdy projekt ma `include_events_in_default_search=true`); opcjonalny filtr `kind` (`fact`\|`document`\|`event`) honorowany zawsze niezależnie od togglea. Dla `document` dokłada excerpt dopasowanego chunku; dla `event` ranking podlega age-decay (§4). Przy embedding-down → **FTS-only** (§6), ciche. |
 | `get_memory` | `(id)` → pełne body | Bumpuje `last_accessed_at`/`access_count`. **Egzekwuje scope** (`id` ∈ projekt tokena albo `global`). Poza scope **lub** nieistniejące → identyczne **`not_found`** (anty-probing IDOR). |
 | `save_memory` | `(header, body, tags)` → `{id, status}` | Liczy embedding + dedup przed odpowiedzią z **twardym budżetem czasu** (po timeoucie → `pending` bez embeddingu, doembed przy akceptacji). `id` mintowany przy proposalu; wiersz `memories` materializowany dopiero przy akceptacji. Statusy: `pending` / `duplicate_pending` / `already_exists`. |
 
@@ -395,7 +402,7 @@ Cienki generator nad `.env` + profilami Compose — **nie osobna warstwa configu
 
 | Rozszerzenie (v2+) | Co już jest gotowe w v1 |
 |---|---|
-| `kind=event` (episodic) | `kind` jako rozszerzalny enum; `revisions` i miejsce na tabelę relacji |
+| `memory-relations` + 1-hop graph boost | `kind=event` (v1.2, zaimplementowane — §4) + `revisions` i miejsce na tabelę relacji, kluczowaną `memory_id`, ortogonalną do `event_time` |
 | Memory Worth (prune po outcome) | miejsce na tabelę `outcome`; nocny job czyta abstrakcyjny (pluggable) score |
 | `conflicts_report` (sprzeczności) | nocny job na `kind=fact`; ewentualnie weryfikacja AI |
 | Anti-fatigue / sedymentacja | miejsce na `confidence`/`auto_eligible` w `proposals` |

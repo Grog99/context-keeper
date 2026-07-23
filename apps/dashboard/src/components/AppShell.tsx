@@ -4,6 +4,7 @@ import {
   Archive,
   Diamond,
   FolderKanban,
+  History,
   Inbox,
   Moon,
   PlugZap,
@@ -31,6 +32,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 const NAV_ITEMS: { to: string; label: string; icon: typeof Inbox; screen: ScreenKey }[] = [
   { to: '/kolejka', label: 'Kolejka', icon: Inbox, screen: 'kolejka' },
   { to: '/pamiec', label: 'Pamięć', icon: Archive, screen: 'pamiec' },
+  { to: '/os-czasu', label: 'Oś czasu', icon: History, screen: 'os-czasu' },
   { to: '/projekty', label: 'Projekty', icon: FolderKanban, screen: 'projekty' },
   { to: '/audyt', label: 'Audyt', icon: ScrollText, screen: 'audyt' },
   { to: '/pomiary', label: 'Pomiary', icon: Activity, screen: 'pomiary' },
@@ -41,6 +43,7 @@ const NAV_ITEMS: { to: string; label: string; icon: typeof Inbox; screen: Screen
 const SCREEN_PATH: Record<ScreenKey, string> = {
   kolejka: '/kolejka',
   pamiec: '/pamiec',
+  'os-czasu': '/os-czasu',
   projekty: '/projekty',
   audyt: '/audyt',
   pomiary: '/pomiary',
