@@ -4,6 +4,10 @@ Runbook do wdrożenia Context Keepera na [Coolify](https://coolify.io/) z builde
 (nie z GHCR) przez `docker-compose.coolify.yml`. Uzupełnienie do `README.md` (ścieżki
 instalator/Docker-manualnie/dev), nie zamiennik — kanon configu wciąż jest w `.env.example`.
 
+Ten runbook zakłada **wbudowany reverse proxy Coolify** (Traefik/Caddy). Masz własny reverse proxy
+na tej samej maszynie (np. **nginx za Pangolinem**) i nie używasz proxy Coolify? →
+[`deploy-coolify-nginx.md`](deploy-coolify-nginx.md).
+
 ## 1. Utworzenie zasobu w Coolify
 
 1. **New Resource → Docker Compose** (nie "Application" — potrzebujemy dwóch serwisów: `db` + `app`).
@@ -146,12 +150,13 @@ i `[migrate] done` PRZED linią `Context Keeper listening on :3000 (mcp) i :3001
 
 ## 8. Różnice vs pozostałe ścieżki deployu
 
-| | `docker-compose.yml` (VPS/`install.sh`) | `docker-compose.coolify.yml` (ten runbook) |
-|---|---|---|
-| Reverse proxy | opcjonalny bundled Caddy (profil `edge-proxy`) albo bring-your-own | Coolify (Traefik/Caddy wbudowany) |
-| Ekspozycja portów | `ports:` (publikacja na hosta) | `expose:` (tylko sieć dockerowa Coolify) |
-| `TRUST_PROXY` | `false` (default) albo `true` wg trybu | zawsze `true` (Coolify zawsze terminuje TLS upstream) |
-| Domeny | 1 origin (opcjonalnie za Caddym) | 2 domeny (`SERVICE_FQDN_APP_3000`/`_3001`) |
-| Embeddingi | `local` (default, sidecar TEI) albo `api` | `api` (na sztywno w compose — brak sidecara TEI) |
-| Migracje | `DB_AUTO_MIGRATE=true` (default) albo manualny `db:migrate` | zawsze auto (`DB_AUTO_MIGRATE=true`, brak serwisu `migrate`) |
-| Nightly/backup scheduling | host crontab (`install.sh` generuje) | Coolify Scheduled Tasks (§5 wyżej) |
+| | `docker-compose.yml` (VPS/`install.sh`) | `docker-compose.coolify.yml` (proxy Coolify — **ten runbook**) | `docker-compose.coolify-nginx.yml` (nginx+Pangolin — [tamten runbook](deploy-coolify-nginx.md)) |
+|---|---|---|---|
+| Reverse proxy | opcjonalny bundled Caddy (`edge-proxy`) albo bring-your-own | Coolify (Traefik/Caddy wbudowany) | własny host nginx za Pangolinem (proxy Coolify pominięty) |
+| Ekspozycja portów | `ports:` (publikacja na hosta) | `expose:` (tylko sieć dockerowa Coolify) | `ports: 127.0.0.1:...` (loopback hosta dla nginx) |
+| `TRUST_PROXY` | `false` (default) albo `true` wg trybu | zawsze `true` | zawsze `true` |
+| Domeny | 1 origin (opcjonalnie za Caddym) | 2 domeny w Coolify (`SERVICE_FQDN_APP_*`) | 2 domeny w Pangolinie (bez magic-env Coolify) |
+| Auth dashboardu (3001) | VPN/CF Access (§9 tech-stack) | IP-allowlist/SSO Coolify | Badger SSO Pangolina |
+| Embeddingi | `local` (default, sidecar TEI) albo `api` | `api` (na sztywno — brak sidecara TEI) | `api` (na sztywno — brak sidecara TEI) |
+| Migracje | `DB_AUTO_MIGRATE=true` (default) albo manualny `db:migrate` | zawsze auto (brak serwisu `migrate`) | zawsze auto (brak serwisu `migrate`) |
+| Nightly/backup scheduling | host crontab (`install.sh` generuje) | Coolify Scheduled Tasks (§5 wyżej) | Coolify Scheduled Tasks / host |
