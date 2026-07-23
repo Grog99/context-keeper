@@ -90,9 +90,11 @@ _przed_ warunkowym pluginem — najpierw wyciskamy maksimum z samego MCP + kontr
 - **Edycja pamięci przez agenta** ⬜ — `supersedes: id` w `save_memory`: agent proponuje korektę istniejącego
   faktu zamiast luźnego duplikatu. Zastępuje dzisiejsze obejście („zapisz nowy fakt, opisz w treści co
   zastępuje") — wykorzystuje supersession z kolejki akceptacji (v1), brakuje tylko ekspozycji w narzędziu.
-- **Snippet do wklejenia w cudzym projekcie** ⬜ — gotowy blok do `AGENTS.md` / `CLAUDE.md` (proaktywność +
-  forma połączenia `Bearer ${VAR}`), który użytkownik kopiuje do własnego repo. „Warstwa 2" kontraktu
-  narzędzi (`mcp-tool-contract.md` §Warstwy 2 i 3) — domknięcie onboardingu dla projektów spoza tego repo.
+- **Snippet do wklejenia w cudzym projekcie** ✅ — ekran „Onboarding” w dashboardzie: gotowe bloki do
+  `AGENTS.md` / `CLAUDE.md` (proaktywność + forma połączenia `Bearer ${VAR}`) i `.mcp.json`, które
+  użytkownik kopiuje do własnego repo. URL MCP wyliczany server-side (`PUBLIC_MCP_URL` → fallback
+  `ACME_DOMAIN` → placeholder). „Warstwa 2" kontraktu narzędzi (`mcp-tool-contract.md` §Warstwy 2 i 3) —
+  domknięcie onboardingu dla projektów spoza tego repo.
 - **Poprawki UI** ⬜ — dopieszczenie dashboardu (konkretna lista do doprecyzowania).
 
 ## Backlog ⬜

@@ -75,7 +75,7 @@ export function useQueueKeyboard(handlers: QueueKeyboardHandlers): void {
   }, []);
 }
 
-export type ScreenKey = 'kolejka' | 'pamiec' | 'projekty' | 'audyt' | 'pomiary' | 'operacje';
+export type ScreenKey = 'kolejka' | 'pamiec' | 'projekty' | 'audyt' | 'pomiary' | 'operacje' | 'onboarding';
 
 export interface GlobalKeyboardHandlers {
   onNavigate: (screen: ScreenKey) => void;
@@ -93,11 +93,12 @@ const SCREEN_CHORD_KEYS: Record<string, ScreenKey> = {
   a: 'audyt',
   m: 'pomiary', // "m" jak w "poMiary" — "p" jest już zajęte przez "pamiec"
   o: 'operacje',
+  w: 'onboarding', // "w" jak w "onboardinW"/"welcome" — "o" jest już zajęte przez "operacje"
 };
 const CHORD_TIMEOUT_MS = 900;
 
 /** §9.0/§10 — skróty globalne (rail + top bar): `⌘K`/`Ctrl+K` paleta poleceń, `/` (deleguje do
- * palety — jeden punkt wejścia do wyszukiwania, jak w makiecie), `g` potem `k/p/t/a/m/o` skok do
+ * palety — jeden punkt wejścia do wyszukiwania, jak w makiecie), `g` potem `k/p/t/a/m/o/w` skok do
  * ekranu, `?` ściągawka skrótów. */
 export function useGlobalKeyboard(handlers: GlobalKeyboardHandlers): void {
   const ref = useRef(handlers);

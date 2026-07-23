@@ -25,6 +25,7 @@ const DEFAULT_LIMITS: DashboardLimits = {
   bodyMaxDocument: 262144,
   tagsMax: 10,
   tagMaxLen: 40,
+  mcpPublicUrl: null,
 };
 
 function utf8Bytes(value: string): number {
