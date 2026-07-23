@@ -49,12 +49,15 @@ export class MemoryService {
   ) {}
 
   /**
-   * save_memory (FR-M3-M5, FR-S1, FR-V1). Agent zapisuje WYŁĄCZNIE `kind=fact`, `scope=project`
-   * (dokumenty i `global` to human-only, poza MCP w v1 — stąd brak parametru `kind` w sygnaturze).
+   * save_memory (FR-M3-M5, FR-S1, FR-V1). Agent może zaproponować `kind='fact'` (default, gdy
+   * `input.kind` pominięty) lub `kind='document'`; `scope` zawsze `project` (`global` to human-only).
+   * `event` pozostaje poza zasięgiem agenta — wykluczone na poziomie typu (`SaveMemoryKind`) i zod
+   * enum w `mcp-server.factory.ts`, więc nie da się go tu przekazać.
    */
   async save(input: SaveMemoryInput, ctx: ProjectContext): Promise<SaveMemoryResult> {
+    const kind = input.kind ?? 'fact';
     const header = normalizeHeader(input.header);
-    const body = validateBody(input.body, 'fact', this.config);
+    const body = validateBody(input.body, kind, this.config);
     const tags = normalizeTags(input.tags, this.config);
     const actor = `agent:${ctx.projectId}`;
 
@@ -77,6 +80,12 @@ export class MemoryService {
     const contentHash = computeContentHash({ header, body, scope, projectId: ctx.projectId });
 
     // Idempotencja (FR-M8): exact match do pending proposala w tym samym projekcie → duplicate_pending.
+    // ZNANA LUKA (świadomie odłożona jako follow-up, patrz plan "Agent tworzy kind=document" §1/§5):
+    // hash i poniższe zapytania dedup IGNORUJĄ `kind` — identyczny header+body zapisany raz jako
+    // `fact`, potem bajt-w-bajt to samo jako `document`, koliduje: drugi zapis dostaje
+    // `duplicate_pending`/`already_exists` wskazujący na pamięć INNEGO kind, a właściwy dokument nigdy
+    // nie powstaje. Rzadkie (wymaga identycznego tekstu w dwóch kind), ale zły failure mode — fix
+    // (dołożenie `kind` do `computeContentHash` i zapytań niżej) to osobne zadanie roadmapy.
     const [pendingDup] = await this.db
       .select({ id: proposals.id })
       .from(proposals)
@@ -122,7 +131,7 @@ export class MemoryService {
     // wektor to tylko dedup-hint na przyszłość, nieużywany jeszcze przy klasyfikacji create/duplicate.
     const mintedMemoryId = generateId(ID_PREFIX.memory);
     const proposalId = generateId(ID_PREFIX.proposal);
-    const payload = { memoryId: mintedMemoryId, header, body, tags, kind: 'fact' as const };
+    const payload = { memoryId: mintedMemoryId, header, body, tags, kind };
 
     await this.db.insert(proposals).values({
       id: proposalId,
@@ -141,12 +150,12 @@ export class MemoryService {
       eventType: 'proposal_created',
       actor,
       affectedIds: [mintedMemoryId],
-      metadata: { proposalId, kind: 'fact' },
+      metadata: { proposalId, kind },
     });
 
     // Best-effort staged embedding (§7 tech-stack "embedding nigdy nie blokuje proposala"):
     // provider down/timeout -> `embedMemoryBestEffort` zwraca null, proposal już powyżej powstał.
-    const staged = await this.embedding.embedMemoryBestEffort('fact', header, body, tags);
+    const staged = await this.embedding.embedMemoryBestEffort(kind, header, body, tags);
     if (staged) {
       await this.db.insert(stagingEmbeddings).values(
         staged.chunks.map((c) => ({

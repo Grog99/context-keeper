@@ -215,6 +215,40 @@ describe('MemoryService (integration, testcontainers)', () => {
         memory.save({ header: 'ok', body: 'tresc', tags: ['zly tag!'] }, projectA),
       ).rejects.toMatchObject({ code: 'validation_error' });
     });
+
+    it('kind=document: proposal ma payload.kind=document, reszta kształtu jak fact (type=create, origin=agent, scope=project)', async () => {
+      const res = await memory.save(
+        { header: 'Dokument testowy', body: 'Treść dokumentu testowego.', kind: 'document' },
+        projectA,
+      );
+      expect(res.status).toBe('pending');
+
+      const rows = await db.select().from(proposals).where(eq(proposals.projectId, projectA.projectId));
+      const matching = rows.find((p) => (p.payload as { memoryId: string }).memoryId === res.id);
+
+      expect(matching).toBeDefined();
+      expect(matching!.type).toBe('create');
+      expect(matching!.origin).toBe('agent');
+      expect(matching!.status).toBe('pending');
+      expect(matching!.scope).toBe('project');
+      const payload = matching!.payload as { header: string; body: string; tags: string[]; kind: string };
+      expect(payload.kind).toBe('document');
+    });
+
+    it('kind=document dostaje szerszy limit body niż fact: między BODY_MAX_FACT a BODY_MAX_DOCUMENT — accepted jako document, rejected jako fact', async () => {
+      const bodyBetweenLimits = 'x'.repeat(config.get('BODY_MAX_FACT') + 1000);
+      expect(bodyBetweenLimits.length).toBeLessThan(config.get('BODY_MAX_DOCUMENT'));
+
+      const asDocument = await memory.save(
+        { header: 'Duzy dokument', body: bodyBetweenLimits, kind: 'document' },
+        projectA,
+      );
+      expect(asDocument.status).toBe('pending');
+
+      await expect(
+        memory.save({ header: 'Duzy fakt', body: bodyBetweenLimits, kind: 'fact' }, projectA),
+      ).rejects.toMatchObject({ code: 'validation_error' });
+    });
   });
 
   describe('get — scope/IDOR (FR-M2, NFR-1, priorytet 2 wg §15)', () => {
@@ -805,6 +839,29 @@ describe('MemoryService (integration, testcontainers)', () => {
       expect(staged.length).toBeGreaterThan(0);
       expect(staged[0].embeddingModel).toBe('save-staging-model');
       expect(staged[0].chunkText).toContain('Fakt ze staged embeddingiem');
+    });
+
+    it('healthy provider, kind=document: staging_embeddings dostaje header dopisany do KAŻDEGO chunku (chunker document, §6 tech-stack)', async () => {
+      const healthyProvider = new StubEmbeddingProvider('save-staging-document-model');
+      const { memory: healthyMemory } = buildMemoryService(healthyProvider);
+
+      const res = await healthyMemory.save(
+        { header: 'Dokument ze staged embeddingiem', body: 'Tresc dokumentu do zaembeddowania przy save.', kind: 'document' },
+        projectS,
+      );
+      expect(res.status).toBe('pending');
+
+      const propId = await proposalIdFor(res.id, projectS.projectId);
+      const staged = await db
+        .select()
+        .from(stagingEmbeddings)
+        .where(eq(stagingEmbeddings.proposalId, propId));
+
+      expect(staged.length).toBeGreaterThan(0);
+      expect(staged[0].embeddingModel).toBe('save-staging-document-model');
+      for (const row of staged) {
+        expect(row.chunkText).toContain('Dokument ze staged embeddingiem');
+      }
     });
 
     it('provider down: save i tak tworzy proposal pending, ale BEZ wiersza staging_embeddings', async () => {

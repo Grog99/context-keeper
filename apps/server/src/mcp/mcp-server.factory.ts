@@ -83,16 +83,23 @@ export function createMcpServer(memory: MemoryService, ctx: ProjectContext): Mcp
       description: SAVE_MEMORY_DESCRIPTION,
       inputSchema: {
         header: z.string().min(1).describe('Short one-line title (<=200 chars).'),
-        body: z.string().min(1).describe('Fact content in markdown (<=~8KB).'),
+        body: z.string().min(1).describe('Content in markdown (fact <=~8KB, document <=~256KB).'),
         tags: z
           .array(z.string())
           .optional()
           .describe('Up to ~10 short lowercase tags ([a-z0-9-_/], no spaces).'),
+        kind: z
+          .enum(['fact', 'document'])
+          .optional()
+          .describe(
+            'Optional memory kind. Default "fact". "document" for longer canonical reference material. ' +
+              '"event" is human-only and not accepted here.',
+          ),
       },
     },
-    async ({ header, body, tags }) =>
+    async ({ header, body, tags, kind }) =>
       runTool(async () => {
-        const result = await memory.save({ header, body, tags }, ctx);
+        const result = await memory.save({ header, body, tags, kind }, ctx);
         return jsonResult(result);
       }),
   );

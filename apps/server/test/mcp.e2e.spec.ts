@@ -173,14 +173,52 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
     }
   });
 
-  it('save_memory nadal nie eksponuje kind (kontrakt agenta bez zmian — agent nie dostaje kind=event)', async () => {
+  it('save_memory eksponuje kind (fact|document) w schemacie — event NIE jest w tools/list enumie', async () => {
     const { client, transport } = newClient(token);
     await client.connect(transport);
     try {
       const tools = await client.listTools();
       const save = tools.tools.find((t) => t.name === 'save_memory')!;
       const props = (save.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
-      expect(Object.keys(props).sort()).toEqual(['body', 'header', 'tags']);
+      expect(Object.keys(props).sort()).toEqual(['body', 'header', 'kind', 'tags']);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('save_memory {kind: "document"} -> pending, jak fact', async () => {
+    const { client, transport } = newClient(token);
+    await client.connect(transport);
+    try {
+      const saveRes = await client.callTool({
+        name: 'save_memory',
+        arguments: {
+          header: 'Nowy dokument e2e',
+          body: 'Treść nowego dokumentu e2e.',
+          kind: 'document',
+          tags: ['e2e'],
+        },
+      });
+      expect(saveRes.isError).not.toBe(true);
+      const saved = JSON.parse(textOf(saveRes as CallToolResult)) as { id: string; status: string };
+      expect(saved.status).toBe('pending');
+      expect(saved.id).toMatch(/^mem_/);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('save_memory {kind: "event"} -> odrzucone przez SDK (event pozostaje human-only)', async () => {
+    const { client, transport } = newClient(token);
+    await client.connect(transport);
+    try {
+      // Zod enum ['fact','document'] w inputSchema (mcp-server.factory.ts) odrzuca 'event' jeszcze
+      // po stronie SDK klienta, PRZED dotarciem do serwera — stąd isError zamiast rzuconego wyjątku.
+      const res = await client.callTool({
+        name: 'save_memory',
+        arguments: { header: 'Próba zapisu eventu', body: 'To nie powinno przejść.', kind: 'event' },
+      });
+      expect(res.isError).toBe(true);
     } finally {
       await transport.close();
     }
