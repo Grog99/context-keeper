@@ -121,7 +121,7 @@ Jeden dyskryminator `kind` na tabeli `memories` (nie osobne tabele — reużycie
 | `event_time` | (v1.2) **wyłącznie `kind=event`** — nullable, backdatable znacznik KIEDY zdarzenie się wydarzyło (osobny od `created_at` = kiedy wpis powstał w pamięci). Ustawiany raz przy tworzeniu (edycja po fakcie poza zakresem v1). Napędza sortowanie ekranu „Oś czasu" i age-decay w rankingu retrievalu. |
 
 - `fact` = fakty accreted przez agenta (mutowalne, podlegają dedup/supersession/prune).
-- `document` = dokumenty authored przez człowieka (PRD, roadmap) — kanon, permanentne, poza zasięgiem nocnego joba. **W v1 tworzone i edytowane wyłącznie przez człowieka** (agent-proposed edycje dokumentu wymagają agent-update → v2).
+- `document` = dokumenty authored przez człowieka (PRD, roadmap) — kanon, permanentne, poza zasięgiem nocnego joba. Od v1.2 agent może *zaproponować* nowy `document` przez `save_memory` (`kind='document'`, human-gated jak każdy proposal); **edycja istniejącego dokumentu przez agenta pozostaje poza zakresem** (agent-update → osobne zadanie roadmapy).
 - `event` = zdarzenia ze stemplem czasu (v1.2) — **tworzone wyłącznie przez człowieka** w dashboardzie (`save_memory` agenta go nie eksponuje). W rankingu retrievalu podlegają age-decay (wykładniczy half-life, `EVENT_DECAY_HALFLIFE_DAYS`, aplikowany post-RRF, zero wpływu na fact/document). Domyślnie **wyłączone** z domyślnego `kind` w `search_memory` — per-projektowy boolean `projects.include_events_in_default_search` (dialog szczegółów projektu, §9.3) je włącza; `kind=event` jawny w zapytaniu działa zawsze niezależnie od togglea.
 - Model 2D: `scope` × `kind` (`document` może być `global` = glossary/standard, lub `project` = PRD tego projektu).
 

@@ -1,9 +1,16 @@
 import type { MemoryKind, MemoryScope } from '../db/schema/enums';
 
+/** `kind` dopuszczalny w `save_memory` (agent) — `event` jest human-only, więc wykluczony na
+ * poziomie typu TS (obok zod enum w `mcp-server.factory.ts`, defense in depth). */
+export type SaveMemoryKind = Extract<MemoryKind, 'fact' | 'document'>;
+
 export interface SaveMemoryInput {
   header: string;
   body: string;
   tags?: string[];
+  /** Domyślnie `fact` (`save()` liczy `input.kind ?? 'fact'`) — istniejący wywołujący bez `kind`
+   * zachowują się jak przed dodaniem `document`. */
+  kind?: SaveMemoryKind;
 }
 
 export type SaveStatus = 'pending' | 'duplicate_pending' | 'already_exists';

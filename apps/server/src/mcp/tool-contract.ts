@@ -20,25 +20,27 @@ Enforces the same project+global scope as search_memory: an id outside your scop
 
 Errors: {code: "not_found", message} when the id is unknown or out of scope for your token.`;
 
-export const SAVE_MEMORY_DESCRIPTION = `Propose a new fact to add to the shared project memory.
+export const SAVE_MEMORY_DESCRIPTION = `Propose a new memory (a fact or a document) to add to the shared project memory.
 
 IMPORTANT — human-gated write: this does NOT write to memory immediately. It creates a pending proposal that a human reviewer must approve before it becomes visible to search_memory/get_memory (to you or to any other agent). Do not expect to find it again later in the same session — this is a fire-and-forget write, not a synchronous commit.
 
-One atomic fact per call. Do not bundle multiple unrelated facts into a single header/body — call save_memory once per fact.
+Choose the kind with the optional \`kind\` parameter: "fact" (the default — omit \`kind\` to save a fact) or "document". \`event\` memories exist but are human-only and cannot be created here.
+
+One atomic fact per call for facts: do not bundle multiple unrelated facts into a single header/body — call save_memory once per fact. A document is instead a single self-contained reference text (a decision record, spec, or convention writeup), saved whole.
 
 - header: a short one-line title (<=200 chars; newlines are collapsed to spaces).
-- body: the fact content in markdown (fact size limit ~8KB).
+- body: the content in markdown (size limit ~8KB for a fact, ~256KB for a document).
 - tags: up to ~10 short lowercase tags ([a-z0-9-_/], no spaces) for filtering later.
 
 Scope: always saved to YOUR project — never global. Promotion to global is a human action in the dashboard.
 
-You can only CREATE new facts in v1 (no update/delete). To correct an existing fact, save a new one that references what it supersedes in the body — a human reviewer will reconcile the two.
+You can only CREATE new memories in v1 (no update/delete). To correct an existing memory, save a new one that references what it supersedes in the body — a human reviewer will reconcile the two.
 
-NEVER include secrets (API keys, passwords, private keys, tokens, credentials) in header or body. Such content is rejected before it reaches storage (\`secret_blocked\` error) — the fact is not saved, and there is no in-place redaction to fall back on. Rewrite the fact referring to the secret by name or purpose only, never by value, and try again.
+NEVER include secrets (API keys, passwords, private keys, tokens, credentials) in header or body. Such content is rejected before it reaches storage (\`secret_blocked\` error) — the memory is not saved, and there is no in-place redaction to fall back on. Rewrite it referring to the secret by name or purpose only, never by value, and try again.
 
 Return value: {id, status}.
 - status "pending": a new proposal was created and is awaiting human review.
 - status "duplicate_pending": an identical proposal is already pending — \`id\` refers to that existing proposal, not a new one.
-- status "already_exists": an identical fact is already approved in memory — \`id\` refers to that memory.
+- status "already_exists": an identical memory is already approved — \`id\` refers to that memory. Note: duplicate detection currently keys only on header+body, not kind — saving the same header+body under a different \`kind\` than an existing fact/document will also be classified as a duplicate.
 
 None of these statuses are errors. This is fire-and-forget — do not poll or wait for approval.`;
