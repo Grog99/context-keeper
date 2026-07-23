@@ -5,8 +5,9 @@ Agenci szukają kontekstu i **proponują** zapisy; nic nie wchodzi do pamięci b
 
 Specyfikacja: [`context/prd.md`](context/prd.md) · [`context/tech-stack.md`](context/tech-stack.md) · [`context/design-system.md`](context/design-system.md) · [`context/roadmap.md`](context/roadmap.md)
 
-> **Status:** Faza 1 (Fundament) — host NestJS, model danych (Postgres + pgvector), Docker Compose, projekty + bearer tokeny.
-> MCP, retrieval, kolejka akceptacji i dashboard dochodzą w Fazach 2–5.
+> **Status:** v1 domknięte i wdrożone (dogfooding live) — MCP (3 narzędzia), hybrid retrieval,
+> kolejka akceptacji, dashboard (4 ekrany), nocny job, utwardzenie, instalator. Następny etap: v1.1
+> (walidacja dogfoodingu) — patrz [`context/roadmap.md`](context/roadmap.md).
 
 ## Stack
 
