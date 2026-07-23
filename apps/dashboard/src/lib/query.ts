@@ -20,5 +20,6 @@ export const queryKeys = {
   projects: () => ['projects'] as const,
   audit: (filter: Record<string, unknown>) => ['audit', filter] as const,
   metrics: () => ['metrics'] as const,
+  usage: (filter: Record<string, unknown>) => ['metrics', 'usage', filter] as const,
   config: () => ['config'] as const,
 };

@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AuditService } from '../src/audit/audit.service';
@@ -12,13 +12,14 @@ import { AppConfigService } from '../src/config/config.service';
 import { envSchema } from '../src/config/env';
 import type { Database } from '../src/db/db.tokens';
 import * as schema from '../src/db/schema';
-import { auditLog, EMBEDDING_DIM, embeddings, proposals, stagingEmbeddings } from '../src/db/schema';
+import { auditLog, EMBEDDING_DIM, embeddings, proposals, searchEvents, stagingEmbeddings } from '../src/db/schema';
 import { generateId, ID_PREFIX } from '../src/common/ids';
 import type { EmbeddingProvider } from '../src/embeddings/embedding-provider';
 import { EmbeddingService } from '../src/embeddings/embedding.service';
 import { MemoryService } from '../src/memory/memory.service';
 import type { ProjectContext } from '../src/projects/projects.service';
 import { ProjectsService } from '../src/projects/projects.service';
+import { UsageService } from '../src/usage/usage.service';
 
 /**
  * Testcontainers nie potrafi odpalić prawdziwego sidecara TEI — port `EmbeddingProvider` istnieje
@@ -79,7 +80,10 @@ describe('MemoryService (integration, testcontainers)', () => {
     const cfg = new AppConfigService(
       envSchema.parse({ DATABASE_URL: 'postgres://unused', ...envOverrides }),
     );
-    return { memory: new MemoryService(db, cfg, audit, new EmbeddingService(provider, cfg)), config: cfg };
+    return {
+      memory: new MemoryService(db, cfg, audit, new EmbeddingService(provider, cfg), new UsageService(db)),
+      config: cfg,
+    };
   }
 
   beforeAll(async () => {
@@ -96,7 +100,7 @@ describe('MemoryService (integration, testcontainers)', () => {
     // starego zachowania FTS-only, więc te testy zostają nietknięte przez dodanie ramienia wektorowego.
     const downProvider = new StubEmbeddingProvider('down-stub');
     downProvider.throwOnEmbed = true;
-    memory = new MemoryService(db, config, audit, new EmbeddingService(downProvider, config));
+    memory = new MemoryService(db, config, audit, new EmbeddingService(downProvider, config), new UsageService(db));
 
     const created = await projects.createProject('memory-test-a');
     projectA = { projectId: created.project.id, projectName: created.project.name };
@@ -553,6 +557,80 @@ describe('MemoryService (integration, testcontainers)', () => {
       // (2) Query z dokładnym tokenem z headera -> FTS wciąż znajduje, niezależnie od modelu wektora.
       const lexicalResults = await activeMemory.search({ query: 'modelfiltertest55' }, projectH);
       expect(lexicalResults.some((r) => r.id === staleMemory.id)).toBe(true);
+    });
+  });
+
+  describe('search — instrumentacja search_events (roadmap v1.1, "Pomiary")', () => {
+    let projectI: ProjectContext;
+
+    beforeAll(async () => {
+      const created = await projects.createProject('memory-test-usage-instrumentation');
+      projectI = { projectId: created.project.id, projectName: created.project.name };
+    });
+
+    /** Ostatni zapisany `search_events` dla projektu — testy tego bloku są jedynym producentem
+     * wierszy dla `projectI`, więc "ostatni po created_at" == "ten z wywołania, które właśnie
+     * sprawdzamy" (brak współbieżnych zapisów w tym projekcie). */
+    async function lastSearchEvent(projectId: string) {
+      const rows = await db
+        .select()
+        .from(searchEvents)
+        .where(eq(searchEvents.projectId, projectId))
+        .orderBy(desc(searchEvents.createdAt));
+      return rows[0];
+    }
+
+    it('dopasowanie: jeden wiersz z result_count>0, degraded=false', async () => {
+      const provider = new StubEmbeddingProvider('usage-instrumentation-model');
+      const { memory: healthyMemory } = buildMemoryService(provider);
+
+      const marker = 'instrumentacjadopasowaniemarker1';
+      provider.register(marker, topicVector(1));
+      await healthyMemory.devSeedApproved({
+        header: `Fakt ${marker}`,
+        body: 'Trescy do dopasowania FTS.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectI.projectId,
+      });
+
+      const before = (await db.select().from(searchEvents).where(eq(searchEvents.projectId, projectI.projectId)))
+        .length;
+      const results = await healthyMemory.search({ query: marker }, projectI);
+      expect(results.length).toBeGreaterThan(0);
+
+      const after = await db.select().from(searchEvents).where(eq(searchEvents.projectId, projectI.projectId));
+      expect(after.length).toBe(before + 1); // DOKŁADNIE jeden nowy wiersz per search()
+
+      const row = await lastSearchEvent(projectI.projectId);
+      expect(row.resultCount).toBe(results.length);
+      expect(row.resultCount).toBeGreaterThan(0);
+      expect(row.degraded).toBe(false);
+      expect(row.id).toMatch(/^sev_/);
+    });
+
+    it('brak dopasowań: wiersz z result_count=0, degraded=false (prawdziwy zero-result, nie degradacja)', async () => {
+      const provider = new StubEmbeddingProvider('usage-instrumentation-model-2');
+      const { memory: healthyMemory } = buildMemoryService(provider);
+
+      const results = await healthyMemory.search({ query: 'zupelnieniepowiazanafrazainstrumentacja777' }, projectI);
+      expect(results).toEqual([]);
+
+      const row = await lastSearchEvent(projectI.projectId);
+      expect(row.resultCount).toBe(0);
+      expect(row.degraded).toBe(false);
+    });
+
+    it('embedding provider padnięty: wiersz ma degraded=true (fail-open — search NIE rzuca)', async () => {
+      const throwingProvider = new StubEmbeddingProvider('usage-instrumentation-down-model');
+      throwingProvider.throwOnEmbed = true;
+      const { memory: downMemory } = buildMemoryService(throwingProvider);
+
+      const results = await downMemory.search({ query: 'dowolnezapytanieinstrumentacja' }, projectI);
+      expect(Array.isArray(results)).toBe(true); // search() nie rzuciło mimo padniętego providera
+
+      const row = await lastSearchEvent(projectI.projectId);
+      expect(row.degraded).toBe(true);
     });
   });
 

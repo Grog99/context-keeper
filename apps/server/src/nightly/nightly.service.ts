@@ -9,6 +9,7 @@ import type { MemoryKind, MemoryScope } from '../db/schema/enums';
 import { findAnnNeighbors } from '../embeddings/ann-search';
 import { EmbeddingService } from '../embeddings/embedding.service';
 import { computeStaleIds } from '../proposals/proposals.service';
+import { UsageService } from '../usage/usage.service';
 import { buildClusters, pickCanonicalMerge, type NeighborPair } from './dedup-cluster';
 import {
   conditionKey,
@@ -39,7 +40,10 @@ const EMPTY_COUNTERS: NightlyCounters = {
   pruneProposed: 0,
   skippedPoliteness: 0,
   skippedCap: 0,
+  searchEventsPruned: 0,
 };
+
+const DAY_MS = 24 * 60 * 60_000;
 
 interface FactRow {
   id: string;
@@ -90,6 +94,7 @@ export class NightlyService {
     private readonly audit: AuditService,
     private readonly embedding: EmbeddingService,
     @Inject(PRUNE_SCORER) private readonly pruneScorer: PruneScorer,
+    private readonly usage: UsageService,
   ) {}
 
   /**
@@ -254,6 +259,23 @@ export class NightlyService {
       if (didWithdraw) withdrawn++;
     }
 
+    // Retencja `search_events` (roadmap v1.1 "Pomiary", plan §5(b/g)) — piggyback na tym samym
+    // przebiegu/lockcie, brak osobnego schedulera. Niezależne od dedup/prune pamięci powyżej —
+    // czysto addytywny krok, nie zmienia żadnej z istniejących decyzji merge/delete. Fail-open
+    // (analogicznie do `MemoryService.recordSearchSafe`) — awaria retencji jest złapana i
+    // zalogowana, NIGDY nie może zamienić skądinąd udanego przebiegu (dedup/merge/prune proposale
+    // powyżej już zacommitowane) w `failed` całego `run()`.
+    const retentionDays = this.config.get('SEARCH_EVENTS_RETENTION_DAYS');
+    let searchEventsPruned = 0;
+    try {
+      searchEventsPruned = await this.usage.pruneOlderThan(new Date(Date.now() - retentionDays * DAY_MS));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `[nightly] retencja search_events nie powiodła się (fail-open, przebieg kontynuowany): ${message}`,
+      );
+    }
+
     return {
       created,
       withdrawn,
@@ -262,6 +284,7 @@ export class NightlyService {
       pruneProposed,
       skippedPoliteness,
       skippedCap,
+      searchEventsPruned,
     };
   }
 

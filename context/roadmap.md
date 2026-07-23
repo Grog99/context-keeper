@@ -52,19 +52,19 @@ Audit log, observability (`/health`, metryki — w tym latencja embeddingu, FR-D
 
 ---
 
-## v1.1 — Walidacja dogfoodingu ⬜
+## v1.1 — Walidacja dogfoodingu 🔨
 
 **Cel fazy:** sprawić, by eksperyment „czy **sam MCP + kontrakt narzędzi + `AGENTS.md`** wystarczą, żeby
 agent proaktywnie sięgał do pamięci" był **mierzalny** i **miał realną treść do znalezienia**. Dopiero
 wynik tej fazy decyduje, czy plugin Claude Code jest potrzebny (patrz backlog).
 
-- **Seed pamięci grounding-dokumentami** — zaseeduj wdrożoną instancję stabilnymi dokumentami
+- **Seed pamięci grounding-dokumentami** ✅ — zaseeduj wdrożoną instancję stabilnymi dokumentami
   (`design-system.md`, `mcp-tool-contract.md`, kluczowe decyzje jako `kind=document`) przez istniejące
   CLI `seed-memory`. Bez treści `search_memory` zwraca zero i eksperyment nie ma czego znaleźć.
-- **Instrumentacja użycia pamięci** — widok odpowiadający na pytanie eksperymentu: liczba
-  `search_memory`/projekt w czasie, searche z **0 wyników**, stosunek accept/reject/edit propozycji.
-  Warstwa, na której podejmiemy decyzję o pluginie na danych, nie na oko. (Rozszerza istniejące
-  `access_count` / metryki kolejki.)
+- **Instrumentacja użycia pamięci** ✅ — ekran „Pomiary" (`/pomiary`): liczba `search_memory`/projekt
+  w czasie, searche z **0 wyników** (rate), stosunek accept/reject/edit propozycji. Nowa tabela
+  `search_events` (zapis fail-open w `search()`), endpoint `GET /api/metrics/usage`, wykresy recharts.
+  Warstwa, na której podejmiemy decyzję o pluginie na danych, nie na oko.
 - **Dashboard: ręczny trigger nocnego jobu + hard-purge** — wystawienie w UI istniejących CLI
   `run-nightly` i `purge` (mała robota, domyka pozycje przesunięte z v1).
 - **Review bezpieczeństwa publicznego MCP** — świadomy pass po token-gated endpoincie wystawionym

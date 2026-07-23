@@ -98,6 +98,9 @@ export const envSchema = z
     // Flood backstop (plan §5 pkt 6): limit NOWYCH proposali tworzonych w jednym przebiegu —
     // reszta wykrytych warunków wraca w kolejnym stateless re-scanie, nie ginie po cichu.
     NIGHTLY_MAX_PROPOSALS_PER_RUN: z.coerce.number().int().positive().default(200),
+    // Retencja `search_events` (instrumentacja "Pomiary", roadmap v1.1) — raw rows starsze niż N dni
+    // są pruned nocnym jobem (piggyback na istniejący przebieg, bez nowego schedulera).
+    SEARCH_EVENTS_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
 
     // Backup (NFR-5, §9 tech-stack; plan Fazy 7). Appka TYCH zmiennych nie czyta — to kontrakt dla
     // `infra/backup.sh` + przyszłego host-side schedulera (Faza 8), dokładnie jak NIGHTLY_CRON/TZ.

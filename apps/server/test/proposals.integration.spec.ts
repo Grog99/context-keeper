@@ -30,6 +30,7 @@ import { MemoryService } from '../src/memory/memory.service';
 import { ProposalsService } from '../src/proposals/proposals.service';
 import type { ProjectContext } from '../src/projects/projects.service';
 import { ProjectsService } from '../src/projects/projects.service';
+import { UsageService } from '../src/usage/usage.service';
 
 /** Jak w `memory.integration.spec.ts` — testcontainers nie odpala prawdziwego sidecara TEI.
  * Tutaj nie interesuje nas RANKING (żadnych testów search-ranking), więc jeden stały wektor
@@ -81,7 +82,7 @@ describe('ProposalsService (integration, testcontainers) — kolejka akceptacji 
     const embeddingService = new EmbeddingService(provider, config);
     return {
       config,
-      memoryService: new MemoryService(db, config, audit, embeddingService),
+      memoryService: new MemoryService(db, config, audit, embeddingService, new UsageService(db)),
       proposalsService: new ProposalsService(db, config, audit, embeddingService),
     };
   }

@@ -132,3 +132,41 @@ export interface DashboardLimits {
   tagsMax: number;
   tagMaxLen: number;
 }
+
+/** Ekran "Pomiary" (roadmap v1.1) — lustro `UsageMetricsDto`
+ * (`apps/server/src/dashboard/usage-metrics.controller.ts`). */
+export type UsageBucket = 'day' | 'hour';
+
+export interface UsageBucketPoint {
+  ts: string;
+  searches: number;
+  zeroResult: number;
+  degraded: number;
+}
+
+export interface ProjectSearchSeries {
+  projectId: string;
+  projectName: string;
+  /** Headline "zero-result rate per projekt" — sumy dla całego zakresu. `degraded` WYŁĄCZONE
+   * z `zeroResult`/`zeroResultRate` (degradacja embeddingu ≠ "pamięć nie ma treści"). */
+  totals: { searches: number; zeroResult: number; degraded: number; zeroResultRate: number };
+  buckets: UsageBucketPoint[];
+}
+
+export interface ProposalOutcomeBucketPoint {
+  ts: string;
+  approved: number;
+  rejected: number;
+  /** PODZBIÓR `approved` (approved AND miał edited_payload) — NIE osobna rozłączna kategoria. */
+  approvedWithEdits: number;
+}
+
+export interface UsageMetrics {
+  range: { from: string; to: string; bucket: UsageBucket };
+  searchSeries: ProjectSearchSeries[];
+  searchTotals: { searches: number; zeroResult: number; degraded: number; zeroResultRate: number };
+  proposalSeries: {
+    buckets: ProposalOutcomeBucketPoint[];
+    totals: { approved: number; rejected: number; approvedWithEdits: number };
+  };
+}

@@ -5,6 +5,7 @@ import { AuditModule } from '../audit/audit.module';
 import { MemoryModule } from '../memory/memory.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { ProposalsModule } from '../proposals/proposals.module';
+import { UsageModule } from '../usage/usage.module';
 import { AuditController } from './audit.controller';
 import { AuthController } from './auth/auth.controller';
 import { CsrfGuard } from './auth/csrf.guard';
@@ -15,6 +16,7 @@ import { MemoriesController } from './memories.controller';
 import { MetricsController } from './metrics.controller';
 import { ProjectsController } from './projects.controller';
 import { ProposalsController } from './proposals.controller';
+import { UsageMetricsController } from './usage-metrics.controller';
 
 /**
  * Powierzchnia dashboardu (Faza 5, M0/M1 planu) — auth/sesja + REST API per ekran, spięte na
@@ -32,6 +34,7 @@ import { ProposalsController } from './proposals.controller';
     MemoryModule,
     ProjectsModule,
     AuditModule,
+    UsageModule,
     ServeStaticModule.forRoot({
       // `__dirname` w skompilowanym dist to `dist/dashboard/` (mirror src/dashboard/) — `dist/public`
       // wymaga wyjścia jeden poziom wyżej, NIE `join(__dirname, 'public')` (patrz M5: kopiowany tam
@@ -48,6 +51,7 @@ import { ProposalsController } from './proposals.controller';
     ProjectsController,
     AuditController,
     MetricsController,
+    UsageMetricsController,
     ConfigController,
   ],
   providers: [SessionGuard, CsrfGuard, LoginThrottleService],

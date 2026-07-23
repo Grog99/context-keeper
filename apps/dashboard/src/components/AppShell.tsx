@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, Diamond, FolderKanban, Inbox, Moon, Plus, ScrollText, Sun } from 'lucide-react';
+import { Activity, Archive, Diamond, FolderKanban, Inbox, Moon, Plus, ScrollText, Sun } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTheme } from '../hooks/useTheme';
@@ -21,6 +21,7 @@ const NAV_ITEMS: { to: string; label: string; icon: typeof Inbox; screen: Screen
   { to: '/pamiec', label: 'Pamięć', icon: Archive, screen: 'pamiec' },
   { to: '/projekty', label: 'Projekty', icon: FolderKanban, screen: 'projekty' },
   { to: '/audyt', label: 'Audyt', icon: ScrollText, screen: 'audyt' },
+  { to: '/pomiary', label: 'Pomiary', icon: Activity, screen: 'pomiary' },
 ];
 
 const SCREEN_PATH: Record<ScreenKey, string> = {
@@ -28,6 +29,7 @@ const SCREEN_PATH: Record<ScreenKey, string> = {
   pamiec: '/pamiec',
   projekty: '/projekty',
   audyt: '/audyt',
+  pomiary: '/pomiary',
 };
 
 /** Label paska zdrowia (FR-D7): `up`/`degraded` + latencja ostatniego health-checku, gdy znana. */
