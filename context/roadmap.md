@@ -67,9 +67,12 @@ wynik tej fazy decyduje, czy plugin Claude Code jest potrzebny (patrz backlog).
   Warstwa, na której podejmiemy decyzję o pluginie na danych, nie na oko.
 - **Dashboard: ręczny trigger nocnego jobu + hard-purge** — wystawienie w UI istniejących CLI
   `run-nightly` i `purge` (mała robota, domyka pozycje przesunięte z v1).
-- **Review bezpieczeństwa publicznego MCP** — świadomy pass po token-gated endpoincie wystawionym
-  w internecie: edge-case'y auth, ścieżki wycieku tokenu, tuning rate-limitu, audyt zależności.
-  (Skaner sekretów, IDOR i rate-limit są już w v1 — to pass utwardzający, nie budowa od zera.)
+- **Review bezpieczeństwa publicznego MCP** ✅ — pass utwardzający po token-gated endpoincie. Auth,
+  scope/IDOR i redakcja tokenu potwierdzone bez dziur; wdrożone utwardzenia: throttle **pre-auth
+  per-IP** na `/mcp` przed `BearerGuard` (`RATE_LIMIT_MCP_IP_PER_MIN`), `helmet` + CSP + `x-powered-by`
+  off, eviction bucketów in-memory, override `@hono/node-server` (audit czysty), bind portów compose do
+  `127.0.0.1` (DB/dashboard poza publicznym interfejsem), `limit_req` w przykładzie nginx. Świadomie
+  odłożone: rewokacja sesji, limiter na Redis (v2).
 
 ## v2 i dalej ⬜ (backlog)
 

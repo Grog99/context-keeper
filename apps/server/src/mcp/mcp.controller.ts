@@ -1,10 +1,21 @@
-import { Controller, Delete, Get, HttpStatus, Post, Req, Res, UseFilters, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Delete,
+  Get,
+  HttpStatus,
+  Post,
+  Req,
+  Res,
+  UseFilters,
+  UseGuards,
+} from '@nestjs/common';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Request, Response } from 'express';
 import { MemoryService } from '../memory/memory.service';
 import { BearerGuard } from '../projects/bearer.guard';
 import type { ProjectContext } from '../projects/projects.service';
 import { RateLimitExceptionFilter } from '../rate-limit/rate-limit.filter';
+import { McpIpThrottleGuard } from './mcp-ip-throttle.guard';
 import { McpRateLimitGuard } from './mcp-rate-limit.guard';
 import { createMcpServer } from './mcp-server.factory';
 
@@ -26,7 +37,9 @@ const METHOD_NOT_ALLOWED_BODY = {
  * (bez AsyncLocalStorage, którego by tu nie było komu odczytać poza tym jednym miejscu).
  */
 @Controller('mcp')
-@UseGuards(BearerGuard, McpRateLimitGuard)
+// Kolejność istotna: throttle pre-auth per IP (C1) PRZED BearerGuard (który dotyka DB), potem
+// rate-limit post-auth per token × narzędzie. Guard, który rzuci, zatrzymuje łańcuch.
+@UseGuards(McpIpThrottleGuard, BearerGuard, McpRateLimitGuard)
 @UseFilters(RateLimitExceptionFilter)
 export class McpController {
   constructor(private readonly memory: MemoryService) {}

@@ -125,6 +125,11 @@ export const envSchema = z
     RATE_LIMIT_SAVE_PER_MIN: z.coerce.number().int().positive().default(20),
     RATE_LIMIT_SEARCH_PER_MIN: z.coerce.number().int().positive().default(120),
     RATE_LIMIT_GET_PER_MIN: z.coerce.number().int().positive().default(240),
+    // Throttle PRE-AUTH per IP na /mcp — backstop DoS zanim BearerGuard dotknie DB przy każdym
+    // (dobrze sformatowanym, ale nieważnym) tokenie. Fidelity per-IP wymaga TRUST_PROXY=true za
+    // zaufanym, jedynym proxy-ingres; bez tego degraduje się do coarse limitu per-instancja
+    // (wciąż ogranicza łączny nieuwierzytelniony ruch). Osobny od limitów per-token wyżej.
+    RATE_LIMIT_MCP_IP_PER_MIN: z.coerce.number().int().positive().default(300),
 
     // Dashboard / sesja (Faza 5) — DASHBOARD_PASSWORD/SESSION_SECRET wymagane w produkcji.
     DASHBOARD_PASSWORD: z.string().optional(),

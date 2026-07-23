@@ -29,4 +29,31 @@ export class TokenBucket {
     const retryAfterMs = Math.ceil(deficit / this.refillPerMs);
     return { allowed: false, retryAfterMs };
   }
+
+  /** Czas (ms) od ostatniego `tryConsume`. Bucket bezczynny ≥ pełny-refill jest już dopełniony do
+   * `capacity`, więc jest nieodróżnialny od świeżo utworzonego — bezpieczny do usunięcia (eviction). */
+  idleMs(nowMs: number = Date.now()): number {
+    return nowMs - this.lastRefillMs;
+  }
+}
+
+/**
+ * Sprząta mapę bucketów in-memory z wpisów bezczynnych ≥ `ttlMs` (patrz `idleMs` — taki bucket i tak
+ * jest w pełni dopełniony, więc usunięcie jest behawioralnie neutralne). Wołane oportunistycznie przez
+ * serwisy rate-limitu/throttlingu, gdy mapa urośnie — bez timerów (spójne z filozofią "bez timerów"
+ * tego pliku). Zwraca liczbę usuniętych wpisów. Domyślny `now` w idleMs → jeden odczyt zegara na wpis;
+ * przekaż `nowMs` gdy testujesz deterministycznie. */
+export function sweepStaleBuckets(
+  buckets: Map<string, TokenBucket>,
+  ttlMs: number,
+  nowMs: number = Date.now(),
+): number {
+  let removed = 0;
+  for (const [key, bucket] of buckets) {
+    if (bucket.idleMs(nowMs) >= ttlMs) {
+      buckets.delete(key);
+      removed += 1;
+    }
+  }
+  return removed;
 }

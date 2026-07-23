@@ -16,6 +16,11 @@
 	# Caddyfile tylko routuje po ścieżce — "za VPN / CF Access" to warstwa PRZED Caddym (network
 	# policy ograniczający kto w ogóle dobija się do tego hosta/portu, albo osobna aplikacja
 	# Cloudflare Access na subdomenie dashboardu) — poza zakresem samego reverse proxy tutaj.
+	# Rate limit dla publicznego /mcp: egzekwowany W APLIKACJI (throttle pre-auth per IP,
+	# RATE_LIMIT_MCP_IP_PER_MIN — review bezpieczeństwa C1). Stockowy obraz `caddy:2.11-alpine` NIE ma
+	# dyrektywy `rate_limit` (wymaga custom-buildu z pluginem `caddy-ratelimit`), więc świadomie nie
+	# dodajemy jej tu, żeby nie wywrócić stocka. Dla per-IP fidelity ustaw TRUST_PROXY=true (Caddy jest
+	# zaufanym, jedynym ingresem i ustawia X-Forwarded-For).
 	handle /mcp* {
 		reverse_proxy app:3000
 	}

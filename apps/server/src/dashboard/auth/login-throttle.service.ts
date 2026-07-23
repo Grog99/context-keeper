@@ -1,8 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { TokenBucket } from '../../rate-limit/token-bucket';
+import { sweepStaleBuckets, TokenBucket } from '../../rate-limit/token-bucket';
 
 const LOGIN_ATTEMPTS_PER_WINDOW = 5;
 const WINDOW_MS = 5 * 60_000;
+// Bucket jest w pełni dopełniony po WINDOW_MS bezczynności → wtedy bezpieczny do usunięcia.
+// Klucz to IP (pre-auth), więc bez sweepu rotacja adresów rosłaby mapę bez ograniczeń (C2).
+const SWEEP_THRESHOLD = 10_000;
 
 export type ThrottleResult = { allowed: true } | { allowed: false; retryAfterSec: number };
 
@@ -18,6 +21,7 @@ export class LoginThrottleService {
   tryConsume(ip: string): ThrottleResult {
     let bucket = this.buckets.get(ip);
     if (!bucket) {
+      if (this.buckets.size >= SWEEP_THRESHOLD) sweepStaleBuckets(this.buckets, WINDOW_MS);
       bucket = new TokenBucket(LOGIN_ATTEMPTS_PER_WINDOW, LOGIN_ATTEMPTS_PER_WINDOW / WINDOW_MS);
       this.buckets.set(ip, bucket);
     }
