@@ -42,7 +42,7 @@ Audit log, observability (`/health`, metryki — w tym latencja embeddingu, FR-D
 **8. Onboarding / instalator** ⬜
 `install.sh` — generacja `.env` + sekrety + wybór profili (preset embeddingów, tryb proxy); uruchomienie stacku opcjonalne (prompt). Kanon configu = `.env.example`.
 - Ścieżka PaaS (Coolify) jako rozszerzenie onboardingu obok `install.sh`/VPS: build z repo przez
-  `docker-compose.coolify.yml` (dwie domeny magic-env, `EMBEDDING_PROVIDER=api` @ 1024, auto-migracja
+  `deploy/docker-compose.coolify.yml` (dwie domeny magic-env, `EMBEDDING_PROVIDER=api` @ 1024, auto-migracja
   in-process) — runbook w [`docs/deploy-coolify.md`](../docs/deploy-coolify.md). Coolify Scheduled
   Tasks zastępują host-cron dla nocnego joba (`run-nightly`) i `infra/backup.sh`.
 

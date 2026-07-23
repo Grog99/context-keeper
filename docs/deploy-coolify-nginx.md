@@ -6,7 +6,7 @@ kontener; cały ruch publiczny, TLS i auth robią Pangolin + nginx. Wariant pod 
 opisuje [`deploy-coolify.md`](deploy-coolify.md) — ten dokument jest jego alternatywą, nie zamiennikiem.
 Kanon configu wciąż w [`.env.example`](../.env.example).
 
-Compose: [`docker-compose.coolify-nginx.yml`](../docker-compose.coolify-nginx.yml).
+Compose: [`deploy/docker-compose.coolify-nginx.yml`](../deploy/docker-compose.coolify-nginx.yml).
 Przykład nginx: [`infra/nginx.conf.example`](../infra/nginx.conf.example).
 
 ## 1. Topologia
@@ -23,7 +23,9 @@ nich host nginx, a przed nim stoi Pangolin. Nikt nie dobije się do app z pomini
 ## 2. Zasób w Coolify
 
 1. **New Resource → Docker Compose**, wskaż repo + branch.
-2. **Base Directory**: root repo. **Docker Compose Location**: `docker-compose.coolify-nginx.yml`.
+2. **Base Directory**: root repo (compose leży w `deploy/`, ale jego `build.context: ..` celuje w root
+   monorepo — Base Directory zostaw na root, nie na `deploy/`).
+   **Docker Compose Location**: `deploy/docker-compose.coolify-nginx.yml`.
 3. **NIE nadawaj domeny** w zakładce *Domains* i **NIE ustawiaj żadnej zmiennej `SERVICE_FQDN_*`.**
    To jest cały trik: Coolify dorzuca router w swoim Traefiku **tylko** gdy nadasz serwisowi domenę
    albo magic-env `SERVICE_FQDN_*`/`SERVICE_URL_*`. Bez nich proxy Coolify ignoruje app, a publikacja

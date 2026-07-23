@@ -34,7 +34,8 @@ services:
 
   app:
     build:
-      context: .
+      # Kontekst = root monorepo. Plik leży w deploy/, więc `..`; Dockerfile jest relatywny do kontekstu.
+      context: ..
       dockerfile: apps/server/Dockerfile
     restart: unless-stopped
     depends_on:

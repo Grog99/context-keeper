@@ -107,10 +107,14 @@ apps/server/           NestJS host (MCP + JSON API + bundle SPA)
   src/health/          /health
   src/cli/             komendy nest-commander
 infra/Caddyfile        bundled edge (tryb A)
+infra/nginx.conf.example  przykład reverse proxy nginx (bring-your-own-proxy / Pangolin)
 infra/backup.sh         pg_dump + retencja tiered + offsite (NFR-5, patrz "Backup / Restore")
 infra/restore.sh        restore dumpa do scratch DB + runbook promocji
-docker-compose.coolify.yml  deploy na Coolify (PaaS, build z repo) — patrz docs/deploy-coolify.md
-docs/deploy-coolify.md  runbook: deploy na Coolify
+deploy/                warianty compose pod Coolify (PaaS, build z repo):
+  docker-compose.coolify.yml        pod wbudowany proxy Coolify — docs/deploy-coolify.md
+  docker-compose.coolify-nginx.yml  za własnym nginx + Pangolin — docs/deploy-coolify-nginx.md
+docs/deploy-coolify.md  runbook: Coolify (wbudowany proxy)
+docs/deploy-coolify-nginx.md  runbook: Coolify za nginx + Pangolin
 context/               specyfikacja (PRD, tech-stack, design system, roadmap)
 ```
 

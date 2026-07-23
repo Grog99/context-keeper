@@ -1,7 +1,7 @@
 # Deploy na Coolify
 
 Runbook do wdrożenia Context Keepera na [Coolify](https://coolify.io/) z buildem **z repo**
-(nie z GHCR) przez `docker-compose.coolify.yml`. Uzupełnienie do `README.md` (ścieżki
+(nie z GHCR) przez `deploy/docker-compose.coolify.yml`. Uzupełnienie do `README.md` (ścieżki
 instalator/Docker-manualnie/dev), nie zamiennik — kanon configu wciąż jest w `.env.example`.
 
 Ten runbook zakłada **wbudowany reverse proxy Coolify** (Traefik/Caddy). Masz własny reverse proxy
@@ -12,15 +12,16 @@ na tej samej maszynie (np. **nginx za Pangolinem**) i nie używasz proxy Coolify
 
 1. **New Resource → Docker Compose** (nie "Application" — potrzebujemy dwóch serwisów: `db` + `app`).
 2. Wskaż repo Context Keepera i branch do deployu.
-3. **Base Directory**: root repo. **Docker Compose Location**: `docker-compose.coolify.yml`
+3. **Base Directory**: root repo. **Docker Compose Location**: `deploy/docker-compose.coolify.yml`
    (NIE domyślny `docker-compose.yml` — ten drugi ma `ports:`/profile `edge-proxy` myślane pod
-   bring-your-own-proxy, nie pod Coolify).
+   bring-your-own-proxy, nie pod Coolify). Compose leży w `deploy/`, a jego `build.context: ..`
+   celuje w root monorepo — **Base Directory zostaw na root repo** (nie na `deploy/`).
 4. Coolify zbuduje obraz `app` z `apps/server/Dockerfile` (kontekst = root repo, tak jak w
    Compose) — pierwszy build może potrwać kilka minut (dashboard SPA + server w jednym multi-stage).
 
 ## 2. Dwie domeny — MCP publiczny, dashboard admin
 
-`docker-compose.coolify.yml` wystawia **jeden proces** (`app`) na **dwóch portach** — to bezpośrednie
+`deploy/docker-compose.coolify.yml` wystawia **jeden proces** (`app`) na **dwóch portach** — to bezpośrednie
 odzwierciedlenie `createSurfaceMiddleware` (`apps/server/src/dashboard/surface.middleware.ts`):
 port `3000` (`PORT_MCP`) to allowlista TYLKO `/mcp*` + `/health*`, port `3001` (`PORT_DASHBOARD`)
 to reszta (SPA, `/api/*`) z odrzuconym `/mcp*`. Coolify musi więc dostać **dwie osobne domeny**,
@@ -37,7 +38,7 @@ kontenera na bazie tych ustawień (magic-env) — nie trzeba ich wpisywać ręcz
 
 > **Open question (dokumentacyjne, nie blokuje):** dokładna forma pól do wypełnienia w UI
 > ("Domains" per port vs. per serwis vs. ręczny wpis `SERVICE_FQDN_APP_<port>` jako zmienna) bywa
-> inna między wersjami Coolify. `docker-compose.coolify.yml` używa formy mapowej
+> inna między wersjami Coolify. `deploy/docker-compose.coolify.yml` używa formy mapowej
 > (`SERVICE_FQDN_APP_3000: ${SERVICE_FQDN_APP_3000}`) zgodnej z dokumentacją Coolify na dzień
 > pisania tego runbooka — **potwierdź na swojej instancji Coolify** (wersja UI), że pola faktycznie
 > tak się nazywają i tak trafiają do kontenera; jeśli nie, dostosuj tę linię w compose do właściwej
@@ -61,7 +62,7 @@ hasłem.
 
 ### Skonfigurowalne (mają default w compose, nadpisz w razie potrzeby)
 
-| Zmienna | Default w `docker-compose.coolify.yml` | Rola |
+| Zmienna | Default w `deploy/docker-compose.coolify.yml` | Rola |
 |---|---|---|
 | `POSTGRES_USER` | `ck` | user Postgresa |
 | `POSTGRES_DB` | `context_keeper` | nazwa bazy |
@@ -150,7 +151,7 @@ i `[migrate] done` PRZED linią `Context Keeper listening on :3000 (mcp) i :3001
 
 ## 8. Różnice vs pozostałe ścieżki deployu
 
-| | `docker-compose.yml` (VPS/`install.sh`) | `docker-compose.coolify.yml` (proxy Coolify — **ten runbook**) | `docker-compose.coolify-nginx.yml` (nginx+Pangolin — [tamten runbook](deploy-coolify-nginx.md)) |
+| | `docker-compose.yml` (VPS/`install.sh`) | `deploy/docker-compose.coolify.yml` (proxy Coolify — **ten runbook**) | `deploy/docker-compose.coolify-nginx.yml` (nginx+Pangolin — [tamten runbook](deploy-coolify-nginx.md)) |
 |---|---|---|---|
 | Reverse proxy | opcjonalny bundled Caddy (`edge-proxy`) albo bring-your-own | Coolify (Traefik/Caddy wbudowany) | własny host nginx za Pangolinem (proxy Coolify pominięty) |
 | Ekspozycja portów | `ports:` (publikacja na hosta) | `expose:` (tylko sieć dockerowa Coolify) | `ports: 127.0.0.1:...` (loopback hosta dla nginx) |

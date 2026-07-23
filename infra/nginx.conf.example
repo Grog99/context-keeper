@@ -1,5 +1,5 @@
 # Context Keeper — przykład reverse proxy nginx dla wariantu "bring-your-own-proxy".
-# Pasuje do docker-compose.coolify-nginx.yml (host nginx za Pangolinem). Runbook:
+# Pasuje do deploy/docker-compose.coolify-nginx.yml (host nginx za Pangolinem). Runbook:
 # docs/deploy-coolify-nginx.md. Odpowiednik infra/Caddyfile dla trybu A (bundled Caddy).
 #
 # Topologia:  internet → Pangolin (TLS + auth) → TEN nginx (host) → 127.0.0.1:app
