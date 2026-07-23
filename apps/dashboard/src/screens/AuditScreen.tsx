@@ -7,6 +7,7 @@ import {
   Moon,
   Pencil,
   Plus,
+  Settings,
   ShieldAlert,
   Trash2,
   X,
@@ -42,6 +43,7 @@ const EVENT_TYPES: AuditEventType[] = [
   'purge_tombstone',
   'nightly_run',
   'backup_completed',
+  'project_settings_changed',
 ];
 
 const EVENT_CONFIG: Record<AuditEventType, { icon: LucideIcon; variant: NonNullable<BadgeProps['variant']> }> = {
@@ -58,6 +60,7 @@ const EVENT_CONFIG: Record<AuditEventType, { icon: LucideIcon; variant: NonNulla
   purge_tombstone: { icon: Trash2, variant: 'danger' },
   nightly_run: { icon: Moon, variant: 'info' },
   backup_completed: { icon: DatabaseBackup, variant: 'info' },
+  project_settings_changed: { icon: Settings, variant: 'info' },
 };
 
 function EventBadge({ eventType }: { eventType: AuditEventType }) {

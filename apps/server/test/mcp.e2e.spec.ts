@@ -142,4 +142,47 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
     const { client, transport } = newClient('ck_' + 'x'.repeat(43));
     await expect(client.connect(transport)).rejects.toThrow();
   });
+
+  it('search_memory z kind=event: event (poza domyślnym search) zwracany dopiero przy jawnym kind (roadmap v1.2)', async () => {
+    const memoryService = app.get(MemoryService);
+    const marker = 'mcpe2eeventkindmarker1';
+    await memoryService.devSeedApproved({
+      header: `Zdarzenie e2e ${marker}`,
+      body: 'Tresc zdarzenia e2e.',
+      kind: 'event',
+      scope: 'project',
+      projectId: (await app.get(ProjectsService).resolveProjectByToken(token))!.id,
+    });
+
+    const { client, transport } = newClient(token);
+    await client.connect(transport);
+    try {
+      const defaultRes = await client.callTool({ name: 'search_memory', arguments: { query: marker } });
+      const defaultResults = JSON.parse(textOf(defaultRes as CallToolResult)) as Array<{ header: string }>;
+      expect(defaultResults.length).toBe(0); // toggle projektu wyłączony domyślnie -> event poza domyślnym kind
+
+      const eventRes = await client.callTool({
+        name: 'search_memory',
+        arguments: { query: marker, kind: 'event' },
+      });
+      const eventResults = JSON.parse(textOf(eventRes as CallToolResult)) as Array<{ header: string }>;
+      expect(eventResults.length).toBeGreaterThan(0);
+      expect(eventResults.some((r) => r.header.includes(marker))).toBe(true);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('save_memory nadal nie eksponuje kind (kontrakt agenta bez zmian — agent nie dostaje kind=event)', async () => {
+    const { client, transport } = newClient(token);
+    await client.connect(transport);
+    try {
+      const tools = await client.listTools();
+      const save = tools.tools.find((t) => t.name === 'save_memory')!;
+      const props = (save.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
+      expect(Object.keys(props).sort()).toEqual(['body', 'header', 'tags']);
+    } finally {
+      await transport.close();
+    }
+  });
 });

@@ -25,8 +25,10 @@ see other projects' memories.
 
 Returns headers only, ranked by relevance — call get_memory(id) to fetch the full body of anything
 that looks relevant. For `kind=document` results, an `excerpt` of the best-matching passage is
-included alongside the header. Default kind filter is fact + document; pass `kind` to narrow to
-just one. `tags` filters to memories sharing at least one of the given tags (any-of match).
+included alongside the header. Default kind filter is fact + document; `event` memories are
+excluded from the default unless enabled for your project by an operator. Pass `kind` (`fact` |
+`document` | `event`) to target one kind explicitly. `tags` filters to memories sharing at least
+one of the given tags (any-of match).
 
 If semantic search is temporarily unavailable, results silently fall back to full-text only — no
 error, no signal that this happened.

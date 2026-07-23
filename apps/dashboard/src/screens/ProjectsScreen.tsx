@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Folder, KeyRound, Plus } from 'lucide-react';
+import { Folder, KeyRound, Plus, Settings } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import {
@@ -24,6 +24,7 @@ import { api } from '../lib/api';
 import { describeApiError } from '../lib/errors';
 import { queryKeys } from '../lib/query';
 import type { CreatedProject, ProjectListItem } from '../types/api';
+import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 
 function tokenStatusBadge(status: ProjectListItem['tokenStatus']) {
   if (status === 'active') return <Badge variant="success">aktywny</Badge>;
@@ -39,6 +40,9 @@ export function ProjectsScreen() {
   const [newName, setNewName] = useState('');
   const [rotateTarget, setRotateTarget] = useState<ProjectListItem | null>(null);
   const [reveal, setReveal] = useState<{ token: string; reason: 'created' | 'rotated' } | null>(null);
+  // Id, nie snapshot obiektu — po `PATCH` invaliduje `queryKeys.projects()`, dialog musi pokazać
+  // ŚWIEŻĄ wartość togglea z refetchowanej listy, nie stan sprzed mutacji.
+  const [settingsTargetId, setSettingsTargetId] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.projects(),
@@ -67,6 +71,7 @@ export function ProjectsScreen() {
   });
 
   const projects = data ?? [];
+  const settingsTarget = projects.find((p) => p.id === settingsTargetId) ?? null;
 
   return (
     <div className="overflow-y-auto p-6">
@@ -118,9 +123,19 @@ export function ProjectsScreen() {
                   <td className="px-3.5 py-2.5 font-mono tabular-nums">{project.memoryCount}</td>
                   <td className="px-3.5 py-2.5">{tokenStatusBadge(project.tokenStatus)}</td>
                   <td className="px-3.5 py-2.5 text-right">
-                    <Button variant="secondary" size="sm" onClick={() => setRotateTarget(project)}>
-                      <KeyRound className="size-3.5" /> Rotuj token
-                    </Button>
+                    <span className="inline-flex items-center gap-1.5">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setSettingsTargetId(project.id)}
+                        aria-label={`Ustawienia projektu ${project.name}`}
+                      >
+                        <Settings className="size-3.5" />
+                      </Button>
+                      <Button variant="secondary" size="sm" onClick={() => setRotateTarget(project)}>
+                        <KeyRound className="size-3.5" /> Rotuj token
+                      </Button>
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -194,6 +209,8 @@ export function ProjectsScreen() {
           reason={reveal.reason}
         />
       )}
+
+      <ProjectSettingsDialog project={settingsTarget} onOpenChange={(open) => !open && setSettingsTargetId(null)} />
     </div>
   );
 }

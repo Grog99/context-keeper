@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseFilters, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseFilters, UseGuards } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { ToolError } from '../common/errors';
 import type { ProjectRow } from '../db/schema';
@@ -14,6 +14,10 @@ export interface ProjectListItem extends ProjectRow {
 
 interface CreateProjectBody {
   name?: string;
+}
+
+interface UpdateProjectBody {
+  includeEventsInDefaultSearch?: boolean;
 }
 
 /**
@@ -63,5 +67,32 @@ export class ProjectsController {
       metadata: { projectId: rotated.project.id },
     });
     return rotated;
+  }
+
+  /** Dialog szczegółów projektu (roadmap v1.2, "kind=event episodic") — dziś jedyne pole jest
+   * `includeEventsInDefaultSearch`. `ProjectsService.updateProject` sam nie audytuje (§M1 planu Fazy
+   * 5, wzorem create/rotate) — audyt `project_settings_changed` dopisany TUTAJ, z `from`/`to` żeby
+   * ekran "Audyt" mógł pokazać co się zmieniło bez osobnego zapytania. `NotFoundException` rzucony
+   * przez serwis leci dalej nietknięty (Nest mapuje wbudowane HttpException na 404 samodzielnie —
+   * poza `DashboardErrorFilter`, który łapie tylko `ProposalError`/`ToolError`/`PurgeError`). */
+  @Patch(':id')
+  async update(@Param('id') id: string, @Body() body: UpdateProjectBody): Promise<ProjectRow> {
+    const before = await this.projects.findById(id);
+    const updated = await this.projects.updateProject(id, {
+      includeEventsInDefaultSearch: body?.includeEventsInDefaultSearch,
+    });
+    if (body?.includeEventsInDefaultSearch !== undefined) {
+      await this.audit.log({
+        eventType: 'project_settings_changed',
+        actor: DASHBOARD_ACTOR,
+        metadata: {
+          projectId: id,
+          field: 'includeEventsInDefaultSearch',
+          from: before?.includeEventsInDefaultSearch ?? null,
+          to: updated.includeEventsInDefaultSearch,
+        },
+      });
+    }
+    return updated;
   }
 }

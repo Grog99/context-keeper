@@ -13,6 +13,7 @@ import { LoginScreen } from './screens/LoginScreen';
 import { MemoryBrowserScreen } from './screens/MemoryBrowserScreen';
 import { OnboardingScreen } from './screens/OnboardingScreen';
 import { OperacjeScreen } from './screens/OperacjeScreen';
+import { OsCzasuScreen } from './screens/OsCzasuScreen';
 import { PomiaryScreen } from './screens/PomiaryScreen';
 import { ProjectsScreen } from './screens/ProjectsScreen';
 import { QueueScreen } from './screens/QueueScreen';
@@ -40,6 +41,7 @@ function Gate() {
       <Route element={<AppShell />}>
         <Route path="/kolejka" element={<QueueScreen />} />
         <Route path="/pamiec" element={<MemoryBrowserScreen />} />
+        <Route path="/os-czasu" element={<OsCzasuScreen />} />
         <Route path="/projekty" element={<ProjectsScreen />} />
         <Route path="/audyt" element={<AuditScreen />} />
         <Route path="/pomiary" element={<PomiaryScreen />} />

@@ -1,4 +1,4 @@
-import { Activity, Archive, FolderKanban, Inbox, PlugZap, ScrollText, Wrench } from 'lucide-react';
+import { Activity, Archive, FolderKanban, History, Inbox, PlugZap, ScrollText, Wrench } from 'lucide-react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
@@ -15,6 +15,7 @@ interface ScreenEntry {
 const SCREENS: ScreenEntry[] = [
   { to: '/kolejka', label: 'Kolejka', icon: Inbox },
   { to: '/pamiec', label: 'Pamięć', icon: Archive },
+  { to: '/os-czasu', label: 'Oś czasu', icon: History },
   { to: '/projekty', label: 'Projekty', icon: FolderKanban },
   { to: '/audyt', label: 'Audyt', icon: ScrollText },
   { to: '/pomiary', label: 'Pomiary', icon: Activity },

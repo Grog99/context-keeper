@@ -13,6 +13,7 @@ import { EmbeddingService, toPgVectorLiteral } from '../embeddings/embedding.ser
 import type { ProjectContext } from '../projects/projects.service';
 import { UsageService } from '../usage/usage.service';
 import { classifyDedup } from './dedup';
+import { eventDecayFactor } from './decay';
 import type {
   GetMemoryResult,
   MemoryKindFilter,
@@ -173,13 +174,26 @@ export class MemoryService {
    * Instrumentacja (roadmap v1.1, "Pomiary", plan §5(e)): dokładnie JEDEN zapis `search_events`
    * na wywołanie, przez wspólny tail (jeden punkt `return`, celowo — dawniej dwa return-y). Fail-open
    * (`recordSearchSafe`) — awaria zapisu instrumentacji NIGDY nie zamienia dobrego wyniku w błąd.
+   *
+   * Default-kind + age-decay (roadmap v1.2, "kind=event episodic"): gdy `input.kind` nie podano,
+   * domyślny zestaw to `DEFAULT_SEARCH_KINDS` (fact+document), z `event` dołożonym TYLKO gdy
+   * `ctx.includeEventsInDefaultSearch === true` (per-projektowy toggle) — jawny `kind` (włącznie z
+   * `'event'`) jest zawsze honorowany bez względu na toggle. Age-decay aplikowany POST-RRF, tylko do
+   * `kind=event` (`memory/decay.ts`) — MUSI poprzedzać `slice(0, SEARCH_TOP_K)`, bo decay może
+   * wypchnąć event poza widoczne okno i wpuścić fact/document niżej rankowany przez RRF; stąd
+   * metadane pobierane dla PEŁNEGO sfuzjowanego zbioru (ograniczonego przez limit kandydatów
+   * każdego ramienia, ≤~100), re-sort po `effectiveScore`, dopiero potem slice.
    */
   async search(input: SearchMemoryInput, ctx: ProjectContext): Promise<SearchResultItem[]> {
     const query = input.query?.trim();
     if (!query) {
       throw new ToolError('validation_error', 'query nie może być puste');
     }
-    const kinds = input.kind ? [input.kind] : DEFAULT_SEARCH_KINDS;
+    const kinds = input.kind
+      ? [input.kind]
+      : ctx.includeEventsInDefaultSearch === true
+        ? [...DEFAULT_SEARCH_KINDS, 'event' as const]
+        : DEFAULT_SEARCH_KINDS;
 
     let tags: string[] | undefined;
     if (input.tags && input.tags.length > 0) {
@@ -195,38 +209,54 @@ export class MemoryService {
     const qvec = await this.embedding.embedQuery(query); // null = fail-open, ramię pominięte
     const vectorIds = qvec ? await this.vectorArm(qvec, ctx, kinds, tags, candidateLimit) : [];
 
-    const fused = rrfFuse([ftsIds, vectorIds], this.config.get('RRF_K')).slice(
-      0,
-      this.config.get('SEARCH_TOP_K'),
-    );
+    // Bez wczesnego slice(SEARCH_TOP_K) — pełny sfuzjowany zbiór (naturalnie ograniczony do
+    // ~2×candidateLimit unikalnych id) idzie do age-decay + re-sort niżej, top-k dopiero po.
+    const fused = rrfFuse([ftsIds, vectorIds], this.config.get('RRF_K'));
 
     let results: SearchResultItem[] = [];
     if (fused.length > 0) {
       const fusedIds = fused.map((f) => f.id);
       const rows = await this.db
-        .select({ id: memories.id, header: memories.header, tags: memories.tags, kind: memories.kind })
+        .select({
+          id: memories.id,
+          header: memories.header,
+          tags: memories.tags,
+          kind: memories.kind,
+          eventTime: memories.eventTime,
+        })
         .from(memories)
         .where(inArray(memories.id, fusedIds));
       const byId = new Map(rows.map((r) => [r.id, r]));
 
-      // Excerpt tylko dla document (FR-M1) i tylko gdy mamy query-vector do wyboru najlepszego chunku
-      // (bez niego nie ma czym rankować chunków — pole zostaje po prostu nieobecne, additive).
-      const documentIds = fusedIds.filter((id) => byId.get(id)?.kind === 'document');
-      const excerpts = qvec ? await this.documentExcerpts(documentIds, qvec) : new Map<string, string>();
-
-      results = fused
+      const now = new Date();
+      const halflifeDays = this.config.get('EVENT_DECAY_HALFLIFE_DAYS');
+      const decayed = fused
         .filter((f) => byId.has(f.id))
         .map((f) => {
           const row = byId.get(f.id)!;
-          const excerpt = excerpts.get(f.id);
-          return {
-            id: row.id,
-            header: row.header,
-            tags: row.tags,
-            score: f.score,
-            ...(excerpt !== undefined ? { excerpt } : {}),
-          };
-        });
+          // decayFactor=1 dla fact/document (zero wpływu na ranking) — tylko event decayuje.
+          const decayFactor = row.kind === 'event' ? eventDecayFactor(row.eventTime, now, halflifeDays) : 1;
+          return { row, effectiveScore: f.score * decayFactor };
+        })
+        .sort((a, b) => b.effectiveScore - a.effectiveScore)
+        .slice(0, this.config.get('SEARCH_TOP_K'));
+
+      // Excerpt tylko dla document (FR-M1) i tylko gdy mamy query-vector do wyboru najlepszego chunku
+      // (bez niego nie ma czym rankować chunków — pole zostaje po prostu nieobecne, additive).
+      // Liczony DOPIERO dla ocalałych po slice (nie dla całego kandydackiego zbioru).
+      const documentIds = decayed.filter((d) => d.row.kind === 'document').map((d) => d.row.id);
+      const excerpts = qvec ? await this.documentExcerpts(documentIds, qvec) : new Map<string, string>();
+
+      results = decayed.map(({ row, effectiveScore }) => {
+        const excerpt = excerpts.get(row.id);
+        return {
+          id: row.id,
+          header: row.header,
+          tags: row.tags,
+          score: effectiveScore,
+          ...(excerpt !== undefined ? { excerpt } : {}),
+        };
+      });
     }
 
     await this.recordSearchSafe(ctx.projectId, results.length, qvec === null);
@@ -376,6 +406,7 @@ export class MemoryService {
       lastAccessedAt: now.toISOString(),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
+      eventTime: row.eventTime ? row.eventTime.toISOString() : null,
     };
   }
 

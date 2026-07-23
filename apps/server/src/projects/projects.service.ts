@@ -5,10 +5,14 @@ import { generateToken, hashToken, isValidTokenFormat } from '../common/tokens';
 import { DB, type Database } from '../db/db.tokens';
 import { memories, projects, type ProjectRow } from '../db/schema';
 
-/** Kontekst projektu wyprowadzony z bearer tokena (dołączany do requestu przez BearerGuard). */
+/** Kontekst projektu wyprowadzony z bearer tokena (dołączany do requestu przez BearerGuard).
+ * `includeEventsInDefaultSearch` opcjonalne (roadmap v1.2, "kind=event episodic") — żeby ręcznie
+ * budowane `ProjectContext` w testach dalej się kompilowały bez tego pola; `undefined` ⇒ wyłączone
+ * (patrz `MemoryService.search`). */
 export interface ProjectContext {
   projectId: string;
   projectName: string;
+  includeEventsInDefaultSearch?: boolean;
 }
 
 /** Wynik utworzenia/rotacji: pełny token `ck_…` widoczny TYLKO raz (w bazie zostaje hash). */
@@ -55,6 +59,34 @@ export class ProjectsService {
 
   async listProjects(): Promise<ProjectRow[]> {
     return this.db.select().from(projects).orderBy(projects.createdAt);
+  }
+
+  /** Dialog szczegółów projektu (roadmap v1.2, "kind=event episodic") — dziś jedyne edytowalne pole
+   * jest `includeEventsInDefaultSearch`; kontroler audytuje zmianę (`project_settings_changed`),
+   * serwis sam nie audytuje (wzorem `createProject`/`rotateToken`, §M1 planu Fazy 5).
+   * `updates.includeEventsInDefaultSearch === undefined` (pole pominięte w body) → no-op zwracający
+   * bieżący wiersz, bez uderzania w `UPDATE` (`drizzle`'s `mapUpdateSet` rzuca "No values to set"
+   * na pustym obiekcie `.set()`, więc filtrujemy `undefined` PRZED złożeniem zapytania). */
+  async updateProject(
+    projectId: string,
+    updates: { includeEventsInDefaultSearch?: boolean },
+  ): Promise<ProjectRow> {
+    if (updates.includeEventsInDefaultSearch === undefined) {
+      const current = await this.findById(projectId);
+      if (!current) {
+        throw new NotFoundException(`Projekt nie istnieje: ${projectId}`);
+      }
+      return current;
+    }
+    const [project] = await this.db
+      .update(projects)
+      .set({ includeEventsInDefaultSearch: updates.includeEventsInDefaultSearch })
+      .where(eq(projects.id, projectId))
+      .returning();
+    if (!project) {
+      throw new NotFoundException(`Projekt nie istnieje: ${projectId}`);
+    }
+    return project;
   }
 
   /** Liczba pamięci per projekt (§M1 planu Fazy 5, dashboard FR-D3) — jeden zagregowany zapytanie

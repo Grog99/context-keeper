@@ -1,7 +1,9 @@
 import { pgEnum } from 'drizzle-orm/pg-core';
 
-// `kind` opisuje czym pamięć JEST (rozszerzalny — `event` dojdzie w v2 przez ALTER TYPE ... ADD VALUE).
-export const memoryKind = pgEnum('memory_kind', ['fact', 'document']);
+// `kind` opisuje czym pamięć JEST. `event` (roadmap v1.2, "kind=event episodic") — zdarzenie z
+// osobnym backdatable `event_time`, tworzone TYLKO przez człowieka (dashboard); agent's
+// `save_memory` go nie eksponuje.
+export const memoryKind = pgEnum('memory_kind', ['fact', 'document', 'event']);
 export const memoryScope = pgEnum('memory_scope', ['global', 'project']);
 // `purged` = hard-purge (FR-S3, §10 tech-stack) — treść wymazana we wszystkich content-bearing
 // tabelach, wiersz zostaje jako tombstone (audit `purge_tombstone`). Nieodwracalne, wyłącznie CLI.
@@ -41,6 +43,9 @@ export const auditEventType = pgEnum('audit_event_type', [
   'purge_tombstone',
   'nightly_run',
   'backup_completed',
+  // roadmap v1.2 ("kind=event episodic") — zmiana ustawień projektu z dialogu szczegółów na
+  // ekranie "Projekty i tokeny" (dziś tylko `include_events_in_default_search`).
+  'project_settings_changed',
 ]);
 
 // Aliasy TS dla wartości enumów (Faza 2+) — jedno źródło prawdy (enumValues), bez duplikowania literałów.

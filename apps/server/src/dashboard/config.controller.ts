@@ -9,6 +9,8 @@ export interface DashboardLimits {
   headerMaxLen: number;
   bodyMaxFact: number;
   bodyMaxDocument: number;
+  /** `kind=event` (roadmap v1.2, "kind=event episodic") — licznik znaków w `HumanCreateDialog`. */
+  bodyMaxEvent: number;
   tagsMax: number;
   tagMaxLen: number;
   /** Publiczny origin powierzchni `/mcp` (bez ścieżki), do snippetu ekranu "Onboarding" (roadmap
@@ -34,6 +36,7 @@ export class ConfigController {
       headerMaxLen: HEADER_MAX_LEN,
       bodyMaxFact: this.config.get('BODY_MAX_FACT'),
       bodyMaxDocument: this.config.get('BODY_MAX_DOCUMENT'),
+      bodyMaxEvent: this.config.get('BODY_MAX_EVENT'),
       tagsMax: this.config.get('TAGS_MAX'),
       tagMaxLen: this.config.get('TAG_MAX_LEN'),
       mcpPublicUrl: this.resolveMcpPublicUrl(),

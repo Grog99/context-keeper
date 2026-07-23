@@ -77,14 +77,22 @@ wynik tej fazy decyduje, czy plugin Claude Code jest potrzebny (patrz backlog).
   `127.0.0.1` (DB/dashboard poza publicznym interfejsem), `limit_req` w przykładzie nginx. Świadomie
   odłożone: rewokacja sesji, limiter na Redis (v2).
 
-## v1.2 — Więcej możliwości agenta + poprawki UI ⬜
+## v1.2 — Więcej możliwości agenta + poprawki UI 🔨
 
 **Cel fazy:** poszerzyć, co agent może zrobić z pamięcią (nowy rodzaj wpisu, tworzenie i edycja),
 obniżyć próg wejścia dla nowych projektów (gotowy snippet) i dopieścić dashboard. Świadomie
 _przed_ warunkowym pluginem — najpierw wyciskamy maksimum z samego MCP + kontraktu.
 
-- **`kind=event` (episodic)** ⬜ — zdarzenia ze stemplem czasu: age-decay w rankingu, memory-relations
-  + 1-hop graph boost, widok timeline. Trzeci rodzaj wpisu obok `fact` / `document`.
+- **`kind=event` (episodic)** ✅ — trzeci rodzaj wpisu obok `fact`/`document`, z osobnym backdatable
+  `event_time`; tworzony wyłącznie przez człowieka (dashboard), `save_memory` agenta go nie eksponuje.
+  Age-decay w rankingu retrievalu (wykładniczy half-life, `EVENT_DECAY_HALFLIFE_DAYS`, post-RRF,
+  zero wpływu na fact/document). Ekran „Oś czasu" (`/os-czasu`), grupowany wg dnia. Per-projektowy
+  toggle `include_events_in_default_search` (dialog szczegółów projektu, audytowany jako
+  `project_settings_changed`) — decyduje, czy `event` wchodzi do domyślnego `kind` w `search_memory`
+  gdy agent go nie poda jawnie (`kind=event` jawny działa zawsze).
+  - **memory-relations + 1-hop graph boost** ⬜ — świadomie odłożone, osobny przyszły task (tabela
+    krawędzi kluczowana `memory_id`, ortogonalna do `event_time`; graph boost komponowałby się z
+    age-decay post-fuzją, nie konkurował).
 - **Agent tworzy `kind=document`** ⬜ — `save_memory` przyjmuje `kind=document` (dziś agent zapisuje tylko
   `fact`); te same guardy (human-gate, skaner sekretów). Plus agent-proposed edycje istniejących dokumentów.
 - **Edycja pamięci przez agenta** ⬜ — `supersedes: id` w `save_memory`: agent proponuje korektę istniejącego

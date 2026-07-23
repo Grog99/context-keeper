@@ -43,6 +43,20 @@
       "when": 1784807362292,
       "tag": "0005_cool_rick_jones",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784835490969,
+      "tag": "0006_medical_mikhail_rasputin",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784835656815,
+      "tag": "0007_nosy_rattler",
+      "breakpoints": true
     }
   ]
 }

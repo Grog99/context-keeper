@@ -14,3 +14,20 @@ export function formatRelativeTime(iso: string, now: Date = new Date()): string 
 export function formatAbsoluteTime(iso: string): string {
   return new Date(iso).toLocaleString('pl-PL', { dateStyle: 'medium', timeStyle: 'medium' });
 }
+
+/** Ekran "Oś czasu" (roadmap v1.2, "kind=event episodic") — klucz grupowania wg DNIA KALENDARZOWEGO
+ * w strefie lokalnej przeglądarki (nie UTC — recenzent grupuje po swoim dniu, nie po dniu serwera). */
+export function dayKey(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Nagłówek dnia w grupowanej "Oś czasu" — np. "środa, 22 lipca 2026". */
+export function formatDayHeading(iso: string): string {
+  return new Date(iso).toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+/** Godzina w obrębie dnia (wiersz eventu pod nagłówkiem dnia już niesie datę) — mono, tabular. */
+export function formatTimeOfDay(iso: string): string {
+  return new Date(iso).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
+}

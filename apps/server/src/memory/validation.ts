@@ -30,12 +30,19 @@ export function normalizeHeader(raw: string): string {
   return collapsed;
 }
 
-/** Limit body per `kind` (FR-V1: BODY_MAX_FACT / BODY_MAX_DOCUMENT z configu), mierzony w bajtach UTF-8. */
+/** Limit body per `kind` (FR-V1: BODY_MAX_FACT / BODY_MAX_DOCUMENT / BODY_MAX_EVENT z configu),
+ * mierzony w bajtach UTF-8. `event` (roadmap v1.2) dostaje własny cap, symetryczny do fact
+ * (domyślnie ~8KB) — zdarzenia są krótkimi notatkami, nie dokumentami. */
 export function validateBody(body: string, kind: MemoryKind, config: AppConfigService): string {
   if (typeof body !== 'string' || body.length === 0) {
     throw new ToolError('validation_error', 'body nie może być puste');
   }
-  const limit = kind === 'fact' ? config.get('BODY_MAX_FACT') : config.get('BODY_MAX_DOCUMENT');
+  const limit =
+    kind === 'fact'
+      ? config.get('BODY_MAX_FACT')
+      : kind === 'event'
+        ? config.get('BODY_MAX_EVENT')
+        : config.get('BODY_MAX_DOCUMENT');
   const bytes = Buffer.byteLength(body, 'utf8');
   if (bytes > limit) {
     throw new ToolError(
@@ -44,6 +51,23 @@ export function validateBody(body: string, kind: MemoryKind, config: AppConfigSe
     );
   }
   return body;
+}
+
+/**
+ * `event_time` (roadmap v1.2, "kind=event episodic") — wymagany WYŁĄCZNIE dla `kind='event'`
+ * (fact/document go nie mają, zwraca `null`). Backdatable ISO timestamp; przyszłe daty dozwolone
+ * bez blokady (decyzja usera — age-decay clampuje wiek ujemny do faktora 1, patrz `memory/decay.ts`).
+ */
+export function validateEventTime(eventTime: string | undefined, kind: MemoryKind): Date | null {
+  if (kind !== 'event') return null;
+  if (typeof eventTime !== 'string' || eventTime.trim().length === 0) {
+    throw new ToolError('validation_error', 'event_time jest wymagany dla kind=event');
+  }
+  const parsed = new Date(eventTime);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new ToolError('validation_error', `event_time nie jest poprawnym znacznikiem czasu ISO: "${eventTime}"`);
+  }
+  return parsed;
 }
 
 /**
