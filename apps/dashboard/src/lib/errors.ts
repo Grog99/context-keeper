@@ -10,6 +10,9 @@ export function describeApiError(err: unknown, fallback = 'Coś poszło nie tak.
     if (err.status === 409 && err.code === 'already_decided') {
       return 'Ta propozycja została już rozpatrzona (przez kogoś innego albo w innej karcie).';
     }
+    if (err.status === 409 && err.code === 'already_purged') {
+      return 'Ta pamięć jest już wymazana (purge_tombstone).';
+    }
     if (err.status === 401) {
       return 'Sesja wygasła — zaloguj się ponownie.';
     }

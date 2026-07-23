@@ -17,6 +17,7 @@ export const queryKeys = {
   memories: (filter: Record<string, unknown>) => ['memories', filter] as const,
   memory: (id: string) => ['memories', id] as const,
   memoryRevisions: (id: string) => ['memories', id, 'revisions'] as const,
+  memoryPurgePreview: (id: string) => ['memories', id, 'purge-preview'] as const,
   projects: () => ['projects'] as const,
   audit: (filter: Record<string, unknown>) => ['audit', filter] as const,
   metrics: () => ['metrics'] as const,

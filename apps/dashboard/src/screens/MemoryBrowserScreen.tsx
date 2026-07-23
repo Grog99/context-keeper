@@ -35,6 +35,7 @@ import { toQueryString } from '../lib/query-string';
 import { cn } from '../lib/utils';
 import type { MemoryDetail, MemoryListItem, ProjectListItem, RevisionRowApi, WithWarnings } from '../types/api';
 import type { MemoryKind, MemoryStatus } from '../types/domain';
+import { PurgeMemoryDialog } from './PurgeMemoryDialog';
 
 type KindFilter = 'all' | MemoryKind;
 type StatusFilter = 'all' | MemoryStatus;
@@ -67,6 +68,7 @@ export function MemoryBrowserScreen() {
   const [editingForId, setEditingForId] = useState<string | null>(null);
   const editing = editingForId !== null && editingForId === selectedId;
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [purgeOpen, setPurgeOpen] = useState(false);
   const [tabState, setTabState] = useState<{ id: string; tab: string } | null>(null);
   const tab = tabState && tabState.id === selectedId ? tabState.tab : 'body';
 
@@ -328,6 +330,14 @@ export function MemoryBrowserScreen() {
                   Promuj do global
                 </Button>
               )}
+              <Button
+                variant="ghost-danger"
+                onClick={() => setPurgeOpen(true)}
+                disabled={detail.status === 'purged'}
+                className="ml-auto"
+              >
+                Hard-purge
+              </Button>
             </div>
           </>
         )}
@@ -349,6 +359,15 @@ export function MemoryBrowserScreen() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {detail && (
+        <PurgeMemoryDialog
+          open={purgeOpen}
+          onOpenChange={setPurgeOpen}
+          memoryId={detail.id}
+          memoryHeader={detail.header}
+        />
+      )}
     </div>
   );
 }

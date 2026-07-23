@@ -3,8 +3,10 @@ import { Module } from '@nestjs/common';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { AuditModule } from '../audit/audit.module';
 import { MemoryModule } from '../memory/memory.module';
+import { NightlyModule } from '../nightly/nightly.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { ProposalsModule } from '../proposals/proposals.module';
+import { PurgeModule } from '../purge/purge.module';
 import { UsageModule } from '../usage/usage.module';
 import { AuditController } from './audit.controller';
 import { AuthController } from './auth/auth.controller';
@@ -14,6 +16,7 @@ import { SessionGuard } from './auth/session.guard';
 import { ConfigController } from './config.controller';
 import { MemoriesController } from './memories.controller';
 import { MetricsController } from './metrics.controller';
+import { NightlyController } from './nightly.controller';
 import { ProjectsController } from './projects.controller';
 import { ProposalsController } from './proposals.controller';
 import { UsageMetricsController } from './usage-metrics.controller';
@@ -23,6 +26,11 @@ import { UsageMetricsController } from './usage-metrics.controller';
  * ISTNIEJĄCYCH serwisach Faz 1-4 (`ProposalsService`/`MemoryAdminService`/`ProjectsService`/
  * `AuditService`). `SessionGuard`/`CsrfGuard` są kontroler-scoped (dekorowane per-controller
  * poniżej), NIGDY globalne — `/mcp` nie może dostać żadnego nowego globalnego guarda (§Ryzyka planu).
+ *
+ * `NightlyModule`/`PurgeModule` dołączone od roadmap v1.1 (dashboard-nightly-purge) — do tej pory
+ * rejestrowane WYŁĄCZNIE w `CliModule`. Import modułu sam z siebie nic nie uruchamia (`NightlyService`/
+ * `PurgeService` stają się tylko wstrzykiwalne w tym procesie) — obie usługi startują wyłącznie na
+ * explicit wywołanie z `NightlyController`/`MemoriesController`.
  *
  * `ServeStaticModule` serwuje SPA (`dist/public`, budowane w M5) — osiągalne wyłącznie na
  * `PORT_DASHBOARD` dzięki `surface.middleware.ts` w `main.ts` (nie tutaj — middleware portowe jest
@@ -35,6 +43,8 @@ import { UsageMetricsController } from './usage-metrics.controller';
     ProjectsModule,
     AuditModule,
     UsageModule,
+    NightlyModule,
+    PurgeModule,
     ServeStaticModule.forRoot({
       // `__dirname` w skompilowanym dist to `dist/dashboard/` (mirror src/dashboard/) — `dist/public`
       // wymaga wyjścia jeden poziom wyżej, NIE `join(__dirname, 'public')` (patrz M5: kopiowany tam
@@ -53,6 +63,7 @@ import { UsageMetricsController } from './usage-metrics.controller';
     MetricsController,
     UsageMetricsController,
     ConfigController,
+    NightlyController,
   ],
   providers: [SessionGuard, CsrfGuard, LoginThrottleService],
 })
