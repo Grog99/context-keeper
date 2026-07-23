@@ -18,7 +18,31 @@ Specyfikacja: [`context/prd.md`](context/prd.md) · [`context/tech-stack.md`](co
 
 - Node.js ≥ 22 (obraz produkcyjny używa 24), pnpm 10, Docker + Compose.
 
-## Szybki start — Docker (zalecane)
+## Szybki start — instalator (zalecane)
+
+```bash
+./install.sh
+```
+
+`install.sh` (POSIX `sh`, zależności: `sh` + `openssl`, opcjonalnie `docker` w Fazie 2) to cienki
+generator nad `.env` + profilami Compose — **nie zastępuje** `.env.example` (kanon configu), tylko
+go templatuje. Dwie fazy:
+
+1. **Faza 1 (zawsze, offline)** — kilka pytań (tryb edge A/bundled-Caddy vs B/bring-your-own-proxy,
+   preset embeddingów, harmonogram nocnego joba, nazwa pierwszego projektu), bezpieczne
+   generowanie/zachowanie `SESSION_SECRET`/`DASHBOARD_PASSWORD` (re-run nigdy nie unieważnia cichej
+   sesji), atomowy zapis `.env` (`umask 077`, mode `600`).
+2. **Faza 2 (opcjonalna, prompt; domyślnie tylko generacja)** — `docker compose up -d`, migracje,
+   `create-project` przez Nest CLI (token wypisywany **raz** — instalator go nie przechwytuje).
+
+Flagi: `-y`/`--yes` (bez promptów, wartości domyślne), `--start`/`--no-start` (wymuś decyzję Fazy 2),
+`--dry-run` (wypisz `.env` na stdout, nic nie zapisuj na dysk — sekrety nigdy nie są drukowane, nawet
+w `--dry-run`), `-h`/`--help`. Prompty/komunikaty skryptu są po angielsku (szerszy zasięg operatorów).
+Idempotentny: ponowne uruchomienie z istniejącym `.env` pyta zachować/regenerować/przerwać, nigdy nie
+nadpisuje cicho, a wybór presetu embeddingów zmieniającego `EMBEDDING_DIM` pod istniejącymi danymi
+jest blokowany ostrzeżeniem (wskazuje na CLI `reembed`).
+
+## Szybki start — Docker, manualnie (fallback / zaawansowany)
 
 ```bash
 cp .env.example .env          # dostosuj sekrety (SESSION_SECRET, DASHBOARD_PASSWORD)
@@ -67,6 +91,7 @@ pnpm --filter @context-keeper/server cli:dev create-project acme
 ## Struktura
 
 ```
+install.sh              instalator onboardingu (POSIX sh) — generuje .env, opcjonalnie startuje stack
 apps/server/           NestJS host (MCP + JSON API + bundle SPA)
   src/config/          zod env (12-factor)
   src/db/              Drizzle schema + migracje + runner
