@@ -2,7 +2,7 @@
 
 Prosty przegląd: co robimy po kolei i gdzie jesteśmy. Szczegóły → [`prd.md`](prd.md), [`tech-stack.md`](tech-stack.md), [`design-system.md`](design-system.md).
 
-**Aktualizacja:** 2026-07-23 · **Etap:** v1 domknięte i wdrożone (dogfooding live) → wchodzimy w **walidację** (v1.1).
+**Aktualizacja:** 2026-07-23 · **Etap:** v1.1 domknięte (walidacja dogfoodingu) → wchodzimy w **v1.2** (więcej możliwości agenta + poprawki UI).
 
 Legenda: ✅ zrobione · 🔨 w toku · ⬜ przed nami
 
@@ -52,7 +52,7 @@ Audit log, observability (`/health`, metryki — w tym latencja embeddingu, FR-D
 
 ---
 
-## v1.1 — Walidacja dogfoodingu 🔨
+## v1.1 — Walidacja dogfoodingu ✅
 
 **Cel fazy:** sprawić, by eksperyment „czy **sam MCP + kontrakt narzędzi + `AGENTS.md`** wystarczą, żeby
 agent proaktywnie sięgał do pamięci" był **mierzalny** i **miał realną treść do znalezienia**. Dopiero
@@ -77,17 +77,26 @@ wynik tej fazy decyduje, czy plugin Claude Code jest potrzebny (patrz backlog).
   `127.0.0.1` (DB/dashboard poza publicznym interfejsem), `limit_req` w przykładzie nginx. Świadomie
   odłożone: rewokacja sesji, limiter na Redis (v2).
 
-## v2 i dalej ⬜ (backlog)
+## v1.2 — Więcej możliwości agenta + poprawki UI ⬜
 
-- **Plugin Claude Code** (config połączenia + skill proaktywności) — **warunkowy:** budujemy tylko,
-  jeśli instrumentacja z v1.1 pokaże, że czysty MCP + `AGENTS.md` nie wymuszają proaktywnego recallu.
-- **Tuning retrievalu na realnych danych** — top-k, próg relevance, próg dedup, `k` RRF, chunking
-  (PRD §11). Karmi się instrumentacją z v1.1 — pomiar najpierw, dostrojenie potem.
-- **`kind=event` (episodic)** — zdarzenia z czasem, age-decay, memory-relations + 1-hop graph boost, timeline.
-- **`conflicts_report`** — wykrywanie sprzeczności same-topic w nocnym jobie (sąd LLM).
-- **Memory Worth** — prune po współwystąpieniu z sukcesem/porażką (`report_outcome` + tabela `outcome`; score już pluggable).
-- **Anti-fatigue kolejki** — bulk approve/reject, auto-allow po N spójnych decyzjach (`confidence`/`auto_eligible` w schemie gotowe).
-- **Per-user auth** + kontrola dostępu per-projekt dla człowieka.
-- **Edycja pamięci przez agenta** (`supersedes: id`), agent-proposed edycje dokumentów, **wiele tokenów per projekt** + graceful rotation (atrybucja agenta).
-- **OAuth 2.1 + PKCE** dla MCP (Desktop/web-connector).
-- Interop wire-format; bulk-import dokumentów; chunk-targeted `get`; skalowanie poziome (rate-limiter na Redis).
+**Cel fazy:** poszerzyć, co agent może zrobić z pamięcią (nowy rodzaj wpisu, tworzenie i edycja),
+obniżyć próg wejścia dla nowych projektów (gotowy snippet) i dopieścić dashboard. Świadomie
+_przed_ warunkowym pluginem — najpierw wyciskamy maksimum z samego MCP + kontraktu.
+
+- **`kind=event` (episodic)** ⬜ — zdarzenia ze stemplem czasu: age-decay w rankingu, memory-relations
+  + 1-hop graph boost, widok timeline. Trzeci rodzaj wpisu obok `fact` / `document`.
+- **Agent tworzy `kind=document`** ⬜ — `save_memory` przyjmuje `kind=document` (dziś agent zapisuje tylko
+  `fact`); te same guardy (human-gate, skaner sekretów). Plus agent-proposed edycje istniejących dokumentów.
+- **Edycja pamięci przez agenta** ⬜ — `supersedes: id` w `save_memory`: agent proponuje korektę istniejącego
+  faktu zamiast luźnego duplikatu. Zastępuje dzisiejsze obejście („zapisz nowy fakt, opisz w treści co
+  zastępuje") — wykorzystuje supersession z kolejki akceptacji (v1), brakuje tylko ekspozycji w narzędziu.
+- **Snippet do wklejenia w cudzym projekcie** ⬜ — gotowy blok do `AGENTS.md` / `CLAUDE.md` (proaktywność +
+  forma połączenia `Bearer ${VAR}`), który użytkownik kopiuje do własnego repo. „Warstwa 2" kontraktu
+  narzędzi (`mcp-tool-contract.md` §Warstwy 2 i 3) — domknięcie onboardingu dla projektów spoza tego repo.
+- **Poprawki UI** ⬜ — dopieszczenie dashboardu (konkretna lista do doprecyzowania).
+
+## Backlog ⬜
+
+Rzeczy świadomie odłożone poza v1.2 → [`backlog.md`](backlog.md): plugin Claude Code (warunkowy), tuning
+retrievalu, `conflicts_report`, Memory Worth, anti-fatigue kolejki, per-user auth, wiele tokenów + rotacja,
+OAuth 2.1 + PKCE, skalowanie poziome / interop.
