@@ -118,7 +118,7 @@ _przed_ warunkowym pluginem — najpierw wyciskamy maksimum z samego MCP + kontr
   użytkownik kopiuje do własnego repo. URL MCP wyliczany server-side (`PUBLIC_MCP_URL` → fallback
   `ACME_DOMAIN` → placeholder). „Warstwa 2" kontraktu narzędzi (`mcp-tool-contract.md` §Warstwy 2 i 3) —
   domknięcie onboardingu dla projektów spoza tego repo.
-- **Poprawki UI** ⬜ — dopieszczenie dashboardu (konkretna lista do doprecyzowania).
+- **Poprawki UI** ✅ — dopieszczenie dashboardu (konkretna lista do doprecyzowania).
 - **Aktualizacja snippetu** ✅ — dodanie instrukcji dot. typów dokumentów (`fact`/`document`),
   `supersedes` oraz dedup snippetu ↔ opisów narzędzi MCP (Warstwa 1 zostaje load-bearing, Warstwa 2
   tylko „kiedy i co").

@@ -46,3 +46,15 @@ Legenda: ⬜ przed nami · ⏸️ warunkowe (czeka na sygnał / decyzję)
 - **Interop wire-format** ⬜ — wspólny format wymiany pamięci.
 - **Bulk-import dokumentów** ⬜.
 - **Chunk-targeted `get`** ⬜ — pobranie konkretnego fragmentu dokumentu zamiast całości.
+
+## UI
+
+- **Poprawić widok diff dla supersedes** - W tym momencie cięzko zobaczyć co się zmieniło, spróbować
+  zrobić widok diff jak w git aby widać było dokładniej zmiany
+- ** 
+
+## Do zastanowienia się
+
+- **Dodać pamiec usera** - oddzielny token dla pamięci o konkretnym użytkowniku, wtedy takie zapiski pamieci może widzieć tylko dany user.
+- **Optymalizacja zapisów w pamięci** - mały model który sprawdza pliki pamięci z ostatniego dnia w ramach nigthly
+  i sprawdza czy wszystko co jest zapisane na pewno jest potrzebne, czy można usunąć treść
