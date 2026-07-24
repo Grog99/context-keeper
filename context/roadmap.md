@@ -92,9 +92,19 @@ _przed_ warunkowym pluginem — najpierw wyciskamy maksimum z samego MCP + kontr
   gdy agent go nie poda jawnie (`kind=event` jawny działa zawsze).
   - **memory-relations + 1-hop graph boost** ⬜ — świadomie odłożone, osobny przyszły task (tabela
     krawędzi kluczowana `memory_id`, ortogonalna do `event_time`; graph boost komponowałby się z
-    age-decay post-fuzją, nie konkurował).
-- **Agent tworzy `kind=document`** ⬜ — `save_memory` przyjmuje `kind=document` (dziś agent zapisuje tylko
-  `fact`); te same guardy (human-gate, skaner sekretów). Plus agent-proposed edycje istniejących dokumentów.
+    age-decay post-fuzją, nie konkurował). Ustalone z góry (quick-clarify przed planowaniem
+    `kind=event`, żeby nie pytać ponownie): krawędzie tworzy **zarówno agent** (przez `save_memory`,
+    human-gated jak reszta treściowych mutacji) **jak i człowiek** ręcznie w dashboardzie; relacje są
+    **typowane** (stały słownik typów, np. `caused_by`/`follows`/`context_for`), nie pojedyncza
+    nietypowana krawędź `relates_to`.
+  - **Edycja `event_time` po utworzeniu** ⬜ — świadomie odłożone w v1: formularz edycji w
+    przeglądarce pamięci nie eksponuje `event_time` (ustawiany tylko raz, przy human-create). Mały
+    follow-up, gdy zajdzie potrzeba korekty backdate po fakcie.
+- **Agent tworzy `kind=document`** ✅ — `save_memory` przyjmuje opcjonalny `kind` (`fact` domyślnie |
+  `document`), te same guardy (human-gate, skaner sekretów, limity rozmiaru per-kind). `kind=event`
+  pozostaje wykluczony (human-only). Deduplikacja świadomie zostaje kind-blind — patrz
+  [`backlog.md`](backlog.md#retrieval-i-higiena-pamięci). Agent-proposed edycje istniejących pamięci
+  (w tym dokumentów) to osobny punkt niżej ("Edycja pamięci przez agenta").
 - **Edycja pamięci przez agenta** ⬜ — `supersedes: id` w `save_memory`: agent proponuje korektę istniejącego
   faktu zamiast luźnego duplikatu. Zastępuje dzisiejsze obejście („zapisz nowy fakt, opisz w treści co
   zastępuje") — wykorzystuje supersession z kolejki akceptacji (v1), brakuje tylko ekspozycji w narzędziu.
@@ -104,6 +114,7 @@ _przed_ warunkowym pluginem — najpierw wyciskamy maksimum z samego MCP + kontr
   `ACME_DOMAIN` → placeholder). „Warstwa 2" kontraktu narzędzi (`mcp-tool-contract.md` §Warstwy 2 i 3) —
   domknięcie onboardingu dla projektów spoza tego repo.
 - **Poprawki UI** ⬜ — dopieszczenie dashboardu (konkretna lista do doprecyzowania).
+- **Aktualizacja snippetu** ⬜ — Dodanie intrukcji dotyczących typów dokumentów
 
 ## Backlog ⬜
 

@@ -24,6 +24,11 @@ Legenda: ⬜ przed nami · ⏸️ warunkowe (czeka na sygnał / decyzję)
 - **`conflicts_report`** ⬜ — wykrywanie sprzeczności same-topic w nocnym jobie (sąd LLM).
 - **Memory Worth** ⬜ — prune po współwystąpieniu z sukcesem / porażką (`report_outcome` + tabela
   `outcome`; score jest już pluggable).
+- **Dedup kind-aware** ⬜ — `computeContentHash`/`already_exists` w `MemoryService.save()` dziś ignorują
+  `kind`: identyczny `header`+`body` zapisany jako różne `kind` (np. `fact` i `document`) koliduje jako
+  duplikat, drugi zapis ginie po cichu (`duplicate_pending`/`already_exists` wskazuje na pamięć
+  niewłaściwego rodzaju). Świadomie odłożone przy "Agent tworzy `kind=document`" (v1.2) — znane
+  ograniczenie udokumentowane komentarzem w kodzie i w opisie narzędzia `save_memory`.
 
 ## Kolejka akceptacji
 

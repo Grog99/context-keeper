@@ -13,7 +13,7 @@ description: >-
 
 # Plan → Implement → Verify → Commit
 
-This skill orchestrates a task through five stages using **model-specialised subagents**: Opus plans
+This skill orchestrates a task through several stages using **model-specialised subagents**: Opus plans
 (thinking-heavy, read-only), Sonnet implements and verifies (execution-heavy). You stay the
 **orchestrator** — your job is to spawn subagents, carry state between them, talk to the user, and drive
 the fix loop. **Do not implement the task yourself**; that defection is the most common way this workflow
@@ -35,14 +35,32 @@ inputs must be passed in the prompt. Carry the plan in a **file** (see below), n
 
 ---
 
-## Stage 0 — Frame the task
+## Stage 0 — Frame the task & quick clarify
 
 Restate the task in one or two sentences and confirm you understand the goal before spending Opus tokens on
 planning. If the request is a vague one-liner, ask the user what "done" looks like first — a fuzzy goal
 produces a fuzzy plan and wastes the whole pipeline.
 
-Pick a short working slug for the task (e.g. `add-token-revoke`). You'll reuse it for the plan file and
-subagent labels.
+Pick a short working slug for the task (e.g. `add-token-revoke`). You'll reuse it for the plan file, the
+task branch name (Stage 3), and subagent labels.
+
+### Quick clarify — before planning
+
+Before spawning the planner, do a **fast, top-of-mind analysis of the feature yourself**: no deep code
+reading, no file spelunking. Based purely on the request and what you already know about the repo, surface
+the handful of questions that obviously matter and would change the shape of the plan — e.g. scope
+boundaries, intended behaviour / UX, hard constraints, edge cases, integration points, and what's explicitly
+out of scope. Then ask the user the ones whose answers you can't reasonably assume.
+
+- Batch discrete-choice questions via `AskUserQuestion` (up to 4 at once); ask genuinely open-ended ones in
+  plain text.
+- Keep it short and obvious-now — this is a quick pass over intent and scope, **not** a substitute for the
+  deep open-questions round. If nothing important is ambiguous, skip it and move on.
+- Carry the answers into the Stage 1 planner prompt so the plan starts from solid inputs.
+
+This is deliberately distinct from Stage 2: here you pin down obvious intent and scope **before** planning,
+so Opus doesn't burn tokens planning the wrong thing; Stage 2 handles the deeper technical decisions the
+planner surfaces only after actually reading the code.
 
 ---
 
@@ -53,6 +71,9 @@ Spawn one planning subagent:
 - `subagent_type: "Plan"`, `model: "opus"`, label like `plan:<slug>`.
 - The `Plan` agent is read-only by design — it produces a plan without touching code, which is exactly what
   you want here.
+
+Give it the task statement **plus the answers from the Stage 0 quick-clarify**, so it plans against the
+clarified scope rather than the raw request.
 
 Prompt it to return, in this order:
 
@@ -91,6 +112,17 @@ Stage 3 without that yes.
 ---
 
 ## Stage 3 — Implement (Sonnet)
+
+### Create a branch — before implementing
+
+Before spawning the builder, create and switch to a new branch off the current branch. Run `git status`
+first — if there's uncommitted work that isn't yours from this session, stash or ask the user rather than
+branching over it. Name the branch `<type>/<slug>` following this repo's convention (visible in recent merged
+branches: `feat/...`, `fix/...`, `docs/...`); pick `type` from the task's nature and reuse the Stage 0 slug:
+
+    git checkout -b <type>/<slug>
+
+Everything from here through Stage 6 (commit) happens on this branch, not on the base branch.
 
 Spawn one implementation subagent:
 
@@ -153,10 +185,23 @@ Once verification passes:
 1. Summarise for the user what was built and the final verification result (real command output).
 2. **Ask** whether to commit, and propose a commit message. Commit only on an explicit yes — never commit or
    push unprompted.
-3. On approval, commit to the current branch (this repo works on `main` directly; only branch if the user
-   asks). End the commit message with the required trailer:
-   `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
-4. Do **not** push unless the user explicitly asks.
+3. On approval, commit to the task branch created in Stage 3. End the commit message with the required
+   trailer: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+4. Do **not** push yet — pushing and opening the PR happen in Stage 7, as their own explicit-yes gate.
+
+---
+
+## Stage 7 — Open a pull request
+
+After the commit lands:
+
+1. **Ask** the user whether to push the branch and open a PR — this is visible, hard-to-reverse, shared-state
+   territory (push + a public PR), so it gets its own explicit yes, separate from the Stage 6 commit
+   approval. Don't fold the two together even if the user tends to say yes to both.
+2. On approval: push the branch (`git push -u origin <type>/<slug>`) and create the PR with `gh pr create`,
+   targeting the repo's default base branch. Write a short title and a body summarising what changed and why
+   — pull this from the plan file and the final verification result rather than re-deriving it.
+3. Report the PR URL back to the user. Do **not** merge it — opening the PR ends this workflow.
 
 ---
 
@@ -173,3 +218,6 @@ Once verification passes:
   out of the workflow — delegate it to a Stage 3 subagent instead.
 - If a stage's subagent returns `null` (skipped or died), don't fabricate its result — tell the user and
   decide whether to re-spawn.
+- **Branch and PR are orchestrator actions, not subagent ones.** You create the branch (Stage 3) and push /
+  open the PR (Stage 7) yourself via `git`/`gh` — don't delegate them to a subagent, and don't skip the
+  Stage 7 approval gate just because Stage 6's commit was already approved.
