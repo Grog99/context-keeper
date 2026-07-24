@@ -21,11 +21,18 @@ Narzędzia: `mcp__context-keeper__search_memory`, `get_memory`, `save_memory`.
 - Zapisuj tylko fakty **niewyprowadzalne z repo** — decyzje, konwencje zespołu, „dlaczego tak",
   specyfikę deploymentu. **Nie** wrzucaj rzeczy, które są już w `README.md`, `context/` czy `docs/`
   (stack, architektura, split powierzchni) — agent to sobie przeczyta.
-- **Jeden atomowy fakt na wywołanie** `save_memory`. Nie pakuj wielu niezwiązanych faktów naraz.
-- Zapisy są **human-gated** — `save_memory` tworzy *propozycję* w kolejce, do pamięci trafia dopiero
-  po akceptacji w dashboardzie. To fire-and-forget: nie odpytuj i nie czekaj na akceptację.
-- **Nigdy sekretów** (klucze, hasła, tokeny) w treści — serwer odrzuca je jako `secret_blocked`.
-  Odnoś się do sekretu po nazwie/przeznaczeniu, nie po wartości.
+- Pełny kontrakt (human-gate, odrzucanie sekretów, statusy zwrotne, limity) niosą **opisy narzędzi
+  MCP** — tu tylko: kiedy sięgać i co zapisywać.
+
+**Co zapisywać, jako jaki `kind`:**
+
+- `fact` (domyślny) — jeden atomowy, samodzielny fakt: decyzja, konwencja zespołu, „dlaczego tak",
+  specyfika deploymentu.
+- `document` — dłuższy, samodzielny tekst referencyjny zapisywany w całości (decyzja, spec,
+  opis konwencji). Przekaż `kind: "document"`.
+- Żeby poprawić coś, co już jest w pamięci, znajdź to przez `search_memory` i zapisz ponownie z
+  `supersedes: <id>` — zamiast dokładać luźny duplikat.
+- `event` jest human-only — agent go nie tworzy.
 
 ---
 
