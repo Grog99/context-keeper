@@ -31,16 +31,17 @@ One atomic fact per call for facts: do not bundle multiple unrelated facts into 
 - header: a short one-line title (<=200 chars; newlines are collapsed to spaces).
 - body: the content in markdown (size limit ~8KB for a fact, ~256KB for a document).
 - tags: up to ~10 short lowercase tags ([a-z0-9-_/], no spaces) for filtering later.
+- supersedes: (optional) id of an existing fact/document in your project to correct; omit to save a brand-new memory.
 
 Scope: always saved to YOUR project — never global. Promotion to global is a human action in the dashboard.
 
-You can only CREATE new memories in v1 (no update/delete). To correct an existing memory, save a new one that references what it supersedes in the body — a human reviewer will reconcile the two.
+Correcting an existing memory (\`supersedes\`): set the optional \`supersedes\` parameter to the id of a memory you found via search_memory/get_memory to propose a CORRECTION of it, instead of adding a loose near-duplicate. The \`header\` and \`body\` you provide are the full corrected content (required, exactly like a normal save) and replace the target in place if approved — there is no content-free "retire" option. The target must be one of YOUR project's \`fact\` or \`document\` memories, and its kind must match the \`kind\` you pass (you cannot change a fact into a document or vice versa). You still cannot delete memories, correct \`event\` memories, or correct \`global\` memories — those are human-only. An unknown id, or an id outside your project's scope, returns the same \`not_found\` error as get_memory (no cross-project leak). A supersede is still a human-gated, fire-and-forget proposal, and is deliberately exempt from duplicate detection — the whole point is that a correction may closely resemble what it replaces.
 
 NEVER include secrets (API keys, passwords, private keys, tokens, credentials) in header or body. Such content is rejected before it reaches storage (\`secret_blocked\` error) — the memory is not saved, and there is no in-place redaction to fall back on. Rewrite it referring to the secret by name or purpose only, never by value, and try again.
 
 Return value: {id, status}.
-- status "pending": a new proposal was created and is awaiting human review.
-- status "duplicate_pending": an identical proposal is already pending — \`id\` refers to that existing proposal, not a new one.
-- status "already_exists": an identical memory is already approved — \`id\` refers to that memory. Note: duplicate detection currently keys only on header+body, not kind — saving the same header+body under a different \`kind\` than an existing fact/document will also be classified as a duplicate.
+- status "pending": a new proposal was created and is awaiting human review. With \`supersedes\`, \`id\` refers to the correction proposal (not the target memory, which keeps its own id until approved).
+- status "duplicate_pending": an identical proposal is already pending — \`id\` refers to that existing proposal, not a new one. With \`supersedes\`, this means an identical correction (same target + same corrected content) is already pending.
+- status "already_exists": an identical memory is already approved — \`id\` refers to that memory. Note: duplicate detection currently keys only on header+body, not kind — saving the same header+body under a different \`kind\` than an existing fact/document will also be classified as a duplicate. Not applicable to \`supersedes\` — corrections are exempt from duplicate detection (see above).
 
 None of these statuses are errors. This is fire-and-forget — do not poll or wait for approval.`;

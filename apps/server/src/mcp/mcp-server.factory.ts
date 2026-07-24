@@ -95,11 +95,20 @@ export function createMcpServer(memory: MemoryService, ctx: ProjectContext): Mcp
             'Optional memory kind. Default "fact". "document" for longer canonical reference material. ' +
               '"event" is human-only and not accepted here.',
           ),
+        supersedes: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Optional. Id of an existing fact/document in YOUR project to correct in place. ' +
+              'When set, header+body are the full corrected replacement content (kind must match the ' +
+              'target). Cannot target events, global memories, or other projects.',
+          ),
       },
     },
-    async ({ header, body, tags, kind }) =>
+    async ({ header, body, tags, kind, supersedes }) =>
       runTool(async () => {
-        const result = await memory.save({ header, body, tags, kind }, ctx);
+        const result = await memory.save({ header, body, tags, kind, supersedes }, ctx);
         return jsonResult(result);
       }),
   );

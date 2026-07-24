@@ -2,7 +2,7 @@
 
 Prosty przegląd: co robimy po kolei i gdzie jesteśmy. Szczegóły → [`prd.md`](prd.md), [`tech-stack.md`](tech-stack.md), [`design-system.md`](design-system.md).
 
-**Aktualizacja:** 2026-07-23 · **Etap:** v1.1 domknięte (walidacja dogfoodingu) → wchodzimy w **v1.2** (więcej możliwości agenta + poprawki UI).
+**Aktualizacja:** 2026-07-24 · **Etap:** v1.1 domknięte (walidacja dogfoodingu) → wchodzimy w **v1.2** (więcej możliwości agenta + poprawki UI).
 
 Legenda: ✅ zrobione · 🔨 w toku · ⬜ przed nami
 
@@ -105,9 +105,14 @@ _przed_ warunkowym pluginem — najpierw wyciskamy maksimum z samego MCP + kontr
   pozostaje wykluczony (human-only). Deduplikacja świadomie zostaje kind-blind — patrz
   [`backlog.md`](backlog.md#retrieval-i-higiena-pamięci). Agent-proposed edycje istniejących pamięci
   (w tym dokumentów) to osobny punkt niżej ("Edycja pamięci przez agenta").
-- **Edycja pamięci przez agenta** ⬜ — `supersedes: id` w `save_memory`: agent proponuje korektę istniejącego
-  faktu zamiast luźnego duplikatu. Zastępuje dzisiejsze obejście („zapisz nowy fakt, opisz w treści co
-  zastępuje") — wykorzystuje supersession z kolejki akceptacji (v1), brakuje tylko ekspozycji w narzędziu.
+- **Edycja pamięci przez agenta** ✅ — `save_memory` przyjmuje opcjonalny `supersedes: id`: agent proponuje
+  korektę istniejącego `fact`/`document` WŁASNEGO projektu zamiast luźnego duplikatu. Zaimplementowane jako
+  proposal `type='update'`, `origin='agent'` (in-place edit, ten sam id, version+1) — reużywa istniejący,
+  dotąd producent-less update approve-branch (`ProposalsService.approve`) i istniejący dashboard update
+  rendering; zero zmian w `proposals/*`/dashboardzie. `header`+`body` zawsze niosą pełną poprawioną treść
+  (replacement-only, brak content-free "retire"); `event`/`global`/inny projekt/nieznane id → błąd
+  (`not_found` dla scope/IDOR, `validation_error` dla event/global/kind-mismatch); supersede jest zwolniony
+  z advisory-dedup (celowo — korekta może być bliźniaczo podobna do targetu).
 - **Snippet do wklejenia w cudzym projekcie** ✅ — ekran „Onboarding” w dashboardzie: gotowe bloki do
   `AGENTS.md` / `CLAUDE.md` (proaktywność + forma połączenia `Bearer ${VAR}`) i `.mcp.json`, które
   użytkownik kopiuje do własnego repo. URL MCP wyliczany server-side (`PUBLIC_MCP_URL` → fallback

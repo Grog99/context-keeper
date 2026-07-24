@@ -640,6 +640,97 @@ describe('ProposalsService (integration, testcontainers) — kolejka akceptacji 
     });
   });
 
+  describe('supersedes — agent-produced type=update proposal (roadmap v1.2, "Edycja pamięci przez agenta")', () => {
+    it('save(supersedes) -> approve() plain (bez opts.supersedes) zamienia target in-place: version+1, revisions=edited z prior snapshot, embeddingi wymienione (delete+insert), source zachowane, search/get zwracają korektę pod TYM SAMYM id', async () => {
+      const provider = new StubEmbeddingProvider('agent-supersede-model');
+      const { memoryService, proposalsService } = buildServices(provider);
+
+      const target = await seedApprovedMemory({
+        header: 'Stary fakt agent-supersede',
+        body: 'Stara tresc przed korekta.',
+        projectId: projectA.projectId,
+      });
+      await db.insert(embeddings).values({
+        id: generateId(ID_PREFIX.embedding),
+        memoryId: target.id,
+        chunkIndex: 0,
+        chunkText: 'stara tresc chunk agent-supersede',
+        embeddingModel: 'agent-supersede-model',
+        vector: new Array(EMBEDDING_DIM).fill(0.05),
+      });
+
+      const saveRes = await memoryService.save(
+        { header: 'Nowy poprawiony fakt', body: 'Nowa, poprawiona tresc.', supersedes: target.id },
+        projectA,
+      );
+      expect(saveRes.status).toBe('pending');
+      expect(saveRes.id).toMatch(/^prop_/);
+
+      const [proposalRow] = await db.select().from(proposals).where(eq(proposals.id, saveRes.id));
+      expect(proposalRow.type).toBe('update');
+      expect(proposalRow.origin).toBe('agent');
+
+      // Plain approve — BEZ opts.supersedes (to pole jest wyłącznie dla create+archive supersession
+      // pair, patrz decyzje planu §1 — tu mechanizm to in-place update, approve() nie potrzebuje nic
+      // dodatkowego, żeby zaaplikować type='update').
+      const result = await proposalsService.approve(proposalRow.id, { actor: 'reviewer' });
+      expect(result.materializedId).toBe(target.id);
+      expect(result.archivedIds).toEqual([]);
+
+      const [memRow] = await db.select().from(memories).where(eq(memories.id, target.id));
+      expect(memRow.header).toBe('Nowy poprawiony fakt');
+      expect(memRow.body).toBe('Nowa, poprawiona tresc.');
+      expect(memRow.version).toBe(1);
+      expect(memRow.source).toBe('human'); // in-place update zachowuje memories.source (decyzja produktowa #6)
+
+      const embRows = await db.select().from(embeddings).where(eq(embeddings.memoryId, target.id));
+      expect(embRows.length).toBeGreaterThan(0);
+      expect(embRows.every((e) => e.chunkText !== 'stara tresc chunk agent-supersede')).toBe(true);
+
+      const revRows = await db.select().from(revisions).where(eq(revisions.memoryId, target.id));
+      const editedRev = revRows.find((r) => r.action === 'edited');
+      expect(editedRev).toBeDefined();
+      expect((editedRev!.snapshot as { header: string }).header).toBe('Stary fakt agent-supersede');
+
+      const found = await memoryService.search({ query: 'poprawiony fakt' }, projectA);
+      expect(found.some((f) => f.id === target.id)).toBe(true);
+      const got = await memoryService.get(target.id, projectA);
+      expect(got.header).toBe('Nowy poprawiony fakt');
+      expect(got.body).toBe('Nowa, poprawiona tresc.');
+    });
+
+    it('drift: target zmieniony (version bump) między save(supersedes) a approve -> ProposalError stale, target nietknięty', async () => {
+      const provider = new StubEmbeddingProvider('agent-supersede-drift-model');
+      const { memoryService, proposalsService } = buildServices(provider);
+
+      const target = await seedApprovedMemory({
+        header: 'Fakt do driftu',
+        body: 'Tresc przed driftem.',
+        projectId: projectA.projectId,
+      });
+
+      const saveRes = await memoryService.save(
+        { header: 'Poprawka driftowana', body: 'Nowa tresc driftowana.', supersedes: target.id },
+        projectA,
+      );
+      const [proposalRow] = await db.select().from(proposals).where(eq(proposals.id, saveRes.id));
+
+      // Symuluje inną zatwierdzoną zmianę targetu MIĘDZY save() agenta a approve() człowieka
+      // (np. human edit gdzie indziej, poza tym proposalem) — dokładnie scenariusz, który
+      // `baseVersions`/`assertNotStale` ma złapać (§8bis, "za darmo" dzięki reużyciu update branch).
+      await db.update(memories).set({ version: 1 }).where(eq(memories.id, target.id));
+
+      await expect(proposalsService.approve(proposalRow.id, { actor: 'reviewer' })).rejects.toMatchObject({
+        code: 'stale',
+        staleIds: [target.id],
+      });
+
+      const [memRow] = await db.select().from(memories).where(eq(memories.id, target.id));
+      expect(memRow.header).toBe('Fakt do driftu'); // approve NIE dotknęło targetu
+      expect(memRow.version).toBe(1); // tylko bump z symulacji, nie z approve
+    });
+  });
+
   describe('listPending / getProposal — stale display-only (bez locka)', () => {
     it('listPending oznacza proposal jako stale gdy affected memory zmieniła wersję poza jego base_versions', async () => {
       const { proposalsService } = buildServices(new StubEmbeddingProvider('list-stale-model'));

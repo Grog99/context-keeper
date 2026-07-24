@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AuditService } from '../src/audit/audit.service';
@@ -248,6 +248,224 @@ describe('MemoryService (integration, testcontainers)', () => {
       await expect(
         memory.save({ header: 'Duzy fakt', body: bodyBetweenLimits, kind: 'fact' }, projectA),
       ).rejects.toMatchObject({ code: 'validation_error' });
+    });
+  });
+
+  describe('save — supersedes (roadmap v1.2, "Edycja pamięci przez agenta")', () => {
+    let projectSuper: ProjectContext;
+
+    beforeAll(async () => {
+      const created = await projects.createProject('memory-test-supersedes');
+      projectSuper = { projectId: created.project.id, projectName: created.project.name };
+    });
+
+    it('happy: supersedes na approved fact tego samego projektu -> pending, proposal type=update/origin=agent, payload=poprawiona tresc, affectedIds/baseVersions na target', async () => {
+      const target = await memory.devSeedApproved({
+        header: 'Stary fakt do poprawy',
+        body: 'Stara, nieaktualna tresc.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectSuper.projectId,
+      });
+
+      const res = await memory.save(
+        { header: 'Poprawiony fakt', body: 'Nowa, poprawiona tresc.', supersedes: target.id },
+        projectSuper,
+      );
+      expect(res.status).toBe('pending');
+      expect(res.id).toMatch(/^prop_/); // id proposala korekty, NIE id targetu
+
+      const [proposalRow] = await db.select().from(proposals).where(eq(proposals.id, res.id));
+      expect(proposalRow).toBeDefined();
+      expect(proposalRow.type).toBe('update');
+      expect(proposalRow.origin).toBe('agent');
+      expect(proposalRow.status).toBe('pending');
+      expect(proposalRow.scope).toBe('project');
+      expect(proposalRow.projectId).toBe(projectSuper.projectId);
+      expect(proposalRow.affectedIds).toEqual([target.id]);
+      expect(proposalRow.baseVersions).toEqual({ [target.id]: target.version });
+      const payload = proposalRow.payload as { memoryId: string; header: string; body: string; kind: string };
+      expect(payload.memoryId).toBe(target.id);
+      expect(payload.header).toBe('Poprawiony fakt');
+      expect(payload.body).toBe('Nowa, poprawiona tresc.');
+      expect(payload.kind).toBe('fact');
+    });
+
+    it('IDOR: target z INNEGO projektu -> not_found, identyczne jak nieznane id (anty-probing)', async () => {
+      const targetB = await memory.devSeedApproved({
+        header: 'Fakt projektu B do probingu',
+        body: 'Widoczny tylko w B.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectB.projectId,
+      });
+
+      await expect(
+        memory.save(
+          { header: 'Proba korekty cudzego faktu', body: 'Tresc.', supersedes: targetB.id },
+          projectSuper,
+        ),
+      ).rejects.toMatchObject({ code: 'not_found' });
+
+      await expect(
+        memory.save(
+          { header: 'Proba korekty nieznanego id', body: 'Tresc.', supersedes: 'mem_doesnotexist9' },
+          projectSuper,
+        ),
+      ).rejects.toMatchObject({ code: 'not_found' });
+    });
+
+    it('target scope=global -> validation_error (nie not_found — globale są widoczne agentowi)', async () => {
+      const targetGlobal = await memory.devSeedApproved({
+        header: 'Fakt globalny do poprawy',
+        body: 'Tresc globalna.',
+        kind: 'fact',
+        scope: 'global',
+      });
+
+      await expect(
+        memory.save(
+          { header: 'Proba korekty global', body: 'Tresc.', supersedes: targetGlobal.id },
+          projectSuper,
+        ),
+      ).rejects.toMatchObject({ code: 'validation_error' });
+    });
+
+    it('target kind=event -> validation_error (event jest human-only)', async () => {
+      const [eventRow] = await db
+        .insert(schema.memories)
+        .values({
+          id: generateId(ID_PREFIX.memory),
+          header: 'Zdarzenie do poprawy',
+          body: 'Tresc zdarzenia.',
+          kind: 'event',
+          tags: [],
+          scope: 'project',
+          projectId: projectSuper.projectId,
+          status: 'approved',
+          source: 'human',
+          approvedAt: new Date(),
+          eventTime: new Date(),
+        })
+        .returning();
+
+      await expect(
+        memory.save(
+          { header: 'Proba korekty eventu', body: 'Tresc.', kind: 'fact', supersedes: eventRow.id },
+          projectSuper,
+        ),
+      ).rejects.toMatchObject({ code: 'validation_error' });
+    });
+
+    it('kind mismatch: target document, save kind=fact (domyślny) -> validation_error', async () => {
+      const targetDoc = await memory.devSeedApproved({
+        header: 'Dokument do poprawy',
+        body: 'Tresc dokumentu.',
+        kind: 'document',
+        scope: 'project',
+        projectId: projectSuper.projectId,
+      });
+
+      await expect(
+        memory.save(
+          { header: 'Proba fact zamiast document', body: 'Tresc.', supersedes: targetDoc.id },
+          projectSuper,
+        ),
+      ).rejects.toMatchObject({ code: 'validation_error' });
+    });
+
+    it('dedup nie suppresuje supersede: pending create o identycznej treści istnieje, supersede tą samą treścią innego targetu nadal type=update (nie duplicate_pending)', async () => {
+      const target = await memory.devSeedApproved({
+        header: 'Fakt do poprawy (dedup test)',
+        body: 'Stara tresc dedup test.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectSuper.projectId,
+      });
+
+      const createRes = await memory.save(
+        { header: 'Wspolna tresc dedup', body: 'Identyczny header+body co supersede.' },
+        projectSuper,
+      );
+      expect(createRes.status).toBe('pending');
+
+      const supersedeRes = await memory.save(
+        { header: 'Wspolna tresc dedup', body: 'Identyczny header+body co supersede.', supersedes: target.id },
+        projectSuper,
+      );
+      expect(supersedeRes.status).toBe('pending'); // NIE duplicate_pending mimo identycznego content hash
+      expect(supersedeRes.id).not.toBe(createRes.id);
+
+      const [proposalRow] = await db.select().from(proposals).where(eq(proposals.id, supersedeRes.id));
+      expect(proposalRow.type).toBe('update');
+    });
+
+    it('sekret w poprawionej treści -> secret_blocked, żaden proposal update nie powstaje', async () => {
+      const target = await memory.devSeedApproved({
+        header: 'Fakt do poprawy z sekretem',
+        body: 'Czysta stara tresc.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectSuper.projectId,
+      });
+
+      const before = await db.select().from(proposals).where(eq(proposals.projectId, projectSuper.projectId));
+
+      await expect(
+        memory.save(
+          {
+            header: 'Proba z sekretem',
+            body: 'export AWS_ACCESS_KEY_ID=AKIAABCDEFGHIJKLMNOP',
+            supersedes: target.id,
+          },
+          projectSuper,
+        ),
+      ).rejects.toMatchObject({ code: 'secret_blocked' });
+
+      const after = await db.select().from(proposals).where(eq(proposals.projectId, projectSuper.projectId));
+      expect(after.length).toBe(before.length); // żaden proposal nie powstał
+    });
+
+    it('idempotentny retry: dwa identyczne supersede -> drugi duplicate_pending wskazuje na pierwszy, dokładnie 1 proposal update dla targetu', async () => {
+      const target = await memory.devSeedApproved({
+        header: 'Fakt do wielokrotnej poprawy',
+        body: 'Stara tresc retry test.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectSuper.projectId,
+      });
+
+      const first = await memory.save(
+        { header: 'Poprawiony retry', body: 'Nowa tresc retry.', supersedes: target.id },
+        projectSuper,
+      );
+      expect(first.status).toBe('pending');
+
+      const second = await memory.save(
+        { header: 'Poprawiony retry', body: 'Nowa tresc retry.', supersedes: target.id },
+        projectSuper,
+      );
+      expect(second.status).toBe('duplicate_pending');
+      expect(second.id).toBe(first.id);
+
+      const rows = await db
+        .select()
+        .from(proposals)
+        .where(and(eq(proposals.projectId, projectSuper.projectId), eq(proposals.type, 'update')));
+      const matching = rows.filter((r) => (r.payload as { memoryId: string }).memoryId === target.id);
+      expect(matching.length).toBe(1);
+    });
+
+    it('backward compat: save bez supersedes nadal tworzy proposal type=create', async () => {
+      const res = await memory.save(
+        { header: 'Zwykly nowy fakt bez supersedes', body: 'Tresc zwyklego zapisu.' },
+        projectSuper,
+      );
+      expect(res.status).toBe('pending');
+
+      const rows = await db.select().from(proposals).where(eq(proposals.projectId, projectSuper.projectId));
+      const matching = rows.find((p) => (p.payload as { memoryId: string }).memoryId === res.id);
+      expect(matching?.type).toBe('create');
     });
   });
 
