@@ -97,9 +97,11 @@ _przed_ warunkowym pluginem — najpierw wyciskamy maksimum z samego MCP + kontr
     human-gated jak reszta treściowych mutacji) **jak i człowiek** ręcznie w dashboardzie; relacje są
     **typowane** (stały słownik typów, np. `caused_by`/`follows`/`context_for`), nie pojedyncza
     nietypowana krawędź `relates_to`.
-  - **Edycja `event_time` po utworzeniu** ⬜ — świadomie odłożone w v1: formularz edycji w
-    przeglądarce pamięci nie eksponuje `event_time` (ustawiany tylko raz, przy human-create). Mały
-    follow-up, gdy zajdzie potrzeba korekty backdate po fakcie.
+  - **Edycja `event_time` po utworzeniu** ✅ — formularz edycji w przeglądarce pamięci (dla
+    `kind='event'`) pozwala skorygować backdate po fakcie, ten sam `datetime-local` widget co przy
+    tworzeniu. `editMemory` odrzuca `event_time` twardym `validation_error` dla fact/document
+    (zamiast cicho ignorować); stara wartość trafia do snapshotu rewizji `edited`, bez osobnego
+    pola w audit metadata (symetrycznie z header/body).
 - **Agent tworzy `kind=document`** ✅ — `save_memory` przyjmuje opcjonalny `kind` (`fact` domyślnie |
   `document`), te same guardy (human-gate, skaner sekretów, limity rozmiaru per-kind). `kind=event`
   pozostaje wykluczony (human-only). Deduplikacja świadomie zostaje kind-blind — patrz

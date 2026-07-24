@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Textarea } from '../components/ui/textarea';
 import { api } from '../lib/api';
 import { describeApiError } from '../lib/errors';
+import { toDatetimeLocalValue } from '../lib/format';
 import { queryKeys } from '../lib/query';
 import type { DashboardLimits, HumanCreateResponse, MemoryListItem } from '../types/api';
 import type { MemoryKind, MemoryScope } from '../types/domain';
@@ -32,18 +33,6 @@ const DEFAULT_LIMITS: DashboardLimits = {
 
 function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).length;
-}
-
-/** Wartość startowa `<input type="datetime-local">` — "teraz" w LOKALNEJ strefie (roadmap v1.2,
- * "kind=event episodic": `event_time` domyślnie teraz, backdatable, przyszłe daty dozwolone bez
- * walidacji blokującej — patrz `validateEventTime` po stronie serwera). `datetime-local` nie ma
- * strefy — budujemy string ręcznie z lokalnych składowych `Date`, żeby uniknąć przesunięcia UTC,
- * które dałoby `toISOString()` na maszynie z inną strefą niż przeglądarka.
- */
-function nowForDatetimeLocal(): string {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function deriveHeaderFromFilename(filename: string): string {
@@ -93,7 +82,7 @@ function HumanCreateForm({ onOpenChange, scope, projectId, projectName }: HumanC
   const [kind, setKind] = useState<MemoryKind>('fact');
   const [header, setHeader] = useState('');
   const [body, setBody] = useState('');
-  const [eventTime, setEventTime] = useState(nowForDatetimeLocal);
+  const [eventTime, setEventTime] = useState(() => toDatetimeLocalValue(new Date()));
   const [tags, setTags] = useState<string[]>([]);
   const [tagDraft, setTagDraft] = useState('');
   const [importTab, setImportTab] = useState<'paste' | 'upload'>('paste');
