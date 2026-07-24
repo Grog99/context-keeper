@@ -7,6 +7,7 @@ import type {
   ProposalOrigin,
   ProposalStatus,
   ProposalType,
+  RelationType,
   RevisionAction,
 } from './domain';
 
@@ -76,6 +77,17 @@ export interface MemoryListItem {
 export interface MemoryDetail extends MemoryListItem {
   body: string;
   approvedAt: string | null;
+}
+
+/** Zakładka "Relacje" (roadmap v1.2, "memory-relations + 1-hop graph boost") — lustro
+ * `RelationListItem` (`apps/server/src/memory/memory-admin.service.ts`). */
+export interface RelationListItemApi {
+  id: string;
+  type: RelationType;
+  direction: 'outgoing' | 'incoming';
+  source: MemorySource;
+  createdAt: string;
+  neighbor: { id: string; header: string; kind: MemoryKind; status: MemoryStatus };
 }
 
 export interface RevisionRowApi {
@@ -213,6 +225,8 @@ export interface PurgePreview {
   embeddingsCount: number;
   relatedProposalsCount: number;
   revisionsWithContentCount: number;
+  /** Roadmap v1.2 — krawędzie `memory_relations` dotykające tę pamięć. */
+  relationsCount: number;
 }
 
 export interface PurgeResult {
@@ -221,4 +235,6 @@ export interface PurgeResult {
   stagingEmbeddingsDeleted: number;
   proposalsRedacted: number;
   revisionsRedacted: number;
+  /** Roadmap v1.2 — krawędzie usunięte razem z tombstone'em. */
+  relationsDeleted: number;
 }

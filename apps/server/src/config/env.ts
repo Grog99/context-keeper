@@ -73,6 +73,12 @@ export const envSchema = z
     // half-life w dniach, aplikowany post-RRF WYŁĄCZNIE do kind=event (zero wpływu na fact/document,
     // patrz `memory/decay.ts`).
     EVENT_DECAY_HALFLIFE_DAYS: z.coerce.number().int().positive().default(30),
+    // 1-hop graph boost (roadmap v1.2, "memory-relations + 1-hop graph boost") — RE-RANK ONLY
+    // (nigdy nie wstrzykuje pamięci spoza sfuzjowanego zbioru, patrz `memory/graph-boost.ts`),
+    // binarny, multiplikatywny: `effectiveScore *= (1 + GRAPH_BOOST_WEIGHT)` gdy oba końce
+    // krawędzi są w sfuzjowanym zbiorze. `0` wyłącza boost I pomija dodatkowe zapytanie o krawędzie
+    // (perf — brak wpływu na hot-path search, gdy funkcja nieużywana).
+    GRAPH_BOOST_WEIGHT: z.coerce.number().nonnegative().default(0.1),
 
     // Limity wejścia (FR-V1)
     BODY_MAX_FACT: z.coerce.number().int().positive().default(8192),

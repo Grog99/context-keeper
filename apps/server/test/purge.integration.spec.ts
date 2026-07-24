@@ -17,6 +17,7 @@ import {
   EMBEDDING_DIM,
   embeddings,
   memories,
+  memoryRelations,
   proposals,
   revisions,
   stagingEmbeddings,
@@ -120,6 +121,21 @@ describe('PurgeService (integration, testcontainers) — hard-purge FR-S3', () =
     return id;
   }
 
+  /** Roadmap v1.2 ("memory-relations + 1-hop graph boost") — krawędź nie niesie treści sama w sobie,
+   * ale purge i tak ją usuwa (mirror embeddings), patrz `PurgeService.purge`. */
+  async function seedRelation(fromMemoryId: string, toMemoryId: string, projectId: string): Promise<string> {
+    const id = generateId(ID_PREFIX.relation);
+    await db.insert(memoryRelations).values({
+      id,
+      fromMemoryId,
+      toMemoryId,
+      type: 'context_for',
+      projectId,
+      source: 'human',
+    });
+    return id;
+  }
+
   beforeAll(async () => {
     container = await new PostgreSqlContainer('pgvector/pgvector:pg18-trixie').start();
     pool = new Pool({ connectionString: container.getConnectionUri() });
@@ -158,6 +174,8 @@ describe('PurgeService (integration, testcontainers) — hard-purge FR-S3', () =
         baseVersions: { [seeded.id]: 0 },
         projectId: projectA.projectId,
       });
+      const neighbor = await seedApprovedMemory({ header: 'Sasiad relacji', projectId: projectA.projectId });
+      const relationId = await seedRelation(seeded.id, neighbor.id, projectA.projectId);
 
       const preview = await purge.preview(seeded.id);
       expect(preview.status).toBe('approved');
@@ -165,6 +183,7 @@ describe('PurgeService (integration, testcontainers) — hard-purge FR-S3', () =
       expect(preview.embeddingsCount).toBe(1);
       expect(preview.relatedProposalsCount).toBe(1);
       expect(preview.revisionsWithContentCount).toBe(1);
+      expect(preview.relationsCount).toBe(1);
 
       // Read-only — nic się nie zmieniło.
       const [memRow] = await db.select().from(memories).where(eq(memories.id, seeded.id));
@@ -172,6 +191,8 @@ describe('PurgeService (integration, testcontainers) — hard-purge FR-S3', () =
       expect(memRow.header).toBe('Do podgladu');
       const [propRow] = await db.select().from(proposals).where(eq(proposals.id, relatedProposal.id));
       expect((propRow.payload as { header: string }).header).toBe('patch');
+      const [relRow] = await db.select().from(memoryRelations).where(eq(memoryRelations.id, relationId));
+      expect(relRow).toBeDefined();
     });
 
     it('nieistniejąca pamięć -> not_found', async () => {
@@ -247,12 +268,22 @@ describe('PurgeService (integration, testcontainers) — hard-purge FR-S3', () =
         projectId: projectA.projectId,
       });
 
+      // Roadmap v1.2 ("memory-relations + 1-hop graph boost") — jedna krawędź WYCHODZĄCA z seeded,
+      // jedna PRZYCHODZĄCA (or() w PurgeService.purge musi złapać OBIE strony), plus kontrolna
+      // krawędź niedotykająca seeded wcale — musi przetrwać.
+      const neighborA = await seedApprovedMemory({ header: 'Sasiad A', projectId: projectA.projectId });
+      const neighborB = await seedApprovedMemory({ header: 'Sasiad B', projectId: projectA.projectId });
+      const outgoingRelation = await seedRelation(seeded.id, neighborA.id, projectA.projectId);
+      const incomingRelation = await seedRelation(neighborB.id, seeded.id, projectA.projectId);
+      const unrelatedRelation = await seedRelation(unrelated.id, neighborA.id, projectA.projectId);
+
       const result = await purge.purge(seeded.id, { reason: 'AWS key wyciekł w body, rotacja wykonana', actor: 'reviewer' });
 
       expect(result.embeddingsDeleted).toBe(2);
       expect(result.stagingEmbeddingsDeleted).toBe(1);
       expect(result.proposalsRedacted).toBe(2); // createProposal + pendingUpdate
       expect(result.revisionsRedacted).toBe(1); // tylko revWithContent
+      expect(result.relationsDeleted).toBe(2); // outgoingRelation + incomingRelation, NIE unrelatedRelation
 
       const [memRow] = await db.select().from(memories).where(eq(memories.id, seeded.id));
       expect(memRow.status).toBe('purged');
@@ -296,6 +327,19 @@ describe('PurgeService (integration, testcontainers) — hard-purge FR-S3', () =
       expect(match).toBeDefined();
       expect(match!.actor).toBe('reviewer');
       expect((match!.metadata as { reason: string }).reason).toBe('AWS key wyciekł w body, rotacja wykonana');
+      expect((match!.metadata as { relationsDeleted: number }).relationsDeleted).toBe(2);
+
+      // Obie krawędzie dotykające seeded (wychodząca i przychodząca) zniknęły.
+      const [outgoingAfter] = await db.select().from(memoryRelations).where(eq(memoryRelations.id, outgoingRelation));
+      expect(outgoingAfter).toBeUndefined();
+      const [incomingAfter] = await db.select().from(memoryRelations).where(eq(memoryRelations.id, incomingRelation));
+      expect(incomingAfter).toBeUndefined();
+      // Kontrolna krawędź NIEDOTYKAJĄCA seeded przetrwała.
+      const [unrelatedRelationAfter] = await db
+        .select()
+        .from(memoryRelations)
+        .where(eq(memoryRelations.id, unrelatedRelation));
+      expect(unrelatedRelationAfter).toBeDefined();
 
       // Niepowiązane wiersze nietknięte.
       const [unrelatedAfter] = await db.select().from(memories).where(eq(memories.id, unrelated.id));

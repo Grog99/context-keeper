@@ -12,6 +12,10 @@ export type ProposalStatus = 'pending' | 'approved' | 'rejected';
 
 export type RevisionAction = 'created' | 'edited' | 'promote' | 'archive' | 'superseded_by';
 
+/** Słownik typów relacji (roadmap v1.2, "memory-relations + 1-hop graph boost") — dokładnie 3
+ * wartości, lustro `relation_type` (`apps/server/src/db/schema/enums.ts`). */
+export type RelationType = 'caused_by' | 'follows' | 'context_for';
+
 export type AuditEventType =
   | 'proposal_created'
   | 'proposal_approved'
@@ -26,4 +30,6 @@ export type AuditEventType =
   | 'purge_tombstone'
   | 'nightly_run'
   | 'backup_completed'
-  | 'project_settings_changed';
+  | 'project_settings_changed'
+  | 'relation_created'
+  | 'relation_removed';

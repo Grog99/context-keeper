@@ -104,11 +104,30 @@ export function createMcpServer(memory: MemoryService, ctx: ProjectContext): Mcp
               'When set, header+body are the full corrected replacement content (kind must match the ' +
               'target). Cannot target events, global memories, or other projects.',
           ),
+        relations: z
+          .array(
+            z.object({
+              type: z.enum(['caused_by', 'follows', 'context_for']),
+              targetId: z.string().min(1),
+            }),
+          )
+          .max(16)
+          .optional()
+          .describe(
+            'Optional. Typed, directed edges FROM this memory (the one being saved/corrected) TO ' +
+              'existing memories in YOUR project — up to 16. Each entry is {type, targetId} with ' +
+              'type one of "caused_by" | "follows" | "context_for". Same human-gated proposal as the ' +
+              'rest of this call: edges only appear after a human approves. targetId can be a fact, ' +
+              'document, or event (events ARE allowed as relation targets, unlike supersedes) in YOUR ' +
+              'project — not global, not another project, not itself. An unknown/out-of-scope ' +
+              'targetId returns the same not_found error as get_memory; a global targetId returns ' +
+              'validation_error.',
+          ),
       },
     },
-    async ({ header, body, tags, kind, supersedes }) =>
+    async ({ header, body, tags, kind, supersedes, relations }) =>
       runTool(async () => {
-        const result = await memory.save({ header, body, tags, kind, supersedes }, ctx);
+        const result = await memory.save({ header, body, tags, kind, supersedes, relations }, ctx);
         return jsonResult(result);
       }),
   );

@@ -10,10 +10,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { sql } from 'drizzle-orm';
 import type { AppModule as AppModuleType } from '../src/app.module';
+import { DB, type Database } from '../src/db/db.tokens';
 import * as schema from '../src/db/schema';
+import { proposals } from '../src/db/schema';
+import { MemoryAdminService } from '../src/memory/memory-admin.service';
 import { MemoryService } from '../src/memory/memory.service';
 import { ProjectsService } from '../src/projects/projects.service';
+import { ProposalsService } from '../src/proposals/proposals.service';
 
 /**
  * Cienki MCP e2e (§15 tech-stack): serwer Nest in-process (port efemeryczny) + KLIENT z oficjalnego
@@ -181,7 +186,7 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
       const tools = await client.listTools();
       const save = tools.tools.find((t) => t.name === 'save_memory')!;
       const props = (save.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
-      expect(Object.keys(props).sort()).toEqual(['body', 'header', 'kind', 'supersedes', 'tags']);
+      expect(Object.keys(props).sort()).toEqual(['body', 'header', 'kind', 'relations', 'supersedes', 'tags']);
     } finally {
       await transport.close();
     }
@@ -235,6 +240,121 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
       const saved = JSON.parse(textOf(res as CallToolResult)) as { id: string; status: string };
       expect(saved.status).toBe('pending');
       expect(saved.id).toMatch(/^prop_/); // id proposala korekty, nie id targetu
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('save_memory z relations -> pending, po approve materializuje krawędzie (roadmap v1.2, attach-on-save)', async () => {
+    const memoryService = app.get(MemoryService);
+    const projectId = (await app.get(ProjectsService).resolveProjectByToken(token))!.id;
+    // Cel MOŻE być kind=event (Stage-2 answer #1, świadome odstępstwo od supersedes) — target A jest
+    // eventem, target B faktem, żeby ćwiczyć oba w jednym save_memory.
+    const targetEvent = await memoryService.devSeedApproved({
+      header: 'Zdarzenie e2e dla relacji',
+      body: 'Tresc zdarzenia.',
+      kind: 'event',
+      scope: 'project',
+      projectId,
+    });
+    const targetFact = await memoryService.devSeedApproved({
+      header: 'Fakt e2e dla relacji',
+      body: 'Tresc faktu.',
+      kind: 'fact',
+      scope: 'project',
+      projectId,
+    });
+
+    const { client, transport } = newClient(token);
+    await client.connect(transport);
+    let saved: { id: string; status: string };
+    try {
+      const res = await client.callTool({
+        name: 'save_memory',
+        arguments: {
+          header: 'Nowy fakt e2e z relacjami',
+          body: 'Ten fakt jest kontekstem dla zdarzenia i nastepuje po innym fakcie.',
+          relations: [
+            { type: 'context_for', targetId: targetEvent.id },
+            { type: 'follows', targetId: targetFact.id },
+          ],
+        },
+      });
+      expect(res.isError).not.toBe(true);
+      saved = JSON.parse(textOf(res as CallToolResult)) as { id: string; status: string };
+      expect(saved.status).toBe('pending');
+    } finally {
+      await transport.close();
+    }
+
+    // Przed approve — zero wierszy w memory_relations (materializacja dopiero w approve()).
+    const memoryAdmin = app.get(MemoryAdminService);
+    expect(await memoryAdmin.listRelations(saved.id)).toHaveLength(0);
+
+    // `save_memory` (status="pending", create-path) zwraca ZMINTOWANY id pamięci, NIE proposala
+    // (patrz test wyżej "supersedes" — to WYŁĄCZNIE update-path zwraca id proposala) — trzeba
+    // odszukać proposal po `payload.memoryId`, dokładnie jak `memory.integration.spec.ts`.
+    const db = app.get<Database>(DB);
+    const [propRow] = await db
+      .select({ id: proposals.id })
+      .from(proposals)
+      .where(sql`${proposals.payload} ->> 'memoryId' = ${saved.id}`);
+    expect(propRow).toBeDefined();
+
+    const proposalsService = app.get(ProposalsService);
+    await proposalsService.approve(propRow.id, { actor: 'tester' });
+
+    const relations = await memoryAdmin.listRelations(saved.id);
+    expect(relations).toHaveLength(2);
+    expect(relations.every((r) => r.direction === 'outgoing')).toBe(true);
+    const byTarget = new Map(relations.map((r) => [r.neighbor.id, r]));
+    expect(byTarget.get(targetEvent.id)?.type).toBe('context_for');
+    expect(byTarget.get(targetFact.id)?.type).toBe('follows');
+  });
+
+  it('save_memory relations z nieznanym targetId -> isError + {code: not_found} (IDOR-safe, jak get_memory)', async () => {
+    const { client, transport } = newClient(token);
+    await client.connect(transport);
+    try {
+      const res = await client.callTool({
+        name: 'save_memory',
+        arguments: {
+          header: 'Relacja do nieznanego celu',
+          body: 'To nie powinno przejsc.',
+          relations: [{ type: 'follows', targetId: 'mem_doesnotexist2' }],
+        },
+      });
+      expect(res.isError).toBe(true);
+      const envelope = JSON.parse(textOf(res as CallToolResult)) as { code: string };
+      expect(envelope.code).toBe('not_found');
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('save_memory relations z targetId=global -> isError + {code: validation_error}', async () => {
+    const memoryService = app.get(MemoryService);
+    const globalTarget = await memoryService.devSeedApproved({
+      header: 'Globalna pamiec e2e',
+      body: 'Tresc globalna.',
+      kind: 'fact',
+      scope: 'global',
+    });
+
+    const { client, transport } = newClient(token);
+    await client.connect(transport);
+    try {
+      const res = await client.callTool({
+        name: 'save_memory',
+        arguments: {
+          header: 'Relacja do global',
+          body: 'To nie powinno przejsc.',
+          relations: [{ type: 'follows', targetId: globalTarget.id }],
+        },
+      });
+      expect(res.isError).toBe(true);
+      const envelope = JSON.parse(textOf(res as CallToolResult)) as { code: string };
+      expect(envelope.code).toBe('validation_error');
     } finally {
       await transport.close();
     }

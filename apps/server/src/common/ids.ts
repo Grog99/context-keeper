@@ -26,4 +26,5 @@ export const ID_PREFIX = {
   embedding: 'emb',
   audit: 'evt',
   searchEvent: 'sev',
+  relation: 'rel',
 } as const;

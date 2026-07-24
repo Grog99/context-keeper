@@ -4,7 +4,16 @@ import type {
   ProposalOrigin,
   ProposalStatus,
   ProposalType,
+  RelationType,
 } from '../db/schema/enums';
+
+/** Krawędź attach-on-save, niesiona w `payload.relations` (§memory.types.ts `SaveRelationInput`,
+ * §db/schema/memory-relations.ts) — dokładnie ten sam kształt na `CreatePayload` i `UpdatePayload`,
+ * bo obie ścieżki `MemoryService.save()` (create i `saveAsSupersede`) mogą je nieść. */
+export interface RelationPayloadEntry {
+  type: RelationType;
+  targetId: string;
+}
 
 /** Payload `type=create` — dokładnie kształt, jaki `MemoryService.save()` zapisuje do `proposals.payload`
  * (Faza 4 seam, patrz `memory.service.ts:118-120`). */
@@ -14,6 +23,9 @@ export interface CreatePayload {
   body: string;
   tags: string[];
   kind: MemoryKind;
+  /** Attach-on-save (roadmap v1.2) — materializowane W `ProposalsService.approve()`, NIE tutaj;
+   * `undefined`/`[]` = bez krawędzi (backward-compat, pole czysto addytywne). */
+  relations?: RelationPayloadEntry[];
 }
 
 /** Payload `type=update` — patch (pola pominięte = "bez zmian", scalane z aktualnym wierszem
@@ -24,6 +36,8 @@ export interface UpdatePayload {
   body?: string;
   tags?: string[];
   kind?: MemoryKind;
+  /** Attach-on-save (roadmap v1.2) — jak w `CreatePayload`, tylko dla `saveAsSupersede`. */
+  relations?: RelationPayloadEntry[];
 }
 
 /** Payload `type=merge` — pełny kształt wynikowej pamięci C (`memoryId` = id domintowany dla C,

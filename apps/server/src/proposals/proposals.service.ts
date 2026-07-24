@@ -1,12 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, or, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { ToolError } from '../common/errors';
 import { generateId, ID_PREFIX } from '../common/ids';
 import { scanForSecrets } from '../common/secret-scanner';
 import { AppConfigService } from '../config/config.service';
 import { DB, type Database, type Tx } from '../db/db.tokens';
-import { embeddings, memories, proposals, revisions, stagingEmbeddings } from '../db/schema';
+import { embeddings, memories, memoryRelations, proposals, revisions, stagingEmbeddings } from '../db/schema';
 import type {
   MemoryKind,
   MemoryScope,
@@ -31,6 +31,7 @@ import type {
   MergePayload,
   ProposalPayload,
   ProposalView,
+  RelationPayloadEntry,
   RejectOptions,
   UpdatePayload,
 } from './proposals.types';
@@ -273,6 +274,9 @@ export class ProposalsService {
             });
             archivedIds.push(supersedeRow.id);
           }
+          // Attach-on-save (roadmap v1.2) — materializacja PO wszystkim innym (embeddingi, ewentualne
+          // supersede-archive), symetrycznie z kolejnością reszty efektów ubocznych `create`.
+          await this.materializeRelations(tx, created.id, propRow.projectId, createPayload.relations, actor);
           break;
         }
         case 'update': {
@@ -300,6 +304,9 @@ export class ProposalsService {
             await this.applyEmbeddings(tx, target.id, embeddingPrep, false);
             embeddingDisposition = embeddingPrep.disposition;
           }
+          // Attach-on-save (roadmap v1.2) — `saveAsSupersede` niesie krawędzie OD targetu (self=targetId),
+          // materializowane tu, tak samo jak dla `create`.
+          await this.materializeRelations(tx, target.id, propRow.projectId, updatePayload.relations, actor);
           materializedId = target.id;
           break;
         }
@@ -456,6 +463,8 @@ export class ProposalsService {
       );
     }
 
+    // `...base` (nie pola po polu) — zachowuje `relations` z oryginalnego payloadu bez zmian
+    // (roadmap v1.2, attach-on-save): recenzent edytuje treść, nie edytuje krawędzi tutaj.
     const editedPayload: ProposalPayload = { ...base, header, body, tags };
 
     await this.db.transaction(async (tx) => {
@@ -563,14 +572,94 @@ export class ProposalsService {
     return row;
   }
 
+  /**
+   * Attach-on-save materializacja (roadmap v1.2, "memory-relations + 1-hop graph boost") — WYŁĄCZNIE
+   * tutaj, wewnątrz `approve()`, nigdy w `MemoryService.save()` (§4 planu, human-gate integrity:
+   * krawędzie agenta powstają dopiero po zatwierdzeniu, tak samo jak reszta treści).
+   *
+   * Fail-open per krawędź (NIE per proposal): cel mógł zniknąć/zmienić stan między `save()` (gdzie
+   * `resolveRelations` go zwalidował) a `approve()` — zarchiwizowany, wypromowany do global, albo (w
+   * teorii, memories nigdy hard-delete) usunięty. Taka krawędź jest po prostu POMIJANA, NIE blokuje
+   * całej akceptacji (relacje nie są w `assertNotStale`/`base_versions` — nie mają własnej wersji, a
+   * odrzucenie approve z powodu jednej martwej krawędzi byłoby nieproporcjonalne). `onConflictDoNothing`
+   * na `UNIQUE(from,to,type)` — idempotentne, gdyby ta sama krawędź już istniała (np. dodana ręcznie
+   * w dashboardzie między save a approve).
+   */
+  private async materializeRelations(
+    tx: Tx,
+    fromId: string,
+    projectId: string | null,
+    relations: RelationPayloadEntry[] | undefined,
+    actor: string,
+  ): Promise<void> {
+    // `projectId` null tylko dla scope=global proposali — `resolveRelations` po stronie
+    // `MemoryService` nigdy nie dopuszcza relations na takich (agent-save jest zawsze project-scoped,
+    // FR-M4), ale strażnik typu zamiast zakładania.
+    if (!relations || relations.length === 0 || !projectId) return;
+
+    const targetIds = Array.from(new Set(relations.map((r) => r.targetId)));
+    const targetRows = await tx.select().from(memories).where(inArray(memories.id, targetIds));
+    const byId = new Map(targetRows.map((r) => [r.id, r]));
+
+    for (const rel of relations) {
+      const target = byId.get(rel.targetId);
+      if (
+        !target ||
+        target.status !== 'approved' ||
+        target.scope !== 'project' ||
+        target.projectId !== projectId ||
+        target.id === fromId
+      ) {
+        continue; // fail-open — patrz komentarz metody
+      }
+
+      const [inserted] = await tx
+        .insert(memoryRelations)
+        .values({
+          id: generateId(ID_PREFIX.relation),
+          fromMemoryId: fromId,
+          toMemoryId: rel.targetId,
+          type: rel.type,
+          projectId,
+          source: 'agent',
+        })
+        .onConflictDoNothing()
+        .returning({ id: memoryRelations.id });
+
+      if (inserted) {
+        await this.audit.log(
+          {
+            eventType: 'relation_created',
+            actor,
+            affectedIds: [fromId, rel.targetId],
+            metadata: {
+              relationId: inserted.id,
+              type: rel.type,
+              fromMemoryId: fromId,
+              toMemoryId: rel.targetId,
+              via: 'agent',
+            },
+          },
+          tx,
+        );
+      }
+    }
+  }
+
   /** Archiwizacja miękka (§1.3 planu — nigdy hard-delete, to osobne CLI purge): bump wersji +
-   * usunięcie authoritative embeddingów (NFR-6, archived nie bierze udziału w search). */
+   * usunięcie authoritative embeddingów (NFR-6, archived nie bierze udziału w search) + usunięcie
+   * krawędzi grafu (roadmap v1.2) — archived memory nie powinna dalej boostować/być boostowana
+   * (mirror embeddings, ON DELETE CASCADE na `memory_relations` jest tylko belt-and-suspenders dla
+   * hard-delete, którego v1 nie robi — status='archived' NIE usuwa wiersza `memories`). */
   private async archiveMemory(tx: Tx, row: MemoryRow): Promise<void> {
     await tx
       .update(memories)
       .set({ status: 'archived', version: sql`${memories.version} + 1`, updatedAt: new Date() })
       .where(eq(memories.id, row.id));
     await tx.delete(embeddings).where(eq(embeddings.memoryId, row.id));
+    await tx
+      .delete(memoryRelations)
+      .where(or(eq(memoryRelations.fromMemoryId, row.id), eq(memoryRelations.toMemoryId, row.id)));
   }
 
   private async writeRevision(

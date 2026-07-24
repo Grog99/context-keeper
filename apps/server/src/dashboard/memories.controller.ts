@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
-import type { MemoryKind, MemoryScope, MemoryStatus } from '../db/schema/enums';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
+import type { MemoryKind, MemoryScope, MemoryStatus, RelationType } from '../db/schema/enums';
 import type { RevisionRow } from '../db/schema';
 import {
   MemoryAdminService,
@@ -9,6 +9,7 @@ import {
   type ListMemoriesFilter,
   type MemoryDetail,
   type MemoryListItem,
+  type RelationListItem,
   type WithWarnings,
 } from '../memory/memory-admin.service';
 import { PurgeService, type PurgePreview, type PurgeResult } from '../purge/purge.service';
@@ -68,6 +69,31 @@ export class MemoriesController {
   @Get(':id/revisions')
   async revisions(@Param('id') id: string): Promise<RevisionRow[]> {
     return this.memoryAdmin.listRevisions(id);
+  }
+
+  /**
+   * Zakładka "Relacje" (roadmap v1.2, "memory-relations + 1-hop graph boost") — trzy cienkie routy
+   * nad `MemoryAdminService`, mirror wzorca `:id/revisions`/`:id/purge-preview` powyżej (żadna z
+   * tych 2-/3-segmentowych ścieżek nie koliduje z `:id` — Express matchuje po LICZBIE segmentów,
+   * ostrzeżenie o kolejności dotyczy tylko literalnych top-level tras typu `events` powyżej `:id`).
+   */
+  @Get(':id/relations')
+  async listRelations(@Param('id') id: string): Promise<RelationListItem[]> {
+    return this.memoryAdmin.listRelations(id);
+  }
+
+  @Post(':id/relations')
+  async createRelation(
+    @Param('id') id: string,
+    @Body() body: { toId: string; type: RelationType },
+  ): Promise<{ id: string }> {
+    return this.memoryAdmin.createRelation({ fromId: id, toId: body?.toId, type: body?.type });
+  }
+
+  @Delete(':id/relations/:relationId')
+  async removeRelation(@Param('relationId') relationId: string): Promise<{ ok: true }> {
+    await this.memoryAdmin.removeRelation(relationId);
+    return { ok: true };
   }
 
   @Post()

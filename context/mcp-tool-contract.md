@@ -71,6 +71,8 @@ reference text (a decision record, spec, or convention writeup), saved whole.
 - tags: up to ~10 short lowercase tags ([a-z0-9-_/], no spaces) for filtering later.
 - supersedes: (optional) id of an existing fact/document in your project to correct; omit to save
   a brand-new memory.
+- relations: (optional) up to 16 typed, directed edges FROM this memory TO existing memories in
+  your project; see "Relating memories" below.
 
 Scope: always saved to YOUR project — never global. Promotion to global is a human action in the
 dashboard.
@@ -86,6 +88,24 @@ human-only. An unknown id, or an id outside your project's scope, returns the sa
 error as get_memory (no cross-project leak). A supersede is still a human-gated proposal, and is
 deliberately exempt from duplicate detection — the whole point is that a correction may closely
 resemble what it replaces.
+
+Relating memories (`relations`): set the optional `relations` parameter to an array of `{type,
+targetId}` (up to 16) to attach typed, directed edges FROM this memory (the one being saved, or the
+corrected version when using `supersedes`) TO existing memories you found via
+search_memory/get_memory. `type` is one of "caused_by" | "follows" | "context_for" — a fixed, closed
+vocabulary, not a free-form label. Each `targetId` must be an existing memory in YOUR project;
+unlike `supersedes`, the target CAN be a `kind=event` memory (relations are orthogonal to event_time
+— e.g. `context_for` to link a fact to the event it explains), but still cannot be `global`, in
+another project, or the memory being saved itself (a self-loop). Relations ride the SAME human-gated
+proposal as the rest of this call — edges are not created until a human approves — using the
+identical taxonomy as `supersedes`: an unknown or out-of-scope `targetId` returns the same
+`not_found` error as get_memory (no cross-project leak), and a `global` target or a self-loop
+returns `validation_error`. Duplicate `{type, targetId}` pairs within one call are silently merged.
+Relating two arbitrary EXISTING memories to each other (neither one currently being saved/corrected)
+is out of scope here — that is a human action in the dashboard. If this call is instead classified
+as "duplicate_pending" or "already_exists" (see Return value below), `relations` is silently dropped
+along with the rest of the redundant proposal — retry with `supersedes` if you need to attach
+relations to an already-existing memory.
 
 NEVER include secrets (API keys, passwords, private keys, tokens, credentials) in header or body.
 Such content is rejected before it reaches storage (`secret_blocked` error) — the memory is not
@@ -122,6 +142,8 @@ after the indicated delay — do not retry in a tight loop.
 | | `get_memory` poza scope lub nieistniejące | `not_found` |
 | | `save_memory` z `supersedes` — target nieznany lub poza scope (IDOR-safe, jak `get_memory`) | `not_found` |
 | | `save_memory` z `supersedes` — target `kind=event`, `kind` korekty ≠ `kind` targetu, lub target `scope=global` | `validation_error` |
+| | `save_memory` z `relations` — target nieznany lub poza scope (IDOR-safe, jak `get_memory`; `kind=event` jako target JEST dozwolony, świadome odstępstwo od `supersedes`) | `not_found` |
+| | `save_memory` z `relations` — target `scope=global`, self-loop, albo ponad limit (max 16) | `validation_error` |
 | Transport (HTTP) | zły/brak bearer | `401` |
 | | rate limit (per token × narzędzie) | `429` + `Retry-After` |
 | Nie-błąd (status w wyniku `save_memory`) | — | `pending` / `duplicate_pending` / `already_exists` |

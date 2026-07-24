@@ -25,6 +25,7 @@ import { Textarea } from '../components/ui/textarea';
 import { EmptyState } from '../components/EmptyState';
 import { MonoId } from '../components/MonoId';
 import { OriginPath } from '../components/OriginPath';
+import { RelationsPanel } from '../components/RelationsPanel';
 import { RevisionTimeline, type RevisionItem } from '../components/RevisionTimeline';
 import { StatusChip } from '../components/StatusChip';
 import { api } from '../lib/api';
@@ -34,8 +35,15 @@ import { formatAbsoluteTime, formatRelativeTime } from '../lib/format';
 import { queryKeys } from '../lib/query';
 import { toQueryString } from '../lib/query-string';
 import { cn } from '../lib/utils';
-import type { MemoryDetail, MemoryListItem, ProjectListItem, RevisionRowApi, WithWarnings } from '../types/api';
-import type { MemoryKind, MemoryStatus } from '../types/domain';
+import type {
+  MemoryDetail,
+  MemoryListItem,
+  ProjectListItem,
+  RelationListItemApi,
+  RevisionRowApi,
+  WithWarnings,
+} from '../types/api';
+import type { MemoryKind, MemoryStatus, RelationType } from '../types/domain';
 import { PurgeMemoryDialog } from './PurgeMemoryDialog';
 
 type KindFilter = 'all' | MemoryKind;
@@ -70,6 +78,9 @@ export function MemoryBrowserScreen() {
   const editing = editingForId !== null && editingForId === selectedId;
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [purgeOpen, setPurgeOpen] = useState(false);
+  // Roadmap v1.2 ("memory-relations + 1-hop graph boost") — id relacji aktualnie usuwanej (disable
+  // TYLKO jej przycisku "Usuń", nie całej zakładki, przy wielu relacjach naraz).
+  const [removingRelationId, setRemovingRelationId] = useState<string | null>(null);
   const [tabState, setTabState] = useState<{ id: string; tab: string } | null>(null);
   const tab = tabState && tabState.id === selectedId ? tabState.tab : 'body';
 
@@ -117,6 +128,12 @@ export function MemoryBrowserScreen() {
     enabled: Boolean(selectedId),
   });
 
+  const { data: relations, isLoading: relationsLoading } = useQuery({
+    queryKey: queryKeys.memoryRelations(selectedId ?? ''),
+    queryFn: () => api.get<RelationListItemApi[]>(`/memories/${selectedId}/relations`),
+    enabled: Boolean(selectedId),
+  });
+
   function select(id: string): void {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -129,6 +146,9 @@ export function MemoryBrowserScreen() {
     queryClient.invalidateQueries({ queryKey: ['memories'] });
     queryClient.invalidateQueries({ queryKey: queryKeys.memory(id) });
     queryClient.invalidateQueries({ queryKey: queryKeys.memoryRevisions(id) });
+    // Archiwizacja usuwa krawędzie grafu po stronie serwera (roadmap v1.2) — odświeżamy razem
+    // z resztą, żeby zakładka "Relacje" nigdy nie pokazywała martwych wierszy.
+    queryClient.invalidateQueries({ queryKey: queryKeys.memoryRelations(id) });
   }
 
   const editMutation = useMutation({
@@ -163,6 +183,28 @@ export function MemoryBrowserScreen() {
       invalidateMemory(id);
     },
     onError: (err) => toast.error(describeApiError(err)),
+  });
+
+  const createRelationMutation = useMutation({
+    mutationFn: (vars: { id: string; type: RelationType; targetId: string }) =>
+      api.post<{ id: string }>(`/memories/${vars.id}/relations`, { toId: vars.targetId, type: vars.type }),
+    onSuccess: (_r, vars) => {
+      toast.success('Dodano relację');
+      queryClient.invalidateQueries({ queryKey: queryKeys.memoryRelations(vars.id) });
+    },
+    onError: (err) => toast.error(describeApiError(err)),
+  });
+
+  const removeRelationMutation = useMutation({
+    mutationFn: (vars: { id: string; relationId: string }) =>
+      api.del(`/memories/${vars.id}/relations/${vars.relationId}`),
+    onMutate: (vars) => setRemovingRelationId(vars.relationId),
+    onSuccess: (_r, vars) => {
+      toast('Usunięto relację');
+      queryClient.invalidateQueries({ queryKey: queryKeys.memoryRelations(vars.id) });
+    },
+    onError: (err) => toast.error(describeApiError(err)),
+    onSettled: () => setRemovingRelationId(null),
   });
 
   return (
@@ -271,6 +313,7 @@ export function MemoryBrowserScreen() {
                   <TabsTrigger value="body">Body</TabsTrigger>
                   <TabsTrigger value="meta">Metadane</TabsTrigger>
                   <TabsTrigger value="revisions">Rewizje ({revisions?.length ?? 0})</TabsTrigger>
+                  <TabsTrigger value="relations">Relacje ({relations?.length ?? 0})</TabsTrigger>
                 </TabsList>
                 <TabsContent value="body" className="pt-4">
                   {editing ? (
@@ -318,6 +361,19 @@ export function MemoryBrowserScreen() {
                 <TabsContent value="revisions" className="pt-4">
                   <RevisionTimeline
                     revisions={toRevisionItems(revisions ?? [])}
+                    onSelectMemory={(id) => select(id)}
+                  />
+                </TabsContent>
+                <TabsContent value="relations" className="pt-4">
+                  <RelationsPanel
+                    canAdd={detail.scope === 'project' && detail.status === 'approved'}
+                    projectId={detail.projectId}
+                    relations={relations ?? []}
+                    isLoading={relationsLoading}
+                    creating={createRelationMutation.isPending}
+                    removingId={removingRelationId}
+                    onCreate={(vars) => createRelationMutation.mutate({ id: detail.id, ...vars })}
+                    onRemove={(relationId) => removeRelationMutation.mutate({ id: detail.id, relationId })}
                     onSelectMemory={(id) => select(id)}
                   />
                 </TabsContent>

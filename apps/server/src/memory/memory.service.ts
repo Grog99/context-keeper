@@ -7,20 +7,22 @@ import { generateId, ID_PREFIX } from '../common/ids';
 import { scanForSecrets } from '../common/secret-scanner';
 import { AppConfigService } from '../config/config.service';
 import { DB, type Database } from '../db/db.tokens';
-import { embeddings, memories, proposals, stagingEmbeddings, type MemoryRow } from '../db/schema';
+import { embeddings, memories, memoryRelations, proposals, stagingEmbeddings, type MemoryRow } from '../db/schema';
 import { findAnnNeighbors } from '../embeddings/ann-search';
 import { EmbeddingService, toPgVectorLiteral } from '../embeddings/embedding.service';
 import type { ProjectContext } from '../projects/projects.service';
-import type { UpdatePayload } from '../proposals/proposals.types';
+import type { RelationPayloadEntry, UpdatePayload } from '../proposals/proposals.types';
 import { UsageService } from '../usage/usage.service';
 import { classifyDedup } from './dedup';
 import { eventDecayFactor } from './decay';
+import { graphBoostFactor, selectBoostedIds, type RelationEdge } from './graph-boost';
 import type {
   GetMemoryResult,
   MemoryKindFilter,
   SaveMemoryInput,
   SaveMemoryKind,
   SaveMemoryResult,
+  SaveRelationInput,
   SearchMemoryInput,
   SearchResultItem,
   SeedApprovedInput,
@@ -31,6 +33,10 @@ import { rrfFuse } from './rrf';
 const DEFAULT_SEARCH_KINDS: MemoryKindFilter[] = ['fact', 'document'];
 // Fragment chunku dopasowanego wektorowo, dołączany do wyniku search dla kind=document (FR-M1).
 const EXCERPT_MAX_LEN = 280;
+// Attach-on-save (roadmap v1.2, "memory-relations + 1-hop graph boost") — twardy cap na liczbę
+// krawędzi w JEDNYM save_memory (symetryczny z TAGS_MAX-style limitami, ale nie env-configurable:
+// to bezpiecznik przeciw nadużyciu proposala jako hurtowego importu grafu, nie knob do dostrajania).
+const MAX_RELATIONS_PER_SAVE = 16;
 
 /**
  * Warstwa logiki pamięci (§4-6 tech-stack) — reużywalna później przez kolejkę akceptacji (Faza 4)
@@ -88,7 +94,12 @@ export class MemoryService {
     // create-path advisory-dedup blokiem niżej — dedup nigdy nie może suppresować korekty (korekta
     // z zamierzenia może być bliźniaczo podobna do treści, którą zastępuje).
     if (input.supersedes) {
-      return this.saveAsSupersede({ header, body, tags, kind }, input.supersedes, ctx, actor);
+      return this.saveAsSupersede(
+        { header, body, tags, kind, relations: input.relations },
+        input.supersedes,
+        ctx,
+        actor,
+      );
     }
 
     const scope = 'project' as const; // FR-M4: zapisy agenta tylko project-scoped
@@ -146,7 +157,17 @@ export class MemoryService {
     // wektor to tylko dedup-hint na przyszłość, nieużywany jeszcze przy klasyfikacji create/duplicate.
     const mintedMemoryId = generateId(ID_PREFIX.memory);
     const proposalId = generateId(ID_PREFIX.proposal);
-    const payload = { memoryId: mintedMemoryId, header, body, tags, kind };
+    // Attach-on-save (roadmap v1.2): walidowane TERAZ (zanim proposal w ogóle powstanie — spójnie
+    // z resztą walidacji save()), materializowane DOPIERO w `ProposalsService.approve()`.
+    const relations = await this.resolveRelations(input.relations, ctx, mintedMemoryId);
+    const payload = {
+      memoryId: mintedMemoryId,
+      header,
+      body,
+      tags,
+      kind,
+      ...(relations.length > 0 ? { relations } : {}),
+    };
 
     await this.db.insert(proposals).values({
       id: proposalId,
@@ -200,7 +221,13 @@ export class MemoryService {
    * wywołaniem tej metody) — brak ścieżki "wycofaj bez zamiennika".
    */
   private async saveAsSupersede(
-    resolved: { header: string; body: string; tags: string[]; kind: SaveMemoryKind },
+    resolved: {
+      header: string;
+      body: string;
+      tags: string[];
+      kind: SaveMemoryKind;
+      relations?: SaveRelationInput[];
+    },
     targetId: string,
     ctx: ProjectContext,
     actor: string,
@@ -268,7 +295,17 @@ export class MemoryService {
     }
 
     const proposalId = generateId(ID_PREFIX.proposal);
-    const payload: UpdatePayload = { memoryId: targetId, header, body, tags, kind };
+    // Attach-on-save (roadmap v1.2): self = targetId (korekta niesie krawędzie OD samej siebie, czyli
+    // OD targetu, który jest zapisywany w miejscu) — patrz `resolveRelations` self-loop check.
+    const relations = await this.resolveRelations(resolved.relations, ctx, targetId);
+    const payload: UpdatePayload = {
+      memoryId: targetId,
+      header,
+      body,
+      tags,
+      kind,
+      ...(relations.length > 0 ? { relations } : {}),
+    };
 
     await this.db.insert(proposals).values({
       id: proposalId,
@@ -311,6 +348,77 @@ export class MemoryService {
   }
 
   /**
+   * Walidacja `input.relations` (roadmap v1.2, "memory-relations + 1-hop graph boost", ATTACH-ON-SAVE
+   * — locked decision planu). Woła się z OBU ścieżek `save()` (create z `selfId=mintedMemoryId`,
+   * `saveAsSupersede` z `selfId=targetId`) — walidacja PRZED utworzeniem proposala, materializacja
+   * (insert do `memory_relations`) dopiero w `ProposalsService.approve()` (§ProposalsService
+   * "materializeRelations"). Zwraca `[]` gdy `relations` nie podano — czysto addytywne, nic się nie
+   * zmienia dla istniejących wywołujących.
+   *
+   * Taksonomia MIRRORUJE `saveAsSupersede` (IDOR-safe, identyczna z `get_memory`): cel nieznany, nie
+   * approved, albo poza scope tokena → `not_found` (bez rozróżnienia przypadków, anty-probing);
+   * `scope=global` → `validation_error` (relacje agenta są project-scoped, jak reszta zapisów).
+   * ŚWIADOME odstępstwo od `saveAsSupersede` (Stage-2 answer #1): BRAK kind gate — `kind=event` jako
+   * cel jest DOZWOLONY (relacje są ortogonalne do `event_time`, np. "ten fakt jest kontekstem dla
+   * tego zdarzenia" to właśnie `context_for` wskazujący na event).
+   */
+  private async resolveRelations(
+    relations: SaveRelationInput[] | undefined,
+    ctx: ProjectContext,
+    selfId: string,
+  ): Promise<RelationPayloadEntry[]> {
+    if (!relations || relations.length === 0) return [];
+    if (relations.length > MAX_RELATIONS_PER_SAVE) {
+      throw new ToolError(
+        'validation_error',
+        `Zbyt wiele relations (max ${MAX_RELATIONS_PER_SAVE}, jest ${relations.length})`,
+      );
+    }
+
+    // Dedup po (type,targetId) — zachowuje kolejność pierwszego wystąpienia, ciche scalanie
+    // (bez błędu — agent mógł powtórzyć się nieumyślnie, to nie jest walidacyjny problem).
+    const seen = new Set<string>();
+    const deduped: SaveRelationInput[] = [];
+    for (const rel of relations) {
+      const key = `${rel.type}:${rel.targetId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(rel);
+    }
+
+    // Self-loop gate PRZED zapytaniem do DB — deterministyczne z samych id-ów, bez potrzeby lookupu.
+    for (const rel of deduped) {
+      if (rel.targetId === selfId) {
+        throw new ToolError(
+          'validation_error',
+          `Relacja nie może wskazywać na samą siebie: ${rel.targetId}`,
+        );
+      }
+    }
+
+    // Scope/IDOR gate (mirror `saveAsSupersede`, anty-probing) — jedno zapytanie na wszystkie
+    // unikalne cele naraz, zamiast N zapytań w pętli.
+    const targetIds = Array.from(new Set(deduped.map((r) => r.targetId)));
+    const rows = await this.db.select().from(memories).where(inArray(memories.id, targetIds));
+    const byId = new Map(rows.map((r) => [r.id, r]));
+
+    for (const targetId of targetIds) {
+      const row = byId.get(targetId);
+      if (!row || row.status !== 'approved' || !this.inScope(row, ctx)) {
+        throw new ToolError('not_found', `Pamięć docelowa relacji nie istnieje: ${targetId}`);
+      }
+      if (row.scope === 'global') {
+        throw new ToolError(
+          'validation_error',
+          `Relacja nie może wskazywać na pamięć global: ${targetId} — relacje agenta są project-scoped.`,
+        );
+      }
+    }
+
+    return deduped.map((r) => ({ type: r.type, targetId: r.targetId }));
+  }
+
+  /**
    * search_memory (FR-M1, FR-R1-R5): dwa ramiona fuzjowane RRF. FTS na całym dokumencie
    * (`memories.fts`, konfiguracja `simple`) — bez chunkingu, więc bez collapse. Wektor na
    * chunkach (`embeddings`, HNSW) — collapse = MIN dystansu per `memory_id` (FR-R3), zawężony
@@ -330,6 +438,12 @@ export class MemoryService {
    * wypchnąć event poza widoczne okno i wpuścić fact/document niżej rankowany przez RRF; stąd
    * metadane pobierane dla PEŁNEGO sfuzjowanego zbioru (ograniczonego przez limit kandydatów
    * każdego ramienia, ≤~100), re-sort po `effectiveScore`, dopiero potem slice.
+   *
+   * 1-hop graph boost (roadmap v1.2, "memory-relations + 1-hop graph boost"): trzeci multiplikatywny
+   * faktor obok `decayFactor` (§memory/graph-boost.ts), RE-RANK ONLY — `fetchInSetEdges` zwraca
+   * WYŁĄCZNIE krawędzie, których OBA końce są już w `fusedIds` (nigdy nie wstrzykuje pamięci spoza
+   * sfuzjowanego zbioru). `GRAPH_BOOST_WEIGHT<=0` pomija dodatkowe zapytanie o krawędzie całkowicie
+   * (perf — zero kosztu, gdy funkcja wyłączona knobem).
    */
   async search(input: SearchMemoryInput, ctx: ProjectContext): Promise<SearchResultItem[]> {
     const query = input.query?.trim();
@@ -375,6 +489,14 @@ export class MemoryService {
         .where(inArray(memories.id, fusedIds));
       const byId = new Map(rows.map((r) => [r.id, r]));
 
+      // Graph boost (roadmap v1.2): `weight<=0` -> pomiń zapytanie o krawędzie, `boosted` zostaje
+      // pusty (graphBoostFactor(false, …) === 1, no-op identyczny z dzisiejszym zachowaniem).
+      const graphBoostWeight = this.config.get('GRAPH_BOOST_WEIGHT');
+      const boosted =
+        graphBoostWeight > 0
+          ? selectBoostedIds(fusedIds, await this.fetchInSetEdges(fusedIds, ctx.projectId))
+          : new Set<string>();
+
       const now = new Date();
       const halflifeDays = this.config.get('EVENT_DECAY_HALFLIFE_DAYS');
       const decayed = fused
@@ -383,7 +505,8 @@ export class MemoryService {
           const row = byId.get(f.id)!;
           // decayFactor=1 dla fact/document (zero wpływu na ranking) — tylko event decayuje.
           const decayFactor = row.kind === 'event' ? eventDecayFactor(row.eventTime, now, halflifeDays) : 1;
-          return { row, effectiveScore: f.score * decayFactor };
+          const boostFactor = graphBoostFactor(boosted.has(f.id), graphBoostWeight);
+          return { row, effectiveScore: f.score * decayFactor * boostFactor };
         })
         .sort((a, b) => b.effectiveScore - a.effectiveScore)
         .slice(0, this.config.get('SEARCH_TOP_K'));
@@ -498,6 +621,28 @@ export class MemoryService {
       limit,
     });
     return rows.map((r) => r.memoryId);
+  }
+
+  /**
+   * Krawędzie `memory_relations` dla graph boost (roadmap v1.2), RE-RANK ONLY: `WHERE project_id=…
+   * AND from IN(ids) AND to IN(ids)` — filtr obu końców na poziomie SQL, nie tylko w
+   * `selectBoostedIds` (§graph-boost.ts), więc zapytanie samo w sobie nigdy nie zwraca krawędzi
+   * wychodzącej poza sfuzjowany zbiór. Project-scoped (edges są ściśle intra-project, §db/schema/
+   * memory-relations.ts) — `ctx.projectId`, nie unia global/project jak ramiona search.
+   */
+  private async fetchInSetEdges(ids: string[], projectId: string): Promise<RelationEdge[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.db
+      .select({ fromMemoryId: memoryRelations.fromMemoryId, toMemoryId: memoryRelations.toMemoryId })
+      .from(memoryRelations)
+      .where(
+        and(
+          eq(memoryRelations.projectId, projectId),
+          inArray(memoryRelations.fromMemoryId, ids),
+          inArray(memoryRelations.toMemoryId, ids),
+        ),
+      );
+    return rows;
   }
 
   /** Najlepiej dopasowany chunk (najmniejszy dystans do query-vector) per `memory_id`, do excerptu. */
