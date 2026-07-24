@@ -11,6 +11,7 @@ import { embeddings, memories, proposals, stagingEmbeddings, type MemoryRow } fr
 import { findAnnNeighbors } from '../embeddings/ann-search';
 import { EmbeddingService, toPgVectorLiteral } from '../embeddings/embedding.service';
 import type { ProjectContext } from '../projects/projects.service';
+import type { UpdatePayload } from '../proposals/proposals.types';
 import { UsageService } from '../usage/usage.service';
 import { classifyDedup } from './dedup';
 import { eventDecayFactor } from './decay';
@@ -18,6 +19,7 @@ import type {
   GetMemoryResult,
   MemoryKindFilter,
   SaveMemoryInput,
+  SaveMemoryKind,
   SaveMemoryResult,
   SearchMemoryInput,
   SearchResultItem,
@@ -53,6 +55,10 @@ export class MemoryService {
    * `input.kind` pominięty) lub `kind='document'`; `scope` zawsze `project` (`global` to human-only).
    * `event` pozostaje poza zasięgiem agenta — wykluczone na poziomie typu (`SaveMemoryKind`) i zod
    * enum w `mcp-server.factory.ts`, więc nie da się go tu przekazać.
+   *
+   * Gdy `input.supersedes` jest ustawione (roadmap v1.2 "Edycja pamięci przez agenta"), zapis nie
+   * mintuje nowej pamięci — deleguje do `saveAsSupersede()`, która produkuje proposal
+   * `type='update'` na ISTNIEJĄCYM id (korekta in-place) zamiast `type='create'`.
    */
   async save(input: SaveMemoryInput, ctx: ProjectContext): Promise<SaveMemoryResult> {
     const kind = input.kind ?? 'fact';
@@ -74,6 +80,15 @@ export class MemoryService {
         'Wykryto potencjalny sekret w treści — zapis zablokowany. Usuń materiał sekretu ' +
           '(referuj po nazwie/przeznaczeniu, nigdy po wartości) i spróbuj ponownie.',
       );
+    }
+
+    // Korekta istniejącej pamięci (roadmap v1.2 "Edycja pamięci przez agenta"): `supersedes` mapuje
+    // się na proposal `type='update'` (reużywa istniejący, dotąd producent-less approve-branch —
+    // `ProposalsService.approve` :278-305), NIE na `type='create'`. `return` TUTAJ, PRZED
+    // create-path advisory-dedup blokiem niżej — dedup nigdy nie może suppresować korekty (korekta
+    // z zamierzenia może być bliźniaczo podobna do treści, którą zastępuje).
+    if (input.supersedes) {
+      return this.saveAsSupersede({ header, body, tags, kind }, input.supersedes, ctx, actor);
     }
 
     const scope = 'project' as const; // FR-M4: zapisy agenta tylko project-scoped
@@ -170,6 +185,129 @@ export class MemoryService {
     }
 
     return { id: mintedMemoryId, status: 'pending' };
+  }
+
+  /**
+   * Branch `save()` dla `input.supersedes` (roadmap v1.2 "Edycja pamięci przez agenta"). Produkuje
+   * proposal `type='update'`, `origin='agent'` na ISTNIEJĄCYM `targetId` (version+1 in-place),
+   * zamiast mintować nową pamięć — `ProposalsService.approve` już umie zaaplikować `type='update'`
+   * (merge payload, bump version, revision `edited` z prior snapshotem, delete-then-insert
+   * embeddingów, `assertNotStale` po `affectedIds`/`baseVersions`), więc tu tylko WALIDUJEMY target
+   * i budujemy proposal — zero zmian w `proposals/*`.
+   *
+   * Semantyka = wyłącznie zamiana treści (decyzja produktowa #2 z planu): `header`+`body` ZAWSZE
+   * niosą pełną poprawioną treść (wymagane jak przy zwykłym save, walidowane przez `save()` PRZED
+   * wywołaniem tej metody) — brak ścieżki "wycofaj bez zamiennika".
+   */
+  private async saveAsSupersede(
+    resolved: { header: string; body: string; tags: string[]; kind: SaveMemoryKind },
+    targetId: string,
+    ctx: ProjectContext,
+    actor: string,
+  ): Promise<SaveMemoryResult> {
+    const { header, body, tags, kind } = resolved;
+
+    // Scope/IDOR gate FIRST (mirror `get()` :394-397, anty-probing): brak wiersza, nie-approved,
+    // albo poza scope tokena (inny projekt) -> IDENTYCZNY not_found jak get_memory. Musi poprzedzać
+    // KAŻDĄ inną walidację poniżej — nic o kind/version celu nie może wyciec przed tym gate'em.
+    const [row] = await this.db.select().from(memories).where(eq(memories.id, targetId)).limit(1);
+    if (!row || row.status !== 'approved' || !this.inScope(row, ctx)) {
+      throw new ToolError('not_found', `Pamięć do poprawienia nie istnieje: ${targetId}`);
+    }
+
+    // Global gate: `inScope` wpuszcza global z KAŻDEGO projektu (agent go widzi przez
+    // search/get_memory), więc `not_found` byłby mylący — jawny validation_error zamiast tego.
+    // Poprawka globalnej pamięci zostaje wyłącznie human action (dashboard).
+    if (row.scope === 'global') {
+      throw new ToolError(
+        'validation_error',
+        'Nie można poprawić pamięci global przez narzędzie — zapisy agenta są project-scoped. ' +
+          'Korektę pamięci global wykonuje człowiek w dashboardzie.',
+      );
+    }
+
+    // Kind gates: `event` jest human-only (defense-in-depth — zod enum w mcp-server.factory.ts już
+    // wyklucza `input.kind='event'`, ale TARGET może i tak być eventem niezależnie od kind żądania).
+    // Kind korekty musi zgadzać się z kind celu — bez cichej zmiany fact<->document przy supersede.
+    if (row.kind === 'event') {
+      throw new ToolError(
+        'validation_error',
+        'Nie można poprawić pamięci kind=event przez narzędzie — event jest human-only.',
+      );
+    }
+    if (row.kind !== kind) {
+      throw new ToolError(
+        'validation_error',
+        `Kind korekty (${kind}) musi zgadzać się z kind pamięci docelowej (${row.kind}).`,
+      );
+    }
+
+    const scope = 'project' as const;
+    const contentHash = computeContentHash({ header, body, scope, projectId: ctx.projectId });
+
+    // Target-aware idempotencja (odrębna od create-path dedup wyżej): retry IDENTYCZNEJ korekty
+    // (ten sam target + ta sama poprawiona treść) -> duplicate_pending wskazujący na istniejący
+    // pending proposal `type='update'` dla TEGO targetu, zamiast tworzyć drugi równoległy.
+    // `arrayOverlaps` na jednoelementowej liście == containment (ten sam wzorzec co
+    // `purge.service.ts:40`); `affectedIds` proposala update zawsze = [targetId] (krok niżej).
+    const [pendingUpdate] = await this.db
+      .select({ id: proposals.id })
+      .from(proposals)
+      .where(
+        and(
+          eq(proposals.contentHash, contentHash),
+          eq(proposals.status, 'pending'),
+          eq(proposals.type, 'update'),
+          eq(proposals.projectId, ctx.projectId),
+          arrayOverlaps(proposals.affectedIds, [targetId]),
+        ),
+      )
+      .limit(1);
+    if (pendingUpdate) {
+      return { id: pendingUpdate.id, status: 'duplicate_pending' };
+    }
+
+    const proposalId = generateId(ID_PREFIX.proposal);
+    const payload: UpdatePayload = { memoryId: targetId, header, body, tags, kind };
+
+    await this.db.insert(proposals).values({
+      id: proposalId,
+      type: 'update',
+      origin: 'agent',
+      status: 'pending',
+      payload,
+      affectedIds: [targetId],
+      // Optimistic concurrency za darmo (§8bis): `assertNotStale` w `ProposalsService.approve` łapie
+      // "target zmieniony/zarchiwizowany między search agenta a approve człowieka" bez nowego kodu.
+      baseVersions: { [targetId]: row.version },
+      contentHash,
+      scope,
+      projectId: ctx.projectId,
+    });
+
+    await this.audit.log({
+      eventType: 'proposal_created',
+      actor,
+      affectedIds: [targetId],
+      metadata: { proposalId, kind, type: 'update', supersedes: targetId },
+    });
+
+    // Best-effort staged embedding na POPRAWIONEJ treści — sam wzorzec co create-path wyżej.
+    const staged = await this.embedding.embedMemoryBestEffort(kind, header, body, tags);
+    if (staged) {
+      await this.db.insert(stagingEmbeddings).values(
+        staged.chunks.map((c) => ({
+          id: generateId(ID_PREFIX.embedding),
+          proposalId,
+          chunkIndex: c.index,
+          chunkText: c.text,
+          embeddingModel: staged.model,
+          vector: c.vector,
+        })),
+      );
+    }
+
+    return { id: proposalId, status: 'pending' };
   }
 
   /**

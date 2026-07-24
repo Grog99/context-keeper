@@ -92,6 +92,7 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
       expect(save.description).toMatch(/pending/i);
       expect(save.description).toMatch(/secret/i);
       expect(save.description).toMatch(/one atomic fact/i);
+      expect(save.description).toMatch(/supersede|correct/i);
     } finally {
       await transport.close();
     }
@@ -180,7 +181,7 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
       const tools = await client.listTools();
       const save = tools.tools.find((t) => t.name === 'save_memory')!;
       const props = (save.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
-      expect(Object.keys(props).sort()).toEqual(['body', 'header', 'kind', 'tags']);
+      expect(Object.keys(props).sort()).toEqual(['body', 'header', 'kind', 'supersedes', 'tags']);
     } finally {
       await transport.close();
     }
@@ -203,6 +204,37 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
       const saved = JSON.parse(textOf(saveRes as CallToolResult)) as { id: string; status: string };
       expect(saved.status).toBe('pending');
       expect(saved.id).toMatch(/^mem_/);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('save_memory z supersedes na seeded fact -> pending (proposal type=update/origin=agent), NIE isError', async () => {
+    const memoryService = app.get(MemoryService);
+    const projectId = (await app.get(ProjectsService).resolveProjectByToken(token))!.id;
+    const target = await memoryService.devSeedApproved({
+      header: 'Fakt do supersede e2e',
+      body: 'Stara tresc e2e przed korekta.',
+      kind: 'fact',
+      scope: 'project',
+      projectId,
+    });
+
+    const { client, transport } = newClient(token);
+    await client.connect(transport);
+    try {
+      const res = await client.callTool({
+        name: 'save_memory',
+        arguments: {
+          header: 'Poprawiony fakt e2e',
+          body: 'Nowa, poprawiona tresc e2e.',
+          supersedes: target.id,
+        },
+      });
+      expect(res.isError).not.toBe(true);
+      const saved = JSON.parse(textOf(res as CallToolResult)) as { id: string; status: string };
+      expect(saved.status).toBe('pending');
+      expect(saved.id).toMatch(/^prop_/); // id proposala korekty, nie id targetu
     } finally {
       await transport.close();
     }

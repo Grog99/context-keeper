@@ -11,6 +11,11 @@ export interface SaveMemoryInput {
   /** Domyślnie `fact` (`save()` liczy `input.kind ?? 'fact'`) — istniejący wywołujący bez `kind`
    * zachowują się jak przed dodaniem `document`. */
   kind?: SaveMemoryKind;
+  /** Opcjonalne — id istniejącej `fact`/`document` pamięci WŁASNEGO projektu, którą `header`+`body`
+   * mają POPRAWIĆ w miejscu (zamiast tworzyć nową, luźną pamięć). Mapowane na proposal
+   * `type='update'`, `origin='agent'` (reużywa istniejący update approve-branch), patrz
+   * `MemoryService.saveAsSupersede`. `event`/`global`/inny projekt/nieznane id → błąd. */
+  supersedes?: string;
 }
 
 export type SaveStatus = 'pending' | 'duplicate_pending' | 'already_exists';
