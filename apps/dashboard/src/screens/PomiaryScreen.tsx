@@ -3,6 +3,7 @@ import { Activity } from 'lucide-react';
 import { useState } from 'react';
 import { EmptyState } from '../components/EmptyState';
 import { MetricStat } from '../components/MetricStat';
+import { ScreenContainer } from '../components/ScreenContainer';
 import { ProposalOutcomeChart, SearchVolumeChart, ZeroResultTrendChart } from '../components/UsageChart';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -67,7 +68,7 @@ export function PomiaryScreen() {
   const hasData = !!data && (data.searchSeries.length > 0 || data.proposalSeries.buckets.length > 0);
 
   return (
-    <div className="overflow-y-auto p-6">
+    <ScreenContainer width="chart">
       <h1 className="mb-1 text-xl font-semibold tracking-tight">Pomiary</h1>
       <p className="mb-5 max-w-2xl text-[13.5px] text-muted-foreground">
         Użycie pamięci przez agentów: liczba wyszukiwań per projekt w czasie, odsetek zapytań bez wyników oraz
@@ -109,7 +110,7 @@ export function PomiaryScreen() {
       </div>
 
       {isLoading ? (
-        <div className="flex flex-col gap-4 max-w-5xl">
+        <div className="flex flex-col gap-4">
           <Skeleton className="h-24 w-full" />
           <Skeleton className="h-64 w-full" />
           <Skeleton className="h-64 w-full" />
@@ -121,7 +122,7 @@ export function PomiaryScreen() {
           description="Zmień zakres dat, bucket albo projekt — agenci jeszcze nie wywoływali search_memory w tym oknie."
         />
       ) : (
-        <div className="flex max-w-5xl flex-col gap-6">
+        <div className="flex flex-col gap-6">
           {/* Nagłówkowe liczby — sumy dla całego zakresu, tego samego kształtu co pasek zdrowia AppShell. */}
           <section className="flex flex-wrap rounded-lg border border-border bg-surface px-1">
             <MetricStat label="Wyszukiwania" value={data.searchTotals.searches} />
@@ -183,6 +184,6 @@ export function PomiaryScreen() {
           </section>
         </div>
       )}
-    </div>
+    </ScreenContainer>
   );
 }

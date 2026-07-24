@@ -16,6 +16,7 @@ import {
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { EmptyState } from '../components/EmptyState';
+import { ScreenContainer } from '../components/ScreenContainer';
 import { Badge, type BadgeProps } from '../components/ui/badge';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -115,7 +116,7 @@ export function AuditScreen() {
   }
 
   return (
-    <div className="overflow-y-auto p-6">
+    <ScreenContainer width="chart">
       <h1 className="mb-1 text-xl font-semibold tracking-tight">Audyt</h1>
       <p className="mb-5 max-w-2xl text-[13.5px] text-muted-foreground">
         Append-only log zdarzeń zmieniających stan pamięci. Filtrowalny po typie zdarzenia, zakresie czasu i projekcie.
@@ -165,11 +166,11 @@ export function AuditScreen() {
       </div>
 
       {isLoading && !isFetching ? (
-        <Skeleton className="h-64 w-full max-w-5xl" />
+        <Skeleton className="h-64 w-full" />
       ) : allRows.length === 0 ? (
         <EmptyState title="Brak zdarzeń" description="Zmień filtry — nic tu nie pasuje." />
       ) : (
-        <div className="max-w-5xl overflow-hidden rounded-lg border border-border">
+        <div className="overflow-hidden rounded-lg border border-border">
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-sm">
               <thead>
@@ -235,7 +236,7 @@ export function AuditScreen() {
           )}
         </div>
       )}
-    </div>
+    </ScreenContainer>
   );
 }
 

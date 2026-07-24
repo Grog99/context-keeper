@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
+import { ScreenContainer } from '../components/ScreenContainer';
 import { api } from '../lib/api';
 import { describeApiError } from '../lib/errors';
 import { queryKeys } from '../lib/query';
@@ -36,13 +37,13 @@ export function OperacjeScreen() {
   });
 
   return (
-    <div className="overflow-y-auto p-6">
+    <ScreenContainer width="prose">
       <h1 className="mb-1 text-xl font-semibold tracking-tight">Operacje</h1>
       <p className="mb-5 max-w-2xl text-[13.5px] text-muted-foreground">
         Rzadkie, uprzywilejowane czynności administracyjne — poza codziennym flow recenzenta w Kolejce.
       </p>
 
-      <section className="max-w-xl rounded-lg border border-border bg-surface p-4">
+      <section className="rounded-lg border border-border bg-surface p-4">
         <h2 className="mb-1 text-sm font-semibold text-foreground">Nocny job</h2>
         <p className="mb-3.5 text-xs leading-relaxed text-muted-foreground">
           Proposer dedup/merge + prune — skanuje zatwierdzone fakty, wykrywa duplikaty (ANN) i kandydatów do
@@ -55,6 +56,6 @@ export function OperacjeScreen() {
           {nightlyMutation.isPending ? 'Uruchamianie…' : 'Uruchom nocny job'}
         </Button>
       </section>
-    </div>
+    </ScreenContainer>
   );
 }
