@@ -21,7 +21,6 @@ export function ContextSwitcher({ projects }: ContextSwitcherProps) {
   const [open, setOpen] = useState(false);
 
   const label = active.kind === 'all' ? 'Wszystkie' : active.kind === 'global' ? 'global' : active.projectName;
-  const scopeSuffix = active.kind === 'project' ? `:${active.projectId}` : '';
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -30,14 +29,9 @@ export function ContextSwitcher({ projects }: ContextSwitcherProps) {
           type="button"
           className="flex h-8 items-center gap-2 rounded-md border border-border-strong bg-background px-2.5 text-[13px] font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <span className="size-[7px] rounded-full bg-primary" />
-          {active.kind === 'project' && <span>project</span>}
-          {active.kind === 'project' ? (
-            <span className="font-mono text-xs text-muted-foreground">{scopeSuffix}</span>
-          ) : (
-            label
-          )}
-          <ChevronDown className="size-[15px] text-faint" />
+          <span className="size-[7px] shrink-0 rounded-full bg-primary" />
+          <span className="max-w-[160px] truncate">{label}</span>
+          <ChevronDown className="size-[15px] shrink-0 text-faint" />
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64 p-0">

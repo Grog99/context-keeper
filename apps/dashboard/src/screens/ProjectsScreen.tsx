@@ -19,6 +19,7 @@ import { Input } from '../components/ui/input';
 import { Skeleton } from '../components/ui/skeleton';
 import { EmptyState } from '../components/EmptyState';
 import { MonoId } from '../components/MonoId';
+import { ScreenContainer } from '../components/ScreenContainer';
 import { TokenReveal } from '../components/TokenReveal';
 import { api } from '../lib/api';
 import { describeApiError } from '../lib/errors';
@@ -74,7 +75,7 @@ export function ProjectsScreen() {
   const settingsTarget = projects.find((p) => p.id === settingsTargetId) ?? null;
 
   return (
-    <div className="overflow-y-auto p-6">
+    <ScreenContainer width="wide">
       <h1 className="mb-1 text-xl font-semibold tracking-tight">Projekty i tokeny</h1>
       <p className="mb-5 max-w-2xl text-[13.5px] text-muted-foreground">
         CRUD projektów oraz generacja/rotacja bearer tokenów <span className="font-mono">ck_…</span>. Ten ekran żyje
@@ -82,7 +83,7 @@ export function ProjectsScreen() {
       </p>
 
       {isLoading ? (
-        <Skeleton className="h-48 w-full max-w-4xl" />
+        <Skeleton className="h-48 w-full" />
       ) : projects.length === 0 ? (
         <EmptyState
           icon={Folder}
@@ -95,7 +96,7 @@ export function ProjectsScreen() {
           }
         />
       ) : (
-        <div className="max-w-4xl overflow-hidden rounded-lg border border-border">
+        <div className="overflow-hidden rounded-lg border border-border">
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-border">
@@ -211,7 +212,7 @@ export function ProjectsScreen() {
       )}
 
       <ProjectSettingsDialog project={settingsTarget} onOpenChange={(open) => !open && setSettingsTargetId(null)} />
-    </div>
+    </ScreenContainer>
   );
 }
 

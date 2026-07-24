@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Info } from 'lucide-react';
 import { CopyBlock } from '../components/CopyBlock';
+import { ScreenContainer } from '../components/ScreenContainer';
 import { api } from '../lib/api';
 import { queryKeys } from '../lib/query';
 import type { DashboardLimits } from '../types/api';
@@ -82,14 +83,14 @@ export function OnboardingScreen() {
   const mcpJsonBlock = buildMcpJsonBlock(mcpUrl);
 
   return (
-    <div className="overflow-y-auto p-6">
+    <ScreenContainer width="prose">
       <h1 className="mb-1 text-xl font-semibold tracking-tight">Onboarding</h1>
       <p className="mb-5 max-w-2xl text-[13.5px] text-muted-foreground">
         Gotowe bloki do wklejenia w dowolnym zewnętrznym repo, żeby podpiąć je pod tę instancję Context Keepera
         jako trwałą, human-gated pamięć projektu.
       </p>
 
-      <div className="flex max-w-2xl flex-col gap-5">
+      <div className="flex flex-col gap-5">
         {base === null && (
           <div className="flex items-start gap-2 rounded-md border border-warning bg-warning-subtle px-2.5 py-2 text-xs text-warning-foreground">
             <Info className="mt-0.5 size-[15px] shrink-0 text-warning" />
@@ -155,6 +156,6 @@ export function OnboardingScreen() {
           <CopyBlock label="CLAUDE.md" code={CLAUDE_NOTE} copyLabel="Kopiuj notatkę CLAUDE.md" />
         </section>
       </div>
-    </div>
+    </ScreenContainer>
   );
 }

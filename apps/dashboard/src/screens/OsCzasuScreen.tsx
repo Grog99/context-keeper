@@ -5,6 +5,7 @@ import { Badge } from '../components/ui/badge';
 import { Skeleton } from '../components/ui/skeleton';
 import { EmptyState } from '../components/EmptyState';
 import { OriginPath } from '../components/OriginPath';
+import { ScreenContainer } from '../components/ScreenContainer';
 import { api } from '../lib/api';
 import { contextQueryParams, useActiveContext } from '../lib/context';
 import { dayKey, formatDayHeading, formatTimeOfDay } from '../lib/format';
@@ -56,7 +57,7 @@ export function OsCzasuScreen() {
   const groups = groupByDay(data ?? []);
 
   return (
-    <div className="overflow-y-auto p-6">
+    <ScreenContainer width="list">
       <h1 className="mb-1 text-xl font-semibold tracking-tight">Oś czasu</h1>
       <p className="mb-5 max-w-2xl text-[13.5px] text-muted-foreground">
         Zdarzenia (<span className="font-mono">kind=event</span>) w kolejności chronologicznej, wg{' '}
@@ -64,7 +65,7 @@ export function OsCzasuScreen() {
       </p>
 
       {isLoading ? (
-        <div className="flex max-w-3xl flex-col gap-2">
+        <div className="flex flex-col gap-2">
           {[0, 1, 2].map((i) => (
             <Skeleton key={i} className="h-14 w-full" />
           ))}
@@ -76,7 +77,7 @@ export function OsCzasuScreen() {
           description="Utwórz pierwsze zdarzenie z panelu „Nowa pamięć” (kind: Zdarzenie)."
         />
       ) : (
-        <div className="flex max-w-3xl flex-col gap-6">
+        <div className="flex flex-col gap-6">
           {groups.map((group) => (
             <div key={group.key}>
               <h2 className="mb-2 border-b border-border pb-1.5 text-xs font-semibold uppercase tracking-[0.05em] text-faint">
@@ -117,6 +118,6 @@ export function OsCzasuScreen() {
           ))}
         </div>
       )}
-    </div>
+    </ScreenContainer>
   );
 }

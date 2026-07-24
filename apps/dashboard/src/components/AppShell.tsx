@@ -155,28 +155,23 @@ export function AppShell() {
           )}
         </Tooltip>
         <div className="mt-auto flex flex-col gap-1 border-t border-border pt-2.5">
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>Kolejka</span>
-            <b className="font-mono text-[12.5px] font-semibold text-foreground">{metrics?.queueDepth ?? '—'}</b>
-          </div>
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>Embedding</span>
-            <b
-              className={
-                'font-mono text-[12.5px] font-semibold ' +
-                (metrics?.embedding.status === 'up' ? 'text-success' : metrics ? 'text-warning' : 'text-foreground')
-              }
-            >
-              {embeddingStatusLabel(metrics)}
-            </b>
-          </div>
-          <Button variant="ghost" size="sm" className="mt-1 justify-start px-2 text-muted-foreground" onClick={handleLogout}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={toggleTheme}
+            aria-label="Przełącz motyw"
+            className="justify-start px-2 text-muted-foreground"
+          >
+            {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
+            {theme === 'dark' ? 'Tryb jasny' : 'Tryb ciemny'}
+          </Button>
+          <Button variant="ghost" size="sm" className="justify-start px-2 text-muted-foreground" onClick={handleLogout}>
             Wyloguj
           </Button>
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-col">
+      <div className="flex min-w-0 flex-col min-h-0">
         <header className="flex h-[52px] flex-none items-center gap-3.5 border-b border-border bg-surface px-4">
           <ContextSwitcher projects={(projects ?? []).map((p) => ({ id: p.id, name: p.name }))} />
           <button
@@ -213,24 +208,10 @@ export function AppShell() {
                   : 'neutral'
               }
             />
-            <MetricStat
-              label="Sekrety /24h"
-              value={metrics?.secretBlocked24h ?? '—'}
-              status={metrics ? (metrics.secretBlocked24h > 0 ? 'bad' : 'ok') : 'neutral'}
-            />
           </div>
-          <button
-            type="button"
-            onClick={toggleTheme}
-            aria-label="Przełącz motyw"
-            title="Przełącz motyw"
-            className="flex size-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
-          </button>
         </header>
 
-        <main className="min-h-0 flex-1">
+        <main className="min-h-0 flex-1 overflow-y-auto">
           <Outlet />
         </main>
       </div>
