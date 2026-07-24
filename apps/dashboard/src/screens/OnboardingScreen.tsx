@@ -16,7 +16,9 @@ const AGENTS_SNIPPET = `## Project memory — Context Keeper (MCP)
 
 This project uses a Context Keeper instance as shared, persistent, human-gated
 project memory, exposed as an MCP server named \`context-keeper\`. Tools:
-\`search_memory\`, \`get_memory\`, \`save_memory\`.
+\`search_memory\`, \`get_memory\`, \`save_memory\`. Each tool's own MCP description
+carries the full contract (writes are human-gated, secrets are rejected, return
+statuses) — this snippet only covers when to reach for them and what to store.
 
 Work proactively:
 - At the START of a task, call \`search_memory\` to pull relevant project context
@@ -24,16 +26,20 @@ Work proactively:
 - When a non-obvious decision, fact, or convention comes up, propose it with
   \`save_memory\` yourself — don't wait to be asked.
 
+What to save, and as which kind:
+- \`fact\` (the default) — one atomic, self-contained fact: a decision, a team
+  convention, a "why", a deployment specific.
+- \`document\` — a longer, self-contained reference saved whole (a decision record,
+  a spec, a convention writeup). Pass \`kind: "document"\`.
+- To fix something already in memory, find it via \`search_memory\` and re-save it
+  with \`supersedes: <id>\` — your new header+body replace it in place — rather than
+  adding a near-duplicate.
+- \`event\` memories are human-only; you can't create them.
+
 Memory hygiene:
-- Save only facts you can't derive from the repo — decisions, team conventions,
+- Save only what you can't derive from the repo — decisions, team conventions,
   the "why", deployment specifics. Don't store what's already in the README, docs,
-  or code.
-- One atomic fact per \`save_memory\` call. Don't bundle unrelated facts.
-- Writes are human-gated: \`save_memory\` creates a pending proposal that a human
-  approves in the dashboard before it enters memory. Fire-and-forget — don't poll
-  or wait for approval.
-- Never put secrets (keys, passwords, tokens) in a memory — the server rejects
-  them (\`secret_blocked\`). Refer to a secret by name/purpose, never by value.`;
+  or code.`;
 
 /** Notatka dla Claude Code (nie czyta `AGENTS.md` automatycznie, w odróżnieniu od Codex/Cursor) —
  * dokładnie ten sam mechanizm co `CLAUDE.md` tego repo. */
