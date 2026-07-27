@@ -80,8 +80,16 @@ rodzaj wpisu — wraz z fixem deduplikacji, który ten trzeci rodzaj czyni pilny
 
 ### UI
 
-- **Widok diff dla `supersedes`** ⬜ — dziś ciężko zobaczyć, co się faktycznie zmieniło; docelowo diff
-  w stylu gita zamiast dwóch bloków tekstu obok siebie.
+- **Widok diff dla `supersedes`** ✅ — case `update` w `DiffView` renderuje teraz word-level inline
+  diff (jsdiff `diffWords`, `apps/dashboard/src/lib/text-diff.ts`) zamiast dwóch pełnych bloków
+  tekstu obok siebie: niezmienione słowa zwykłym tekstem, usunięcia pod `<del>`, dodania pod `<ins>`,
+  legenda `−/+` nad blokiem. Ten sam renderer dla nagłówka i treści. Cztery fallbacki z typowanym
+  powodem: `'too-long'` (>20 000 znaków) i `'aborted'` (jsdiff timeout 250 ms) to twarde limity
+  wydajności bez obejścia; `'too-different'` (>70% treści zmienione) to heurystyka czytelności —
+  recenzent może ją obejść linkiem „Pokaż zmiany inline mimo to"; `'whitespace-only'` (czysty
+  reflow/wcięcie, brak zmian słów) pokazuje notkę zamiast pustego podświetlenia. Wszystkie fallbacki
+  renderują dawny układ dwóch bloków `del`/`add`. A11y: `<del>`/`<ins>` (nie kolor sam w sobie),
+  `role="group"`/`aria-label` na kontenerze (§10 design-systemu).
 - **Czytelność przeglądarki pamięci** ⬜ — wszystko w odcieniach szarości słabo się skanuje; widok rekordu
   ma zajmować całą dostępną powierzchnię zamiast połowy, ze scrollem w treści i przyklejonymi na dole
   akcjami (Edytuj / Archiwizuj / …), żeby zawsze były widoczne.
