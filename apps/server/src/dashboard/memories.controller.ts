@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
-import type { MemoryKind, MemoryScope, MemoryStatus, RelationType } from '../db/schema/enums';
+import { relationType, type MemoryKind, type MemoryScope, type MemoryStatus, type RelationType } from '../db/schema/enums';
 import type { RevisionRow } from '../db/schema';
+import { ToolError } from '../common/errors';
 import {
   MemoryAdminService,
   type EditMemoryInput,
@@ -82,12 +83,31 @@ export class MemoriesController {
     return this.memoryAdmin.listRelations(id);
   }
 
+  /** `@Body()` powyżej to czysta asercja typu TS — bez globalnego `ValidationPipe` w `main.ts`
+   * (świadome: MCP i tak waliduje zod-em na wejściu narzędzia, `main.ts` go nie potrzebował do
+   * teraz) request z `type: "bogus"` doleciałby aż do enuma Postgresa (500 zamiast 400), a brak
+   * `toId` wysypałby `MemoryAdminService.createRelation`'s `inArray(memories.id, [fromId, undefined])`.
+   * Walidujemy więc explicit, PRZED wejściem w serwis, tym samym `ToolError('validation_error', …)`
+   * co reszta ścieżek dashboardu — `DashboardErrorFilter` mapuje go na 400 (§dashboard-error.filter.ts).
+   * Wartości `type` czytane z jednego źródła prawdy (`relationType.enumValues`, §db/schema/enums.ts),
+   * bez przepisywania literałów. */
   @Post(':id/relations')
   async createRelation(
     @Param('id') id: string,
     @Body() body: { toId: string; type: RelationType },
   ): Promise<{ id: string }> {
-    return this.memoryAdmin.createRelation({ fromId: id, toId: body?.toId, type: body?.type });
+    const toId = body?.toId;
+    if (typeof toId !== 'string' || toId.length === 0) {
+      throw new ToolError('validation_error', 'toId jest wymagany');
+    }
+    const type = body?.type;
+    if (!relationType.enumValues.includes(type)) {
+      throw new ToolError(
+        'validation_error',
+        `type musi być jednym z: ${relationType.enumValues.join(', ')}`,
+      );
+    }
+    return this.memoryAdmin.createRelation({ fromId: id, toId, type });
   }
 
   @Delete(':id/relations/:relationId')

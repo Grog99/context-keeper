@@ -1,5 +1,5 @@
 import { ArrowDownLeft, ArrowUpRight, ChevronDown, X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import type { MemoryListItem, RelationListItemApi } from '../types/api';
 import type { RelationType } from '../types/domain';
@@ -11,6 +11,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { StatusChip } from './StatusChip';
 
 const RELATION_TYPES: RelationType[] = ['caused_by', 'follows', 'context_for'];
+
+/** Debounce fetchu w `TargetPicker` (FINDING 8 review PR #15) — bez tego każdy keystroke odpalał
+ * osobny request do `/memories`. */
+const SEARCH_DEBOUNCE_MS = 300;
 
 export interface RelationsPanelProps {
   /** Formularz dodawania widoczny WYŁĄCZNIE scope=project & status=approved (roadmap v1.2, plan
@@ -25,6 +29,11 @@ export interface RelationsPanelProps {
   onCreate: (vars: { type: RelationType; targetId: string }) => void;
   onRemove: (relationId: string) => void;
   onSelectMemory: (id: string) => void;
+  /** Id pamięci, której dotyczy panel (`detail.id` w `MemoryBrowserScreen`) — wyłącznie do
+   * wykluczenia self-loop z TargetPicker (FINDING 8 review PR #15). To zawężenie UX z wyprzedzeniem,
+   * NIE guard bezpieczeństwa: serwer i tak odrzuca self-loop jako `validation_error`
+   * (`MemoryAdminService.createRelation`) niezależnie od tego, co pokazuje combobox. */
+  currentMemoryId: string;
 }
 
 /**
@@ -33,13 +42,28 @@ export interface RelationsPanelProps {
  * `scope=project&projectId=` (nie `all`) — human dashboard i tak widzi wszystko, ale target relacji
  * musi być tego samego projektu co pamięć (§createRelation guard po stronie serwera; combobox tylko
  * zawęża wybór z wyprzedzeniem, serwer i tak jest autorytatywny).
+ *
+ * FINDING 8 review PR #15 — dwie poprawki ponad pierwotną wersję:
+ *  1. Debounce (`SEARCH_DEBOUNCE_MS`) + strażnik sekwencji zapytań. `api.get` (`../lib/api.ts`)
+ *     nie przyjmuje opcji (brak `signal`), więc zamiast `AbortController` używamy `requestSeqRef`:
+ *     odpowiedź zwraca się, ale stosujemy ją tylko jeśli w międzyczasie nie poszło nowsze zapytanie
+ *     (ignorujemy stale-response zamiast go anulować). `query` w polu aktualizuje się od razu —
+ *     debounce dotyczy wyłącznie fetchu.
+ *  2. `excludedIds` — self-loop (`currentMemoryId`) + targety z już istniejącą relacją są
+ *     wykluczane z WYŚWIETLANEJ listy (patrz `RelationsPanel`, `excludedTargetIds`). To tylko
+ *     UX-owe zawężenie wyboru z wyprzedzeniem: serwer i tak odrzuca self-loop/duplikat jako
+ *     `validation_error` i to on jest autorytatywny — filtr niczego nie zabezpiecza, tylko nie
+ *     proponuje oczywistego mis-clicku.
  */
 function TargetPicker({
   projectId,
+  excludedIds,
   onSelect,
   disabled,
 }: {
   projectId: string | null;
+  /** Id-y do wykluczenia z wyświetlanej listy — patrz komentarz p.2 wyżej. */
+  excludedIds: ReadonlySet<string>;
   onSelect: (candidate: { id: string; header: string }) => void;
   disabled?: boolean;
 }) {
@@ -48,34 +72,70 @@ function TargetPicker({
   const [results, setResults] = useState<MemoryListItem[]>([]);
   const [loading, setLoading] = useState(false);
 
-  async function handleQueryChange(value: string): Promise<void> {
-    setQuery(value);
+  const debounceTimerRef = useRef<number | undefined>(undefined);
+  // Rośnie przy każdym nowym zapytaniu/resecie — odpowiedź porównuje swój numer z aktualnym i
+  // ignoruje się, jeśli w międzyczasie poszło coś nowszego (stale-response clobber, FINDING 8).
+  const requestSeqRef = useRef(0);
+
+  // Timer po unmount komponentu (np. zamknięcie zakładki/pamięci w trakcie wpisywania) — sam fetch
+  // ewentualnie doleci, ale strażnik sekwencji i tak by go zignorował; czyścimy dla porządku.
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current !== undefined) window.clearTimeout(debounceTimerRef.current);
+    };
+  }, []);
+
+  function resetSearch(): void {
+    if (debounceTimerRef.current !== undefined) window.clearTimeout(debounceTimerRef.current);
+    requestSeqRef.current += 1; // unieważnij ewentualny fetch w locie
+    setQuery('');
+    setResults([]);
+    setLoading(false);
+  }
+
+  function runSearch(value: string): void {
+    if (!projectId) return;
+    const seq = ++requestSeqRef.current;
+    setLoading(true);
+    api
+      .get<MemoryListItem[]>(
+        `/memories?scope=project&projectId=${encodeURIComponent(projectId)}&q=${encodeURIComponent(value.trim())}`,
+      )
+      .then((found) => {
+        if (requestSeqRef.current !== seq) return; // odpowiedź na nieaktualne zapytanie
+        setResults(found.slice(0, 8));
+        setLoading(false);
+      })
+      .catch(() => {
+        if (requestSeqRef.current !== seq) return;
+        setResults([]);
+        setLoading(false);
+      });
+  }
+
+  function handleQueryChange(value: string): void {
+    setQuery(value); // natychmiast — debounce dotyczy tylko fetchu, nie pola input
+    if (debounceTimerRef.current !== undefined) window.clearTimeout(debounceTimerRef.current);
     if (!projectId || value.trim().length === 0) {
+      requestSeqRef.current += 1; // unieważnij ewentualny fetch w locie
       setResults([]);
+      setLoading(false);
       return;
     }
-    setLoading(true);
-    try {
-      const found = await api.get<MemoryListItem[]>(
-        `/memories?scope=project&projectId=${encodeURIComponent(projectId)}&q=${encodeURIComponent(value.trim())}`,
-      );
-      setResults(found.slice(0, 8));
-    } catch {
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
+    debounceTimerRef.current = window.setTimeout(() => runSearch(value), SEARCH_DEBOUNCE_MS);
   }
+
+  const visibleResults = results.filter((candidate) => !excludedIds.has(candidate.id));
+  // Serwer coś znalazł, ale wszystko odfiltrowane jako self/już-powiązane — inny komunikat niż
+  // "brak wyników", żeby nie sugerować, że wyszukiwarka nic nie znalazła.
+  const allFilteredOut = results.length > 0 && visibleResults.length === 0;
 
   return (
     <Popover
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (!next) {
-          setQuery('');
-          setResults([]);
-        }
+        if (!next) resetSearch();
       }}
     >
       <PopoverTrigger asChild>
@@ -88,17 +148,18 @@ function TargetPicker({
         <Command shouldFilter={false}>
           <CommandInput placeholder="Szukaj pamięci w projekcie…" value={query} onValueChange={handleQueryChange} />
           <CommandList>
-            <CommandEmpty>{loading ? 'Szukam…' : 'Brak wyników.'}</CommandEmpty>
+            <CommandEmpty>
+              {loading ? 'Szukam…' : allFilteredOut ? 'Wszystko już połączone lub to ta sama pamięć.' : 'Brak wyników.'}
+            </CommandEmpty>
             <CommandGroup>
-              {results.map((candidate) => (
+              {visibleResults.map((candidate) => (
                 <CommandItem
                   key={candidate.id}
                   value={candidate.id}
                   onSelect={() => {
                     onSelect(candidate);
                     setOpen(false);
-                    setQuery('');
-                    setResults([]);
+                    resetSearch();
                   }}
                 >
                   <span className="min-w-0 flex-1 truncate">{candidate.header}</span>
@@ -175,10 +236,15 @@ export function RelationsPanel({
   onCreate,
   onRemove,
   onSelectMemory,
+  currentMemoryId,
 }: RelationsPanelProps) {
   const [type, setType] = useState<RelationType>('caused_by');
   const outgoing = relations.filter((r) => r.direction === 'outgoing');
   const incoming = relations.filter((r) => r.direction === 'incoming');
+  // Wykluczone z TargetPicker (FINDING 8 review PR #15): targety, z którymi relacja już istnieje
+  // (niezależnie od kierunku) + bieżąca pamięć sama (self-loop). Tylko UX-owe zawężenie wyboru z
+  // wyprzedzeniem — serwer i tak odrzuca oba przypadki jako `validation_error`.
+  const excludedTargetIds = new Set([...relations.map((r) => r.neighbor.id), currentMemoryId]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -198,6 +264,7 @@ export function RelationsPanel({
           </Select>
           <TargetPicker
             projectId={projectId}
+            excludedIds={excludedTargetIds}
             disabled={creating}
             onSelect={(candidate) => onCreate({ type, targetId: candidate.id })}
           />

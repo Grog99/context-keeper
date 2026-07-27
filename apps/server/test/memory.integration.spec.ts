@@ -1225,8 +1225,11 @@ describe('MemoryService (integration, testcontainers)', () => {
       const marker = 'graphboostinjectionmarker2';
       const throwingProvider = new StubEmbeddingProvider('graph-boost-injection-throwing');
       throwingProvider.throwOnEmbed = true;
-      // Wysoki współczynnik — gdyby doszło do wstrzyknięcia/przecieku, byłoby to jednoznacznie widoczne.
-      const { memory: injMemory } = buildMemoryService(throwingProvider, { GRAPH_BOOST_WEIGHT: 5 });
+      // Maksymalna dopuszczalna waga (sufit `.max(1)` w `envSchema` — §config/env.ts): re-rank-only
+      // jest własnością ZBIORU, nie skali, więc wielkość wagi i tak nie decyduje o tym, czy `outside`
+      // wejdzie do wyników. Bierzemy sufit, żeby test pokazywał, że nawet przy najsilniejszym
+      // dopuszczalnym boostcie nic się nie wstrzykuje.
+      const { memory: injMemory } = buildMemoryService(throwingProvider, { GRAPH_BOOST_WEIGHT: 1 });
 
       const hit = await injMemory.devSeedApproved({
         header: `Trafiony fakt ${marker}`,

@@ -1,5 +1,5 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { RefreshCw } from 'lucide-react';
+import { ArrowUpRight, RefreshCw } from 'lucide-react';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
 import {
@@ -34,7 +34,7 @@ import { formatAbsoluteTime, formatRelativeTime } from '../lib/format';
 import { queryKeys } from '../lib/query';
 import { toQueryString } from '../lib/query-string';
 import type { ApproveResult, EditProposalResult, MemoryDetail, ProjectListItem, ProposalView } from '../types/api';
-import type { ProposalOrigin, ProposalType } from '../types/domain';
+import type { ProposalOrigin, ProposalType, RelationType } from '../types/domain';
 
 type OriginFilter = 'all' | ProposalOrigin;
 type TypeFilter = 'all' | ProposalType;
@@ -54,11 +54,18 @@ function projectNameFor(projectId: string | null, projects: ProjectListItem[] | 
 
 /** Fetch before/merge-source memories dla detalu (§DiffView, M4) — `create` nie potrzebuje niczego
  * poza payloadem, `update`/`delete` potrzebują aktualnego stanu (`before`), `merge` potrzebuje
- * nagłówków każdego źródła w `affectedIds`. Robione TYLKO dla zaznaczonej propozycji, nie całej listy. */
+ * nagłówków każdego źródła w `affectedIds`. Robione TYLKO dla zaznaczonej propozycji, nie całej listy.
+ *
+ * Dociąga też nagłówki targetów attach-on-save `relations` (roadmap v1.2, FINDING 1 review PR #15)
+ * — TYM SAMYM `GET /memories/:id` co `beforeQuery`/`mergeQueries` (współdzielony cache przez
+ * `queryKeys.memory`), celowo bez nowego endpointu. `retry: false` + fail-open na brak danych: target
+ * mógł zniknąć (archiwizacja/purge) między `save()` a przeglądem — `ProposalRelations` wtedy po
+ * prostu pokazuje sam `targetId` (ten sam fail-open co `materializeRelations` po stronie serwera). */
 function useProposalDetailData(proposal: ProposalView | undefined) {
   const effective = proposal ? (proposal.editedPayload ?? proposal.payload) : undefined;
   const beforeId = proposal && (proposal.type === 'update' || proposal.type === 'delete') ? effective?.memoryId : undefined;
   const mergeIds = proposal?.type === 'merge' ? proposal.affectedIds : [];
+  const relationTargetIds = Array.from(new Set((effective?.relations ?? []).map((r) => r.targetId)));
 
   const beforeQuery = useQuery({
     queryKey: queryKeys.memory(beforeId ?? ''),
@@ -73,11 +80,25 @@ function useProposalDetailData(proposal: ProposalView | undefined) {
     })),
   });
 
+  const relationTargetQueries = useQueries({
+    queries: relationTargetIds.map((id) => ({
+      queryKey: queryKeys.memory(id),
+      queryFn: () => api.get<MemoryDetail>(`/memories/${id}`),
+      retry: false,
+    })),
+  });
+  const relationHeaders = new Map<string, string>();
+  relationTargetIds.forEach((id, i) => {
+    const header = relationTargetQueries[i]?.data?.header;
+    if (header) relationHeaders.set(id, header);
+  });
+
   return {
     beforeMemory: beforeId ? beforeQuery.data : undefined,
     beforeLoading: Boolean(beforeId) && beforeQuery.isLoading,
     mergeMemories: mergeQueries.map((q) => q.data).filter((d): d is MemoryDetail => Boolean(d)),
     mergeLoading: mergeIds.length > 0 && mergeQueries.some((q) => q.isLoading),
+    relationHeaders,
   };
 }
 
@@ -137,7 +158,7 @@ export function QueueScreen() {
   function setTab(next: string): void {
     if (selected) setTabState({ id: selected.id, tab: next });
   }
-  const { beforeMemory, beforeLoading, mergeMemories, mergeLoading } = useProposalDetailData(selected);
+  const { beforeMemory, beforeLoading, mergeMemories, mergeLoading, relationHeaders } = useProposalDetailData(selected);
 
   function invalidateAfterMutation(): void {
     queryClient.invalidateQueries({ queryKey: ['proposals'] });
@@ -328,6 +349,7 @@ export function QueueScreen() {
             beforeLoading={beforeLoading}
             mergeMemories={mergeMemories}
             mergeLoading={mergeLoading}
+            relationHeaders={relationHeaders}
             editing={editing}
             onCancelEdit={() => setEditingForId(null)}
             onSaveEdit={(vars) => editMutation.mutate({ id: selected.id, ...vars })}
@@ -380,6 +402,7 @@ interface ProposalDetailProps {
   beforeLoading: boolean;
   mergeMemories: MemoryDetail[];
   mergeLoading: boolean;
+  relationHeaders: Map<string, string>;
   editing: boolean;
   onCancelEdit: () => void;
   onSaveEdit: (vars: { header: string; body: string; tags: string[] }) => void;
@@ -403,6 +426,7 @@ function ProposalDetail({
   beforeLoading,
   mergeMemories,
   mergeLoading,
+  relationHeaders,
   editing,
   onCancelEdit,
   onSaveEdit,
@@ -446,6 +470,10 @@ function ProposalDetail({
             </>
           )}
         </div>
+
+        {effective.relations && effective.relations.length > 0 && (
+          <ProposalRelations relations={effective.relations} headers={relationHeaders} />
+        )}
 
         <Tabs value={tab} onValueChange={onTabChange}>
           <TabsList>
@@ -612,6 +640,51 @@ function EditProposalForm({
           {saving ? 'Zapisywanie…' : 'Zapisz'}
         </Button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Krawędzie attach-on-save (roadmap v1.2, "memory-relations + 1-hop graph boost") niesione w
+ * `payload.relations` (FINDING 1 review PR #15) — materializują się DOPIERO w `ProposalsService.approve()`,
+ * ale recenzent musi je widzieć PRZED kliknięciem "Zatwierdź" (human-gate integrity: bez tego widzi
+ * treść pamięci, ale nie widzi, że approve dorzuci do 16 krawędzi grafu). Renderowane z payloadu, który
+ * faktycznie pójdzie do approve (`effective` = `editedPayload ?? payload` w wywołaniu wyżej) — edycja
+ * treści (`EditProposalForm`) nigdy nie dotyka `relations` (serwer je kopiuje 1:1, patrz `ProposalsService.edit`).
+ *
+ * Wizualnie mirror `RelationRow` w `RelationsPanel.tsx` (ten sam PR) — `ArrowUpRight` (attach-on-save
+ * jest zawsze wychodząca: fromId = ta pamięć, targetId = istniejąca) + `Badge variant="kind"` na
+ * typie relacji — ale czysto read-only: bez usuwania/nawigacji (Queue nie ma przejścia do przeglądarki
+ * pamięci). Nagłówek targetu dociągnięty tanio (istniejący `GET /memories/:id`, `useProposalDetailData`
+ * wyżej w tym pliku) — gdy niedostępny (target zniknął / jeszcze się ładuje), pokazujemy sam `targetId`.
+ */
+function ProposalRelations({
+  relations,
+  headers,
+}: {
+  relations: { type: RelationType; targetId: string }[];
+  headers: Map<string, string>;
+}) {
+  return (
+    <div className="mb-4 flex flex-col gap-1.5 border-b border-border pb-4">
+      <h3 className="text-2xs font-semibold uppercase tracking-[0.04em] text-faint">
+        Krawędzie po zatwierdzeniu ({relations.length})
+      </h3>
+      <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+        {relations.map((rel, i) => {
+          const header = headers.get(rel.targetId);
+          return (
+            <li key={`${rel.type}-${rel.targetId}-${i}`} className="flex min-w-0 items-center gap-2 text-[13px]">
+              <ArrowUpRight className="size-3.5 shrink-0 text-faint" aria-label="wychodząca" />
+              <Badge variant="kind" className="shrink-0">
+                {rel.type}
+              </Badge>
+              {header ? <span className="min-w-0 flex-1 truncate text-foreground">{header}</span> : <span className="flex-1" />}
+              <MonoId value={rel.targetId} />
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

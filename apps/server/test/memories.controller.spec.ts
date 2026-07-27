@@ -151,6 +151,42 @@ describe('MemoriesController — relations endpoints (roadmap v1.2, "memory-rela
     expect(result).toEqual({ id: 'rel_created' });
   });
 
+  it('POST :id/relations z nieznanym type odrzuca PRZED wejściem w serwis jako ToolError(validation_error)', async () => {
+    let called = false;
+    const controller = new MemoriesController(
+      fakeMemoryAdmin({
+        createRelation: async (_input) => {
+          called = true;
+          return { id: 'rel_created' };
+        },
+      }),
+      fakePurge({}),
+    );
+
+    await expect(
+      controller.createRelation('mem_1', { toId: 'mem_2', type: 'bogus' as unknown as CreateRelationInput['type'] }),
+    ).rejects.toMatchObject({ code: 'validation_error' });
+    expect(called).toBe(false);
+  });
+
+  it('POST :id/relations z brakującym toId odrzuca PRZED wejściem w serwis jako ToolError(validation_error)', async () => {
+    let called = false;
+    const controller = new MemoriesController(
+      fakeMemoryAdmin({
+        createRelation: async (_input) => {
+          called = true;
+          return { id: 'rel_created' };
+        },
+      }),
+      fakePurge({}),
+    );
+
+    await expect(
+      controller.createRelation('mem_1', { toId: undefined as unknown as string, type: 'caused_by' }),
+    ).rejects.toMatchObject({ code: 'validation_error' });
+    expect(called).toBe(false);
+  });
+
   it('DELETE :id/relations/:relationId woła memoryAdmin.removeRelation(relationId) i zwraca {ok:true}', async () => {
     let captured: string | undefined;
     const controller = new MemoriesController(

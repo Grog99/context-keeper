@@ -375,6 +375,7 @@ export function MemoryBrowserScreen() {
                     onCreate={(vars) => createRelationMutation.mutate({ id: detail.id, ...vars })}
                     onRemove={(relationId) => removeRelationMutation.mutate({ id: detail.id, relationId })}
                     onSelectMemory={(id) => select(id)}
+                    currentMemoryId={detail.id}
                   />
                 </TabsContent>
               </Tabs>

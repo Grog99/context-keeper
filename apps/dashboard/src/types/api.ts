@@ -20,6 +20,12 @@ export interface ProposalPayloadShape {
   body?: string;
   tags?: string[];
   kind?: MemoryKind;
+  /** Attach-on-save (roadmap v1.2, "memory-relations + 1-hop graph boost") — lustro
+   * `RelationPayloadEntry`/`CreatePayload.relations`/`UpdatePayload.relations`
+   * (`apps/server/src/proposals/proposals.types.ts`); materializowane dopiero w `ProposalsService.approve()`,
+   * NIE tutaj. Renderowane w kolejce PRZED akceptacją (`QueueScreen.tsx` → `ProposalRelations`,
+   * FINDING 1 review PR #15) — recenzent musi widzieć krawędzie, które approve utworzy. */
+  relations?: { type: RelationType; targetId: string }[];
 }
 
 export interface ProposalView {

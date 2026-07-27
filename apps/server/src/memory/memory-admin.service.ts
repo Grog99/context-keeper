@@ -7,7 +7,15 @@ import { scanForSecrets } from '../common/secret-scanner';
 import { AppConfigService } from '../config/config.service';
 import { DASHBOARD_ACTOR } from '../dashboard/dashboard.constants';
 import { DB, type Database, type Tx } from '../db/db.tokens';
-import { embeddings, memories, memoryRelations, revisions, type MemoryRow, type RevisionRow } from '../db/schema';
+import {
+  embeddings,
+  memories,
+  memoryRelations,
+  revisions,
+  type MemoryRelationRow,
+  type MemoryRow,
+  type RevisionRow,
+} from '../db/schema';
 import type {
   MemoryKind,
   MemoryScope,
@@ -507,9 +515,21 @@ export class MemoryAdminService {
     return { warnings };
   }
 
-  /** Soft-delete (§1.3 planu Fazy 4 — nigdy hard-delete): bump wersji + usunięcie embeddingów
-   * (NFR-6, archived nie bierze udziału w search) + usunięcie krawędzi grafu (roadmap v1.2, mirror
-   * `ProposalsService.archiveMemory`), jak `ProposalsService`'s `archiveMemory`. */
+  /**
+   * Soft-delete (§1.3 planu Fazy 4 — nigdy hard-delete): bump wersji + usunięcie embeddingów
+   * (NFR-6, archived nie bierze udziału w search) + usunięcie krawędzi grafu (roadmap v1.2),
+   * audytowane per-krawędź jako `relation_removed` (code review finding "kaskada bez audytu" —
+   * bez tego krawędzie znikały bez śladu w append-only audycie).
+   *
+   * UWAGA na uzasadnienie: to NIE jest ochrona przed graph boostem ("archived memory nie powinna
+   * dalej boostować/być boostowana" — poprzednie, mylące uzasadnienie). Boost widzi WYŁĄCZNIE
+   * `fusedIds`, czyli kandydatów z `MemoryService.search()`, a oba ramiona (`ftsArm`,
+   * `findAnnNeighbors`/`vectorArm`) filtrują `status='approved'` — zarchiwizowana pamięć nigdy nie
+   * jest kandydatem, więc boost i tak by nie strzelił. Prawdziwy powód: krawędź do pamięci wyjętej
+   * z grafu projektu jest martwą daną — `listRelations` niżej i tak by ją pokazywał jako relację do
+   * martwego wiersza. Usunięcie jest teraz audytowane, więc utrata jest widoczna w historii, zamiast
+   * znikać po cichu. Mirror `ProposalsService.archiveMemory` (tam ten sam komentarz, pełniejszy).
+   */
   async archiveMemory(id: string): Promise<void> {
     const current = await this.requireApproved(id, 'archiwizacji');
     await this.db.transaction(async (tx) => {
@@ -518,14 +538,26 @@ export class MemoryAdminService {
         .set({ status: 'archived', version: sql`${memories.version} + 1`, updatedAt: new Date() })
         .where(eq(memories.id, id));
       await tx.delete(embeddings).where(eq(embeddings.memoryId, id));
-      await tx
+      const deletedRelations = await tx
         .delete(memoryRelations)
-        .where(or(eq(memoryRelations.fromMemoryId, id), eq(memoryRelations.toMemoryId, id)));
+        .where(or(eq(memoryRelations.fromMemoryId, id), eq(memoryRelations.toMemoryId, id)))
+        .returning();
       await this.writeRevision(tx, id, 'archive', snapshotOf(current));
       await this.audit.log({ eventType: 'archive', actor: DASHBOARD_ACTOR, affectedIds: [id] }, tx);
+      await this.auditRemovedRelations(tx, deletedRelations, 'archive');
     });
   }
 
+  /**
+   * Promocja do scope=global (FR-D5). Usuwa też krawędzie `memory_relations` dotykające promowanej
+   * pamięci, audytowane jako `relation_removed` (code review finding "promote zostawia martwe
+   * krawędzie", roadmap v1.2) — bez tego wiersze krawędzi trzymałyby stary `project_id` (kolumna
+   * jest `NOT NULL`, promote sam jej nie aktualizuje), mimo że pamięć nie jest już w żadnym
+   * konkretnym projekcie. Krawędź do pamięci global jest martwymi danymi z tego samego powodu, co
+   * kasowana przez `archiveMemory` (patrz komentarz tamże): graph boost wymaga OBU końców w tym
+   * samym per-project sfuzjowanym zapytaniu (`fetchInSetEdges`, `memory.service.ts`) — krawędź z
+   * jednym końcem w `global` nigdy by nic nie zboostowała w ŻADNYM projekcie. Mirror `archiveMemory`.
+   */
   async promoteToGlobal(id: string): Promise<void> {
     const [current] = await this.db.select().from(memories).where(eq(memories.id, id)).limit(1);
     if (!current) throw new ToolError('not_found', `Pamięć nie istnieje: ${id}`);
@@ -537,12 +569,48 @@ export class MemoryAdminService {
         .update(memories)
         .set({ scope: 'global', projectId: null, version: sql`${memories.version} + 1`, updatedAt: new Date() })
         .where(eq(memories.id, id));
+      const deletedRelations = await tx
+        .delete(memoryRelations)
+        .where(or(eq(memoryRelations.fromMemoryId, id), eq(memoryRelations.toMemoryId, id)))
+        .returning();
       await this.writeRevision(tx, id, 'promote', snapshotOf(current));
       await this.audit.log({ eventType: 'promote', actor: DASHBOARD_ACTOR, affectedIds: [id] }, tx);
+      await this.auditRemovedRelations(tx, deletedRelations, 'promote');
     });
   }
 
   // ---- private helpers ------------------------------------------------
+
+  /**
+   * Audyt kaskady usunięcia krawędzi (code review finding "kaskada bez audytu", roadmap v1.2) —
+   * wspólne dla `archiveMemory` i `promoteToGlobal`: obie operacje wyjmują pamięć z grafu JEJ
+   * projektu, więc dotykające ją krawędzie giną i muszą zostawić ślad w append-only audycie, tak
+   * samo jak ręczne `removeRelation`. `via` rozróżnia kaskadę (`archive`/`promote`) od ręcznego
+   * usunięcia (`removeRelation`, `via: 'human'`) — czytelne w audit logu, skąd krawędź zniknęła.
+   */
+  private async auditRemovedRelations(
+    tx: Tx,
+    deleted: MemoryRelationRow[],
+    via: 'archive' | 'promote',
+  ): Promise<void> {
+    for (const rel of deleted) {
+      await this.audit.log(
+        {
+          eventType: 'relation_removed',
+          actor: DASHBOARD_ACTOR,
+          affectedIds: [rel.fromMemoryId, rel.toMemoryId],
+          metadata: {
+            relationId: rel.id,
+            type: rel.type,
+            fromMemoryId: rel.fromMemoryId,
+            toMemoryId: rel.toMemoryId,
+            via,
+          },
+        },
+        tx,
+      );
+    }
+  }
 
   private async requireApproved(id: string, action: string): Promise<MemoryRow> {
     const [current] = await this.db.select().from(memories).where(eq(memories.id, id)).limit(1);

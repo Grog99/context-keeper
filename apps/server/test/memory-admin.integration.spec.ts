@@ -389,7 +389,7 @@ describe('MemoryAdminService (integration, testcontainers) — przeglądarka pam
       await expect(admin.archiveMemory(seeded.id)).rejects.toMatchObject({ code: 'validation_error' });
     });
 
-    it('archiwizacja usuwa krawędzie grafu dotykające pamięci — WYCHODZĄCE i PRZYCHODZĄCE (roadmap v1.2, mirror embeddingów)', async () => {
+    it('archiwizacja usuwa krawędzie grafu dotykające pamięci — WYCHODZĄCE i PRZYCHODZĄCE — i audytuje relation_removed dla obu (roadmap v1.2, mirror embeddingów)', async () => {
       const seeded = await seedApprovedMemory({
         header: 'Do archiwizacji z relacjami',
         body: 'Tresc.',
@@ -407,8 +407,8 @@ describe('MemoryAdminService (integration, testcontainers) — przeglądarka pam
       });
       const { admin } = buildAdmin(new StubEmbeddingProvider('archive-relations-model'));
 
-      await admin.createRelation({ fromId: seeded.id, toId: outNeighbor.id, type: 'follows' });
-      await admin.createRelation({ fromId: inNeighbor.id, toId: seeded.id, type: 'caused_by' });
+      const outRelation = await admin.createRelation({ fromId: seeded.id, toId: outNeighbor.id, type: 'follows' });
+      const inRelation = await admin.createRelation({ fromId: inNeighbor.id, toId: seeded.id, type: 'caused_by' });
 
       await admin.archiveMemory(seeded.id);
 
@@ -417,6 +417,22 @@ describe('MemoryAdminService (integration, testcontainers) — przeglądarka pam
         .from(memoryRelations)
         .where(or(eq(memoryRelations.fromMemoryId, seeded.id), eq(memoryRelations.toMemoryId, seeded.id)));
       expect(rows).toHaveLength(0);
+
+      // Kaskada z archiveMemory audytuje KAŻDĄ usuniętą krawędź jako relation_removed, via='archive'
+      // — odróżnione od ręcznego `removeRelation` (via='human', patrz test niżej).
+      const removedAudit = await db.select().from(auditLog).where(eq(auditLog.eventType, 'relation_removed'));
+      const removedOut = removedAudit.find(
+        (r) => (r.metadata as { relationId?: string }).relationId === outRelation.id,
+      );
+      expect(removedOut).toBeDefined();
+      expect([...removedOut!.affectedIds].sort()).toEqual([seeded.id, outNeighbor.id].sort());
+      expect((removedOut!.metadata as { via?: string }).via).toBe('archive');
+      const removedIn = removedAudit.find(
+        (r) => (r.metadata as { relationId?: string }).relationId === inRelation.id,
+      );
+      expect(removedIn).toBeDefined();
+      expect([...removedIn!.affectedIds].sort()).toEqual([seeded.id, inNeighbor.id].sort());
+      expect((removedIn!.metadata as { via?: string }).via).toBe('archive');
 
       // Krawędź MIĘDZY DWOMA sąsiadami (nietknięta pamięć) musi przetrwać — archiwizacja usuwa
       // wyłącznie krawędzie DOTYKAJĄCE archiwizowanej pamięci, nie cały graf projektu.
@@ -581,6 +597,54 @@ describe('MemoryAdminService (integration, testcontainers) — przeglądarka pam
 
       const auditRows = await db.select().from(auditLog).where(eq(auditLog.eventType, 'promote'));
       expect(auditRows.some((a) => a.affectedIds.includes(seeded.id))).toBe(true);
+    });
+
+    it('promocja usuwa krawędzie dotykające promowanej pamięci (wychodzącą i przychodzącą) + audytuje relation_removed via=promote (roadmap v1.2, code review "promote zostawia martwe krawędzie")', async () => {
+      const seeded = await seedApprovedMemory({
+        header: 'Do promocji z relacjami',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+      const outNeighbor = await seedApprovedMemory({
+        header: 'Sasiad wychodzacy promote',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+      const inNeighbor = await seedApprovedMemory({
+        header: 'Sasiad przychodzacy promote',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+      const { admin } = buildAdmin(new StubEmbeddingProvider('promote-relations-model'));
+
+      const outRelation = await admin.createRelation({ fromId: seeded.id, toId: outNeighbor.id, type: 'follows' });
+      const inRelation = await admin.createRelation({ fromId: inNeighbor.id, toId: seeded.id, type: 'caused_by' });
+
+      await admin.promoteToGlobal(seeded.id);
+
+      const [row] = await db.select().from(memories).where(eq(memories.id, seeded.id));
+      expect(row.scope).toBe('global'); // memory faktycznie promowana mimo krawędzi
+
+      // Krawędzie dotykające promowanej pamięci zniknęły — endpoint global byłby martwymi danymi
+      // dla graph boostu (`fetchInSetEdges` wymaga OBU końców w tym samym per-project zapytaniu).
+      const rows = await db
+        .select()
+        .from(memoryRelations)
+        .where(or(eq(memoryRelations.fromMemoryId, seeded.id), eq(memoryRelations.toMemoryId, seeded.id)));
+      expect(rows).toHaveLength(0);
+
+      const removedAudit = await db.select().from(auditLog).where(eq(auditLog.eventType, 'relation_removed'));
+      const removedOut = removedAudit.find(
+        (r) => (r.metadata as { relationId?: string }).relationId === outRelation.id,
+      );
+      expect(removedOut).toBeDefined();
+      expect([...removedOut!.affectedIds].sort()).toEqual([seeded.id, outNeighbor.id].sort());
+      expect((removedOut!.metadata as { via?: string }).via).toBe('promote');
+      const removedIn = removedAudit.find(
+        (r) => (r.metadata as { relationId?: string }).relationId === inRelation.id,
+      );
+      expect(removedIn).toBeDefined();
+      expect((removedIn!.metadata as { via?: string }).via).toBe('promote');
     });
 
     it('promocja już-global -> validation_error', async () => {

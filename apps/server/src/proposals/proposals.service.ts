@@ -14,7 +14,7 @@ import type {
   ProposalOrigin,
   RevisionAction,
 } from '../db/schema/enums';
-import type { MemoryRow, ProposalRow } from '../db/schema';
+import type { MemoryRelationRow, MemoryRow, ProposalRow } from '../db/schema';
 import { EmbeddingService } from '../embeddings/embedding.service';
 import { normalizeHeader, normalizeTags, validateBody } from '../memory/validation';
 import { ProposalError } from './proposals.errors';
@@ -264,7 +264,7 @@ export class ProposalsService {
             embeddingDisposition = embeddingPrep.disposition;
           }
           if (supersedeRow) {
-            await this.archiveMemory(tx, supersedeRow);
+            await this.archiveMemory(tx, supersedeRow, actor);
             await this.writeRevision(tx, {
               memoryId: supersedeRow.id,
               action: 'superseded_by',
@@ -326,10 +326,28 @@ export class ProposalsService {
             await this.applyEmbeddings(tx, created.id, embeddingPrep, true);
             embeddingDisposition = embeddingPrep.disposition;
           }
+
+          // Repin krawędzi scalanych pamięci NA C — MUSI być odczytane PRZED pętlą `archiveMemory`
+          // niżej, bo `archiveMemory` kasuje (i audytuje jako `relation_removed`) wszystkie krawędzie
+          // dotykające archiwizowanego wiersza. Bez tego snapshotu C dziedziczyłaby zero krawędzi,
+          // mimo że A/B je miały (code review finding "merge niszczy graf", roadmap v1.2).
+          const edgesToRepin: MemoryRelationRow[] =
+            affectedIds.length > 0
+              ? await tx
+                  .select()
+                  .from(memoryRelations)
+                  .where(
+                    or(
+                      inArray(memoryRelations.fromMemoryId, affectedIds),
+                      inArray(memoryRelations.toMemoryId, affectedIds),
+                    ),
+                  )
+              : [];
+
           for (const archivedId of affectedIds) {
             const row = byId.get(archivedId);
             if (!row) continue; // niemożliwe po assertNotStale — strażnik dla typechecka
-            await this.archiveMemory(tx, row);
+            await this.archiveMemory(tx, row, actor);
             await this.writeRevision(tx, {
               memoryId: row.id,
               action: 'superseded_by',
@@ -339,6 +357,15 @@ export class ProposalsService {
             });
             archivedIds.push(row.id);
           }
+
+          await this.repinRelationsToSurvivor(
+            tx,
+            edgesToRepin,
+            new Set(affectedIds),
+            created.id,
+            propRow.projectId,
+            actor,
+          );
           break;
         }
         case 'delete': {
@@ -349,7 +376,7 @@ export class ProposalsService {
               deletePayload.memoryId,
             ]);
           }
-          await this.archiveMemory(tx, target);
+          await this.archiveMemory(tx, target, actor);
           await this.writeRevision(tx, {
             memoryId: target.id,
             action: 'archive',
@@ -646,20 +673,120 @@ export class ProposalsService {
     }
   }
 
-  /** Archiwizacja miękka (§1.3 planu — nigdy hard-delete, to osobne CLI purge): bump wersji +
+  /**
+   * Merge repina krawędzie scalanych pamięci (A, B, …) NA nowo powstałą C (code review finding
+   * "merge niszczy graf", roadmap v1.2) — wołane PO pętli `archiveMemory` w `case 'merge'`, ale na
+   * snapshocie krawędzi odczytanym PRZED nią (`archiveMemory` je już skasowała + zaudytowała jako
+   * `relation_removed`, patrz komentarz tamże). Zasady:
+   * - `X → A` staje się `X → C`, `A → X` staje się `C → X` (kierunek zachowany, `type`/`source`
+   *   przepisane z krawędzi źródłowej).
+   * - Krawędź WEWNĄTRZ zbioru scalanego (oba końce w `archivedIds`, np. `A → B`) jest POMIJANA —
+   *   po przepięciu byłaby self-loopem `C → C`, co łamie `CHECK memory_relations_no_self_loop`
+   *   (§db/schema/memory-relations.ts). Ta krawędź i tak zniknęła (audytowana jako `relation_removed`
+   *   przez `archiveMemory`), tu po prostu nie ma jej odpowiednika na C.
+   * - `onConflictDoNothing` na `UNIQUE(from,to,type)` — dwie krawędzie tego samego typu do tego
+   *   samego targetu (np. `A→X` i `B→X`) kolapsują się do jednej `C→X`, tak samo jak w
+   *   `materializeRelations` wyżej.
+   * `via: 'merge'` w audycie — odróżnia przepięcie przy scaleniu od nowej krawędzi agenta
+   * (`materializeRelations`, `via: 'agent'`) albo ręcznej z dashboardu (`via: 'human'`).
+   */
+  private async repinRelationsToSurvivor(
+    tx: Tx,
+    edges: MemoryRelationRow[],
+    archivedIds: Set<string>,
+    survivorId: string,
+    projectId: string | null,
+    actor: string,
+  ): Promise<void> {
+    if (edges.length === 0 || !projectId) return;
+
+    for (const edge of edges) {
+      const fromArchived = archivedIds.has(edge.fromMemoryId);
+      const toArchived = archivedIds.has(edge.toMemoryId);
+      if (fromArchived && toArchived) continue; // wewnątrz zbioru scalanego -> pomiń (self-loop guard)
+
+      const newFrom = fromArchived ? survivorId : edge.fromMemoryId;
+      const newTo = toArchived ? survivorId : edge.toMemoryId;
+
+      const [inserted] = await tx
+        .insert(memoryRelations)
+        .values({
+          id: generateId(ID_PREFIX.relation),
+          fromMemoryId: newFrom,
+          toMemoryId: newTo,
+          type: edge.type,
+          projectId,
+          source: edge.source,
+        })
+        .onConflictDoNothing()
+        .returning({ id: memoryRelations.id });
+
+      if (inserted) {
+        await this.audit.log(
+          {
+            eventType: 'relation_created',
+            actor,
+            affectedIds: [newFrom, newTo],
+            metadata: {
+              relationId: inserted.id,
+              type: edge.type,
+              fromMemoryId: newFrom,
+              toMemoryId: newTo,
+              via: 'merge',
+            },
+          },
+          tx,
+        );
+      }
+    }
+  }
+
+  /**
+   * Archiwizacja miękka (§1.3 planu — nigdy hard-delete, to osobne CLI purge): bump wersji +
    * usunięcie authoritative embeddingów (NFR-6, archived nie bierze udziału w search) + usunięcie
-   * krawędzi grafu (roadmap v1.2) — archived memory nie powinna dalej boostować/być boostowana
-   * (mirror embeddings, ON DELETE CASCADE na `memory_relations` jest tylko belt-and-suspenders dla
-   * hard-delete, którego v1 nie robi — status='archived' NIE usuwa wiersza `memories`). */
-  private async archiveMemory(tx: Tx, row: MemoryRow): Promise<void> {
+   * krawędzi grafu (roadmap v1.2), audytowane per-krawędź jako `relation_removed` (code review
+   * finding "kaskada bez audytu" — bez tego krawędzie znikały bez śladu w append-only audycie).
+   *
+   * UWAGA na uzasadnienie: to NIE jest ochrona przed graph boostem ("archived memory nie powinna
+   * dalej boostować/być boostowana" — poprzednie, mylące uzasadnienie). Boost widzi WYŁĄCZNIE
+   * `fusedIds`, czyli kandydatów z `search()` (`memory.service.ts`), a oba ramiona (`ftsArm`,
+   * `findAnnNeighbors`/`vectorArm`) filtrują `status='approved'` — zarchiwizowana pamięć nigdy nie
+   * jest kandydatem, więc boost i tak by nie strzelił. Prawdziwy powód: krawędź do pamięci wyjętej
+   * z grafu projektu jest martwą daną — `listRelations` w dashboardzie i tak by ją pokazywał jako
+   * relację do martwego wiersza. Usunięcie jest teraz audytowane, więc utrata jest widoczna w
+   * historii, zamiast znikać po cichu (mirror embeddings; `ON DELETE CASCADE` na
+   * `memory_relations` jest tylko belt-and-suspenders dla hard-delete, którego v1 nie robi —
+   * status='archived' NIE usuwa wiersza `memories`).
+   */
+  private async archiveMemory(tx: Tx, row: MemoryRow, actor: string): Promise<void> {
     await tx
       .update(memories)
       .set({ status: 'archived', version: sql`${memories.version} + 1`, updatedAt: new Date() })
       .where(eq(memories.id, row.id));
     await tx.delete(embeddings).where(eq(embeddings.memoryId, row.id));
-    await tx
+    const deletedRelations = await tx
       .delete(memoryRelations)
-      .where(or(eq(memoryRelations.fromMemoryId, row.id), eq(memoryRelations.toMemoryId, row.id)));
+      .where(or(eq(memoryRelations.fromMemoryId, row.id), eq(memoryRelations.toMemoryId, row.id)))
+      .returning();
+    for (const rel of deletedRelations) {
+      await this.audit.log(
+        {
+          eventType: 'relation_removed',
+          actor,
+          affectedIds: [rel.fromMemoryId, rel.toMemoryId],
+          metadata: {
+            relationId: rel.id,
+            type: rel.type,
+            fromMemoryId: rel.fromMemoryId,
+            toMemoryId: rel.toMemoryId,
+            // Kaskada z archiwizacji (case 'merge'/'delete'/supersedes), NIE ręczne usunięcie z
+            // dashboardu (`MemoryAdminService.removeRelation`, `via: 'human'`) — rozróżnialne w audycie.
+            via: 'archive-cascade',
+          },
+        },
+        tx,
+      );
+    }
   }
 
   private async writeRevision(

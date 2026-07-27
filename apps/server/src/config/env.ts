@@ -77,8 +77,11 @@ export const envSchema = z
     // (nigdy nie wstrzykuje pamięci spoza sfuzjowanego zbioru, patrz `memory/graph-boost.ts`),
     // binarny, multiplikatywny: `effectiveScore *= (1 + GRAPH_BOOST_WEIGHT)` gdy oba końce
     // krawędzi są w sfuzjowanym zbiorze. `0` wyłącza boost I pomija dodatkowe zapytanie o krawędzie
-    // (perf — brak wpływu na hot-path search, gdy funkcja nieużywana).
-    GRAPH_BOOST_WEIGHT: z.coerce.number().nonnegative().default(0.1),
+    // (perf — brak wpływu na hot-path search, gdy funkcja nieużywana). Sufit `.max(1)`: to ma być
+    // "boost" (drugorzędna korekta rankingu), nie "override" — literówka w configu (np. `=10`) nie
+    // może sprawić, że JEDNA krawędź całkowicie zdominuje wynik. Przy suficie=1 najgorszy przypadek
+    // to podwojenie score'a (`*(1+1)`), nigdy więcej.
+    GRAPH_BOOST_WEIGHT: z.coerce.number().nonnegative().max(1).default(0.1),
 
     // Limity wejścia (FR-V1)
     BODY_MAX_FACT: z.coerce.number().int().positive().default(8192),

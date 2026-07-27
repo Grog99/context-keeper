@@ -36,6 +36,11 @@ const EXCERPT_MAX_LEN = 280;
 // Attach-on-save (roadmap v1.2, "memory-relations + 1-hop graph boost") — twardy cap na liczbę
 // krawędzi w JEDNYM save_memory (symetryczny z TAGS_MAX-style limitami, ale nie env-configurable:
 // to bezpiecznik przeciw nadużyciu proposala jako hurtowego importu grafu, nie knob do dostrajania).
+// UWAGA: dla ścieżki MCP (`save_memory`) to defense-in-depth, NIE pierwsza linia — zod `.max(16)`
+// na `relations` w `mcp-server.factory.ts` waliduje wejście PRZED wejściem w handler, więc 17.
+// krawędź jest odrzucana tam, generycznym błędem schematu (nie tym czytelnym `validation_error`
+// poniżej). Ten komunikat jest osiągalny wyłącznie przy bezpośrednim wywołaniu serwisu (np. testy,
+// przyszły caller inny niż MCP) — nie polerować go jako "brakującej" ścieżki dla klienta MCP.
 const MAX_RELATIONS_PER_SAVE = 16;
 
 /**
