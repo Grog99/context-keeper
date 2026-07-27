@@ -2,133 +2,101 @@
 
 Prosty przegląd: co robimy po kolei i gdzie jesteśmy. Szczegóły → [`prd.md`](prd.md), [`tech-stack.md`](tech-stack.md), [`design-system.md`](design-system.md).
 
-**Aktualizacja:** 2026-07-24 · **Etap:** v1.1 domknięte (walidacja dogfoodingu) → wchodzimy w **v1.2** (więcej możliwości agenta + poprawki UI).
+**Aktualizacja:** 2026-07-27 · **Etap:** v1.2 domknięte (możliwości agenta + UI) → wchodzimy w **v1.3** (dostęp i UI).
 
 Legenda: ✅ zrobione · 🔨 w toku · ⬜ przed nami
 
-> Poprzedni snapshot (stan „v1 domknięte", przed reconcile) zarchiwizowany w
-> [`old/roadmap-2026-07-23-v1-complete.md`](old/roadmap-2026-07-23-v1-complete.md).
+> Pełne opisy zakresu faz 0 → v1.2 zarchiwizowane w
+> [`archive/roadmap-2026-07-27-v1.2-complete.md`](archive/roadmap-2026-07-27-v1.2-complete.md).
+> Wcześniejszy snapshot (v1 domknięte): [`archive/roadmap-2026-07-23-v1-complete.md`](archive/roadmap-2026-07-23-v1-complete.md).
 
 ---
 
-## Faza 0 — Planowanie i design ✅
+## Zrobione ✅
 
-- [x] Research prior-art (`old/research-prior-art-pamiec-agentow.md`)
-- [x] Plan pamięci agentów MCP (`old/plan-pamiec-agentow-mcp.md`)
-- [x] PRD v1.2 (`prd.md`)
-- [x] Tech-stack i architektura v1.2 (`tech-stack.md`)
-- [x] Design system + klikalna makieta (`design-system.md`, `design-system-mockup.html`)
+**Faza 0 — Planowanie i design** — research prior-art, plan pamięci agentów, PRD, tech-stack, design system + klikalna makieta.
 
-## v1 — Rdzeń ✅ (ukończone)
+### v1 — Rdzeń
 
-**1. Fundament** ✅
-Host NestJS (adapter Express). Postgres + pgvector, Docker Compose, model danych (schema), projekty + bearer tokeny (`ck_`, hash). Reverse proxy opcjonalny (profil `edge-proxy` bundled Caddy / bring-your-own-proxy).
+1. **Fundament** — NestJS na Express, Postgres + pgvector w Docker Compose, model danych, projekty z bearer tokenami `ck_`, opcjonalny reverse proxy.
+2. **MCP server** — `search_memory` / `get_memory` / `save_memory` na bezstanowym Streamable HTTP, z auth per token, scope, rate-limitingiem i skanerem sekretów.
+3. **Retrieval** — hybryda wektor + full-text z fuzją RRF i dwufazowym pobraniem, pluggable provider embeddingów z presetami deploy-time i fail-open do FTS.
+4. **Kolejka akceptacji** — tabela `proposals` z transakcyjnym zatwierdzaniem, optimistic concurrency, edit-before-approve i supersession.
+5. **Dashboard** — kolejka, przeglądarka pamięci, projekty+tokeny i audyt, z przełącznikiem kontekstu i human-create (fakty, dokumenty, import `.md`).
+6. **Nocny job** — proposer (nie executor) dedup / merge / prune wrzucający do tej samej kolejki, pod advisory lockiem i idempotentny.
+7. **Utwardzenie** — audit log, `/health` + metryki, backup `pg_dump` z offsite i audit eventem, testy rdzenia, hard-purge jako CLI.
+8. **Onboarding / instalator** — `install.sh` generujący `.env` i sekrety z wyborem profili, plus ścieżka PaaS na Coolify z runbookiem.
 
-**2. MCP server** ✅
-3 narzędzia: `search_memory` / `get_memory` / `save_memory`. Auth per token → scope, taksonomia błędów, rate-limiting, skaner sekretów przy save. Transport Streamable HTTP bezstanowy; kontrakt narzędzi w `mcp-tool-contract.md`.
+**Dogfooding** — repo używa własnej wdrożonej instancji jako pamięci projektu (MCP `context-keeper`, kontrakt w [`AGENTS.md`](../AGENTS.md)).
 
-**3. Retrieval** ✅
-Hybrid: wektor + full-text, fuzja RRF, dwufazowy (nagłówki → body). Abstrakcja providera embeddingów + presety deploy-time (`multilingual`/`english`/`api`, CLI `reembed`) + degradacja fail-open (FTS-only).
+### v1.1 — Walidacja dogfoodingu
 
-**4. Kolejka akceptacji** ✅
-Tabela `proposals`, transakcyjne zatwierdzanie, optimistic concurrency (stale = blokada), edit-before-approve, supersession.
+- **Seed pamięci grounding-dokumentami** — wdrożona instancja zaseedowana stabilnymi dokumentami przez CLI `seed-memory`, żeby `search_memory` miał co zwracać.
+- **Instrumentacja użycia pamięci** — ekran „Pomiary" (`/pomiary`) na tabeli `search_events`: liczba wyszukań, rate zerowych wyników, stosunek accept/reject/edit.
+- **Dashboard: ręczny trigger nocnego jobu + hard-purge** — ekran „Operacje" (`/operacje`) plus purge per-pamięć z podglądem skali i wymaganym powodem.
+- **Review bezpieczeństwa publicznego MCP** — pre-auth throttle per-IP na `/mcp`, `helmet` + CSP, bind portów compose do `127.0.0.1`, czysty audit zależności.
 
-**5. Dashboard** ✅
-4 ekrany (kolejka / przeglądarka pamięci / projekty+tokeny / audyt) + przełącznik kontekstu + human-create (fakty, dokumenty, import `.md`). Wg design systemu.
+### v1.2 — Więcej możliwości agenta + poprawki UI
 
-**6. Nocny job** ✅
-Proposer (nie executor): dedup / merge / prune → do tej samej kolejki. Advisory lock, idempotentny re-scan. Ręczny trigger jako CLI `run-nightly`.
-
-**7. Utwardzenie** ✅
-Audit log, observability (`/health`, metryki — w tym latencja embeddingu, FR-D7/NFR-4), backup (`pg_dump` + offsite, audit event `backup_completed` przez CLI `record-backup`), testy rdzenia (transakcja akceptacji, scope/IDOR, skaner sekretów). Hard-purge jako CLI `purge`.
-
-**8. Onboarding / instalator** ✅
-`install.sh` — generacja `.env` + sekrety + wybór profili (preset embeddingów, tryb proxy); uruchomienie stacku opcjonalne. Kanon configu = `.env.example`.
-- Ścieżka PaaS (Coolify): build z repo przez `deploy/docker-compose.coolify.yml` (auto-migracja
-  in-process), runbook [`docs/deploy-coolify.md`](../docs/deploy-coolify.md). Coolify Scheduled Tasks
-  zastępują host-cron dla nocnego joba i `infra/backup.sh`.
-
-**Dogfooding** ✅ — repo używa własnej wdrożonej instancji jako pamięci projektu (MCP `context-keeper`, config w `.mcp.json`, kontrakt w `AGENTS.md`).
+- **`kind=event` (episodic)** — trzeci rodzaj wpisu z backdatable `event_time`, age-decay w rankingu, ekran „Oś czasu" i per-projektowy toggle widoczności w domyślnym search.
+- **memory-relations + 1-hop graph boost** — typowane krawędzie (`caused_by`/`follows`/`context_for`) tworzone przez agenta i człowieka, z re-rank-only boostem na sąsiadach.
+- **Edycja `event_time` po utworzeniu** — korekta backdate’u z formularza edycji w przeglądarce pamięci.
+- **Agent tworzy `kind=document`** — `save_memory` przyjmuje opcjonalny `kind` (`fact` | `document`) przy tych samych guardach; `event` pozostaje human-only.
+- **Edycja pamięci przez agenta** — `save_memory` z `supersedes: id` proponuje in-place korektę własnej pamięci jako proposal `type='update'` zamiast luźnego duplikatu.
+- **Snippet do wklejenia w cudzym projekcie** — ekran „Onboarding" z gotowymi blokami do `AGENTS.md` / `CLAUDE.md` i `.mcp.json`, z URL-em MCP liczonym server-side.
+- **Poprawki UI** — dopieszczenie dashboardu wg design systemu.
 
 ---
 
-## v1.1 — Walidacja dogfoodingu ✅
+## v1.3 — Dostęp i UI 🔨
 
-**Cel fazy:** sprawić, by eksperyment „czy **sam MCP + kontrakt narzędzi + `AGENTS.md`** wystarczą, żeby
-agent proaktywnie sięgał do pamięci" był **mierzalny** i **miał realną treść do znalezienia**. Dopiero
-wynik tej fazy decyduje, czy plugin Claude Code jest potrzebny (patrz backlog).
+**Cel fazy:** domknąć zarządzanie dostępem (wiele agentów per projekt bez downtime przy rotacji),
+uczytelnić dashboard tam, gdzie dogfooding pokazał realne tarcie, oraz dołożyć agentowi ostatni brakujący
+rodzaj wpisu — wraz z fixem deduplikacji, który ten trzeci rodzaj czyni pilnym.
 
-- **Seed pamięci grounding-dokumentami** ✅ — zaseeduj wdrożoną instancję stabilnymi dokumentami
-  (`design-system.md`, `mcp-tool-contract.md`, kluczowe decyzje jako `kind=document`) przez istniejące
-  CLI `seed-memory`. Bez treści `search_memory` zwraca zero i eksperyment nie ma czego znaleźć.
-- **Instrumentacja użycia pamięci** ✅ — ekran „Pomiary" (`/pomiary`): liczba `search_memory`/projekt
-  w czasie, searche z **0 wyników** (rate), stosunek accept/reject/edit propozycji. Nowa tabela
-  `search_events` (zapis fail-open w `search()`), endpoint `GET /api/metrics/usage`, wykresy recharts.
-  Warstwa, na której podejmiemy decyzję o pluginie na danych, nie na oko.
-- **Dashboard: ręczny trigger nocnego jobu + hard-purge** ✅ — ekran „Operacje" (`/operacje`) z ręcznym
-  triggerem nocnego joba (`POST /api/nightly/run`, wynik jako toast z licznikami) + hard-purge jako akcja
-  per-pamięć w przeglądarce (`GET :id/purge-preview` + `POST :id/purge`, AlertDialog z podglądem skali
-  i wymaganym powodem). Cienkie wrappery nad istniejącymi serwisami CLI `run-nightly`/`purge` — te same
-  gwarancje, guardy kontroler-scoped, `PurgeError` mapowany w filtrze.
-- **Review bezpieczeństwa publicznego MCP** ✅ — pass utwardzający po token-gated endpoincie. Auth,
-  scope/IDOR i redakcja tokenu potwierdzone bez dziur; wdrożone utwardzenia: throttle **pre-auth
-  per-IP** na `/mcp` przed `BearerGuard` (`RATE_LIMIT_MCP_IP_PER_MIN`), `helmet` + CSP + `x-powered-by`
-  off, eviction bucketów in-memory, override `@hono/node-server` (audit czysty), bind portów compose do
-  `127.0.0.1` (DB/dashboard poza publicznym interfejsem), `limit_req` w przykładzie nginx. Świadomie
-  odłożone: rewokacja sesji, limiter na Redis (v2).
+### Dostęp
 
-## v1.2 — Więcej możliwości agenta + poprawki UI 🔨
+- **Wiele tokenów per projekt + graceful rotation** ⬜ — atrybucja per-agent (który token zapisał /
+  wyszukał) i rotacja bez downtime: nowy token wydany obok starego, stary wygasa po okresie karencji.
 
-**Cel fazy:** poszerzyć, co agent może zrobić z pamięcią (nowy rodzaj wpisu, tworzenie i edycja),
-obniżyć próg wejścia dla nowych projektów (gotowy snippet) i dopieścić dashboard. Świadomie
-_przed_ warunkowym pluginem — najpierw wyciskamy maksimum z samego MCP + kontraktu.
+### Agent / MCP
 
-- **`kind=event` (episodic)** ✅ — trzeci rodzaj wpisu obok `fact`/`document`, z osobnym backdatable
-  `event_time`; tworzony wyłącznie przez człowieka (dashboard), `save_memory` agenta go nie eksponuje.
-  Age-decay w rankingu retrievalu (wykładniczy half-life, `EVENT_DECAY_HALFLIFE_DAYS`, post-RRF,
-  zero wpływu na fact/document). Ekran „Oś czasu" (`/os-czasu`), grupowany wg dnia. Per-projektowy
-  toggle `include_events_in_default_search` (dialog szczegółów projektu, audytowany jako
-  `project_settings_changed`) — decyduje, czy `event` wchodzi do domyślnego `kind` w `search_memory`
-  gdy agent go nie poda jawnie (`kind=event` jawny działa zawsze).
-  - **memory-relations + 1-hop graph boost** ✅ — tabela krawędzi `memory_relations` (surogatowy
-    `rel_…` PK, `UNIQUE(from,to,type)`, ściśle intra-project, `kind=event` jako endpoint DOZWOLONY —
-    ortogonalna do `event_time`). Krawędzie tworzy **zarówno agent** (`save_memory` opcjonalny
-    `relations: [{type, targetId}]`, ATTACH-ON-SAVE — jedzie na TYM SAMYM human-gated proposalu
-    create/update, materializacja dopiero w `ProposalsService.approve`) **jak i człowiek** (dashboard,
-    zakładka "Relacje" w przeglądarce pamięci). Relacje **typowane**, dokładnie 3 wartości:
-    `caused_by`/`follows`/`context_for`, nie pojedyncza nietypowana krawędź `relates_to`. Graph boost
-    (`GRAPH_BOOST_WEIGHT`, domyślnie 0.1) jest RE-RANK ONLY — binarny, multiplikatywny `*(1+w)` na
-    sąsiadach już obecnych w sfuzjowanym zbiorze `search_memory`, komponuje się z age-decay
-    (`rrfScore * decayFactor * graphBoostFactor`). Kontrakt `save_memory` (warstwa 1 i 2 — narzędzie
-    MCP + snippet onboardingu) i `AGENTS.md` zaktualizowane.
-  - **Edycja `event_time` po utworzeniu** ⬜ — świadomie odłożone w v1: formularz edycji w
-    przeglądarce pamięci nie eksponuje `event_time` (ustawiany tylko raz, przy human-create). Mały
-    follow-up, gdy zajdzie potrzeba korekty backdate po fakcie.
-- **Agent tworzy `kind=document`** ✅ — `save_memory` przyjmuje opcjonalny `kind` (`fact` domyślnie |
-  `document`), te same guardy (human-gate, skaner sekretów, limity rozmiaru per-kind). `kind=event`
-  pozostaje wykluczony (human-only). Deduplikacja świadomie zostaje kind-blind — patrz
-  [`backlog.md`](backlog.md#retrieval-i-higiena-pamięci). Agent-proposed edycje istniejących pamięci
-  (w tym dokumentów) to osobny punkt niżej ("Edycja pamięci przez agenta").
-- **Edycja pamięci przez agenta** ✅ — `save_memory` przyjmuje opcjonalny `supersedes: id`: agent proponuje
-  korektę istniejącego `fact`/`document` WŁASNEGO projektu zamiast luźnego duplikatu. Zaimplementowane jako
-  proposal `type='update'`, `origin='agent'` (in-place edit, ten sam id, version+1) — reużywa istniejący,
-  dotąd producent-less update approve-branch (`ProposalsService.approve`) i istniejący dashboard update
-  rendering; zero zmian w `proposals/*`/dashboardzie. `header`+`body` zawsze niosą pełną poprawioną treść
-  (replacement-only, brak content-free "retire"); `event`/`global`/inny projekt/nieznane id → błąd
-  (`not_found` dla scope/IDOR, `validation_error` dla event/global/kind-mismatch); supersede jest zwolniony
-  z advisory-dedup (celowo — korekta może być bliźniaczo podobna do targetu).
-- **Snippet do wklejenia w cudzym projekcie** ✅ — ekran „Onboarding” w dashboardzie: gotowe bloki do
-  `AGENTS.md` / `CLAUDE.md` (proaktywność + forma połączenia `Bearer ${VAR}`) i `.mcp.json`, które
-  użytkownik kopiuje do własnego repo. URL MCP wyliczany server-side (`PUBLIC_MCP_URL` → fallback
-  `ACME_DOMAIN` → placeholder). „Warstwa 2" kontraktu narzędzi (`mcp-tool-contract.md` §Warstwy 2 i 3) —
-  domknięcie onboardingu dla projektów spoza tego repo.
-- **Poprawki UI** ✅ — dopieszczenie dashboardu (konkretna lista do doprecyzowania).
-- **Aktualizacja snippetu** ✅ — dodanie instrukcji dot. typów dokumentów (`fact`/`document`),
-  `supersedes` oraz dedup snippetu ↔ opisów narzędzi MCP (Warstwa 1 zostaje load-bearing, Warstwa 2
-  tylko „kiedy i co").
+- **`kind=event` przez agenta (MCP)** ⬜ — zniesienie ograniczenia human-only: `save_memory` przyjmuje
+  `kind: "event"` wraz z `event_time`. Te same guardy co dla `fact`/`document` (human-gate, skaner
+  sekretów, limity rozmiaru). Do rozstrzygnięcia w projektowaniu: czy `event_time` jest wymagane, czy
+  domyślnie „teraz", i jak szeroki backdate wolno zaproponować agentowi.
+- **Dedup kind-aware** ⬜ — **fix znanego buga, nie feature.** `computeContentHash`/`already_exists`
+  w `MemoryService.save()` dziś ignorują `kind`: identyczny `header`+`body` zapisany jako różne `kind`
+  (np. `fact` i `document`) koliduje jako duplikat i **drugi zapis ginie po cichu**
+  (`duplicate_pending`/`already_exists` wskazuje na pamięć niewłaściwego rodzaju). Cicha utrata zapisu
+  jest sprzeczna z obietnicą produktu. Zakres: `kind` wchodzi do hasha + migracja przeliczająca istniejące
+  hashe. Świadomie odłożone przy „Agent tworzy `kind=document`" (v1.2), domykane tutaj — tym pilniej,
+  że `kind=event` przez agenta dokłada trzeci rodzaj do tej samej kolizji.
+
+### UI
+
+- **Widok diff dla `supersedes`** ⬜ — dziś ciężko zobaczyć, co się faktycznie zmieniło; docelowo diff
+  w stylu gita zamiast dwóch bloków tekstu obok siebie.
+- **Czytelność przeglądarki pamięci** ⬜ — wszystko w odcieniach szarości słabo się skanuje; widok rekordu
+  ma zajmować całą dostępną powierzchnię zamiast połowy, ze scrollem w treści i przyklejonymi na dole
+  akcjami (Edytuj / Archiwizuj / …), żeby zawsze były widoczne.
+- **Wydzielić zakładkę Projekty** ⬜ — dotyczy ustawień całego projektu, nie wybranej pamięci, więc
+  powinna być wizualnie oddzielona od reszty nawigacji.
+- **Przenieść wybór projektu do sidebara** ⬜ — nad nawigację, pod logo; dziś nie widać wystarczająco
+  wyraźnie, w którym projekcie się jest.
+- **Bulk approve/reject w kolejce** ⬜ — zaznaczanie wielu propozycji i jedna decyzja na cały zaznaczony
+  zestaw, zamiast klikania pozycja po pozycji. Czysto UI: każda decyzja nadal przechodzi tę samą
+  transakcję i ten sam audit trail, human-gate zostaje nietknięty. Wydzielone z „anti-fatigue kolejki"
+  w backlogu — druga połowa tamtego punktu (auto-allow po N spójnych decyzjach) tam zostaje, bo
+  rozmiękcza human-gate.
 
 ## Backlog ⬜
 
-Rzeczy świadomie odłożone poza v1.2 → [`backlog.md`](backlog.md): plugin Claude Code (warunkowy), tuning
-retrievalu, `conflicts_report`, Memory Worth, anti-fatigue kolejki, per-user auth, wiele tokenów + rotacja,
-OAuth 2.1 + PKCE, skalowanie poziome / interop.
+Rzeczy świadomie odłożone poza v1.3 → [`backlog.md`](backlog.md): plugin Claude Code (warunkowy), OAuth 2.1
++ PKCE, migracja na MCP SDK v2, tuning retrievalu, `conflicts_report`, auto-allow w kolejce, per-user auth,
+pamięć usera, rewokacja sesji, lepszy prune w nocnym jobie, skalowanie poziome / interop.
+
+**Wycięte** (nie „odłożone"): Memory Worth — prune po współwystąpieniu z sukcesem/porażką. Sygnał outcome
+jest z natury zaszumiony (sesja się udała ≠ ta pamięć pomogła), a koszt to nowe narzędzie MCP wymagające
+zdyscyplinowanego użycia przez agenta. Score w rankingu jest pluggable, więc temat wraca, jeśli pojawi się
+realny sygnał — na razie nie zajmuje miejsca w backlogu.
