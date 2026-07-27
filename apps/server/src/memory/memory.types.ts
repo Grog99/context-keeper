@@ -1,8 +1,16 @@
-import type { MemoryKind, MemoryScope } from '../db/schema/enums';
+import type { MemoryKind, MemoryScope, RelationType } from '../db/schema/enums';
 
 /** `kind` dopuszczalny w `save_memory` (agent) — `event` jest human-only, więc wykluczony na
  * poziomie typu TS (obok zod enum w `mcp-server.factory.ts`, defense in depth). */
 export type SaveMemoryKind = Extract<MemoryKind, 'fact' | 'document'>;
+
+/** Jeden wpis `relations[]` w `save_memory` (roadmap v1.2, "memory-relations + 1-hop graph boost",
+ * ATTACH-ON-SAVE — locked decision planu). Krawędź kierunkowa OD zapisywanej/poprawianej pamięci DO
+ * `targetId` — patrz `MemoryService.resolveRelations`. */
+export interface SaveRelationInput {
+  type: RelationType;
+  targetId: string;
+}
 
 export interface SaveMemoryInput {
   header: string;
@@ -16,6 +24,10 @@ export interface SaveMemoryInput {
    * `type='update'`, `origin='agent'` (reużywa istniejący update approve-branch), patrz
    * `MemoryService.saveAsSupersede`. `event`/`global`/inny projekt/nieznane id → błąd. */
   supersedes?: string;
+  /** Opcjonalne — typowane krawędzie OD tej pamięci DO istniejących pamięci WŁASNEGO projektu
+   * (max `MAX_RELATIONS_PER_SAVE`). Rider na TYM SAMYM human-gated proposalu (create/update) —
+   * materializowane dopiero w `ProposalsService.approve()`, patrz `MemoryService.resolveRelations`. */
+  relations?: SaveRelationInput[];
 }
 
 export type SaveStatus = 'pending' | 'duplicate_pending' | 'already_exists';

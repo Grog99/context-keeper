@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { resolve } from 'node:path';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { eq } from 'drizzle-orm';
+import { eq, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
@@ -13,7 +13,16 @@ import { AppConfigService } from '../src/config/config.service';
 import { envSchema } from '../src/config/env';
 import type { Database } from '../src/db/db.tokens';
 import * as schema from '../src/db/schema';
-import { auditLog, EMBEDDING_DIM, embeddings, memories, revisions, type MemoryRow, type NewMemoryRow } from '../src/db/schema';
+import {
+  auditLog,
+  EMBEDDING_DIM,
+  embeddings,
+  memories,
+  memoryRelations,
+  revisions,
+  type MemoryRow,
+  type NewMemoryRow,
+} from '../src/db/schema';
 import type { EmbeddingProvider } from '../src/embeddings/embedding-provider';
 import { EmbeddingService } from '../src/embeddings/embedding.service';
 import { MemoryAdminService } from '../src/memory/memory-admin.service';
@@ -437,6 +446,196 @@ describe('MemoryAdminService (integration, testcontainers) — przeglądarka pam
       await admin.archiveMemory(seeded.id);
       await expect(admin.archiveMemory(seeded.id)).rejects.toMatchObject({ code: 'validation_error' });
     });
+
+    it('archiwizacja usuwa krawędzie grafu dotykające pamięci — WYCHODZĄCE i PRZYCHODZĄCE — i audytuje relation_removed dla obu (roadmap v1.2, mirror embeddingów)', async () => {
+      const seeded = await seedApprovedMemory({
+        header: 'Do archiwizacji z relacjami',
+        body: 'Tresc.',
+        projectId: projectA.projectId,
+      });
+      const outNeighbor = await seedApprovedMemory({
+        header: 'Sasiad wychodzacy archive',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+      const inNeighbor = await seedApprovedMemory({
+        header: 'Sasiad przychodzacy archive',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+      const { admin } = buildAdmin(new StubEmbeddingProvider('archive-relations-model'));
+
+      const outRelation = await admin.createRelation({ fromId: seeded.id, toId: outNeighbor.id, type: 'follows' });
+      const inRelation = await admin.createRelation({ fromId: inNeighbor.id, toId: seeded.id, type: 'caused_by' });
+
+      await admin.archiveMemory(seeded.id);
+
+      const rows = await db
+        .select()
+        .from(memoryRelations)
+        .where(or(eq(memoryRelations.fromMemoryId, seeded.id), eq(memoryRelations.toMemoryId, seeded.id)));
+      expect(rows).toHaveLength(0);
+
+      // Kaskada z archiveMemory audytuje KAŻDĄ usuniętą krawędź jako relation_removed, via='archive'
+      // — odróżnione od ręcznego `removeRelation` (via='human', patrz test niżej).
+      const removedAudit = await db.select().from(auditLog).where(eq(auditLog.eventType, 'relation_removed'));
+      const removedOut = removedAudit.find(
+        (r) => (r.metadata as { relationId?: string }).relationId === outRelation.id,
+      );
+      expect(removedOut).toBeDefined();
+      expect([...removedOut!.affectedIds].sort()).toEqual([seeded.id, outNeighbor.id].sort());
+      expect((removedOut!.metadata as { via?: string }).via).toBe('archive');
+      const removedIn = removedAudit.find(
+        (r) => (r.metadata as { relationId?: string }).relationId === inRelation.id,
+      );
+      expect(removedIn).toBeDefined();
+      expect([...removedIn!.affectedIds].sort()).toEqual([seeded.id, inNeighbor.id].sort());
+      expect((removedIn!.metadata as { via?: string }).via).toBe('archive');
+
+      // Krawędź MIĘDZY DWOMA sąsiadami (nietknięta pamięć) musi przetrwać — archiwizacja usuwa
+      // wyłącznie krawędzie DOTYKAJĄCE archiwizowanej pamięci, nie cały graf projektu.
+      await admin.createRelation({ fromId: outNeighbor.id, toId: inNeighbor.id, type: 'context_for' });
+      const untouched = await db
+        .select()
+        .from(memoryRelations)
+        .where(eq(memoryRelations.fromMemoryId, outNeighbor.id));
+      expect(untouched).toHaveLength(1);
+    });
+  });
+
+  describe('relations — zakładka "Relacje" (roadmap v1.2, "memory-relations + 1-hop graph boost")', () => {
+    it('createRelation happy path: insert source=human, audit relation_created via=human', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('relation-happy-model'));
+      const from = await seedApprovedMemory({ header: 'Relacja from', body: 'T.', projectId: projectA.projectId });
+      const to = await seedApprovedMemory({ header: 'Relacja to', body: 'T.', projectId: projectA.projectId });
+
+      const result = await admin.createRelation({ fromId: from.id, toId: to.id, type: 'follows' });
+      expect(result.id).toMatch(/^rel_/);
+
+      const [row] = await db.select().from(memoryRelations).where(eq(memoryRelations.id, result.id));
+      expect(row.fromMemoryId).toBe(from.id);
+      expect(row.toMemoryId).toBe(to.id);
+      expect(row.type).toBe('follows');
+      expect(row.source).toBe('human');
+      expect(row.projectId).toBe(projectA.projectId);
+
+      const auditRows = await db.select().from(auditLog).where(eq(auditLog.eventType, 'relation_created'));
+      const match = auditRows.find((a) => (a.metadata as { relationId?: string })?.relationId === result.id);
+      expect(match).toBeDefined();
+      expect([...match!.affectedIds].sort()).toEqual([from.id, to.id].sort());
+      expect((match!.metadata as { via?: string }).via).toBe('human');
+    });
+
+    it('reject target scope=global -> validation_error (relacje są ściśle intra-project)', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('relation-global-model'));
+      const from = await seedApprovedMemory({
+        header: 'Relacja from global test',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+      const globalTo = await seedApprovedMemory({ header: 'Relacja to global', body: 'T.', scope: 'global', projectId: null });
+
+      await expect(
+        admin.createRelation({ fromId: from.id, toId: globalTo.id, type: 'follows' }),
+      ).rejects.toMatchObject({ code: 'validation_error' });
+    });
+
+    it('reject cross-project (obie pamięci scope=project, różne projekty) -> validation_error', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('relation-crossproject-model'));
+      const from = await seedApprovedMemory({ header: 'Relacja from cross', body: 'T.', projectId: projectA.projectId });
+      const to = await seedApprovedMemory({ header: 'Relacja to cross', body: 'T.', projectId: projectB.projectId });
+
+      await expect(
+        admin.createRelation({ fromId: from.id, toId: to.id, type: 'follows' }),
+      ).rejects.toMatchObject({ code: 'validation_error' });
+    });
+
+    it('reject self-loop (fromId === toId) -> validation_error', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('relation-selfloop-model'));
+      const m = await seedApprovedMemory({ header: 'Relacja self-loop', body: 'T.', projectId: projectA.projectId });
+
+      await expect(admin.createRelation({ fromId: m.id, toId: m.id, type: 'follows' })).rejects.toMatchObject({
+        code: 'validation_error',
+      });
+    });
+
+    it('reject duplikat (ten sam from/to/type) -> validation_error, oryginalna krawędź nietknięta', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('relation-duplicate-model'));
+      const from = await seedApprovedMemory({ header: 'Relacja from dup', body: 'T.', projectId: projectA.projectId });
+      const to = await seedApprovedMemory({ header: 'Relacja to dup', body: 'T.', projectId: projectA.projectId });
+
+      const first = await admin.createRelation({ fromId: from.id, toId: to.id, type: 'context_for' });
+      await expect(
+        admin.createRelation({ fromId: from.id, toId: to.id, type: 'context_for' }),
+      ).rejects.toMatchObject({ code: 'validation_error' });
+
+      const rows = await db.select().from(memoryRelations).where(eq(memoryRelations.fromMemoryId, from.id));
+      expect(rows).toHaveLength(1);
+      expect(rows[0].id).toBe(first.id);
+    });
+
+    it('createRelation z nieznanym fromId/toId -> not_found', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('relation-notfound-model'));
+      const to = await seedApprovedMemory({ header: 'Relacja to notfound', body: 'T.', projectId: projectA.projectId });
+
+      await expect(
+        admin.createRelation({ fromId: 'mem_doesnotexist3', toId: to.id, type: 'follows' }),
+      ).rejects.toMatchObject({ code: 'not_found' });
+    });
+
+    it('listRelations zwraca OBIE strony (outgoing+incoming) z metadanymi sąsiada', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('relation-list-model'));
+      const center = await seedApprovedMemory({ header: 'Centrum relacji', body: 'T.', projectId: projectA.projectId });
+      const outNeighbor = await seedApprovedMemory({
+        header: 'Sasiad wychodzacy list',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+      const inNeighbor = await seedApprovedMemory({
+        header: 'Sasiad przychodzacy list',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+
+      await admin.createRelation({ fromId: center.id, toId: outNeighbor.id, type: 'caused_by' });
+      await admin.createRelation({ fromId: inNeighbor.id, toId: center.id, type: 'follows' });
+
+      const relations = await admin.listRelations(center.id);
+      expect(relations).toHaveLength(2);
+
+      const outgoing = relations.find((r) => r.direction === 'outgoing');
+      expect(outgoing?.neighbor.id).toBe(outNeighbor.id);
+      expect(outgoing?.neighbor.header).toBe('Sasiad wychodzacy list');
+      expect(outgoing?.type).toBe('caused_by');
+
+      const incoming = relations.find((r) => r.direction === 'incoming');
+      expect(incoming?.neighbor.id).toBe(inNeighbor.id);
+      expect(incoming?.neighbor.header).toBe('Sasiad przychodzacy list');
+      expect(incoming?.type).toBe('follows');
+    });
+
+    it('removeRelation usuwa wiersz i zapisuje audit relation_removed via=human', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('relation-remove-model'));
+      const from = await seedApprovedMemory({ header: 'Relacja from remove', body: 'T.', projectId: projectA.projectId });
+      const to = await seedApprovedMemory({ header: 'Relacja to remove', body: 'T.', projectId: projectA.projectId });
+      const created = await admin.createRelation({ fromId: from.id, toId: to.id, type: 'follows' });
+
+      await admin.removeRelation(created.id);
+
+      const rows = await db.select().from(memoryRelations).where(eq(memoryRelations.id, created.id));
+      expect(rows).toHaveLength(0);
+
+      const auditRows = await db.select().from(auditLog).where(eq(auditLog.eventType, 'relation_removed'));
+      const match = auditRows.find((a) => (a.metadata as { relationId?: string })?.relationId === created.id);
+      expect(match).toBeDefined();
+      expect([...match!.affectedIds].sort()).toEqual([from.id, to.id].sort());
+      expect((match!.metadata as { via?: string }).via).toBe('human');
+    });
+
+    it('removeRelation z nieznanym relationId -> not_found', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('relation-remove-notfound-model'));
+      await expect(admin.removeRelation('rel_doesnotexist9')).rejects.toMatchObject({ code: 'not_found' });
+    });
   });
 
   describe('promoteToGlobal', () => {
@@ -456,6 +655,54 @@ describe('MemoryAdminService (integration, testcontainers) — przeglądarka pam
 
       const auditRows = await db.select().from(auditLog).where(eq(auditLog.eventType, 'promote'));
       expect(auditRows.some((a) => a.affectedIds.includes(seeded.id))).toBe(true);
+    });
+
+    it('promocja usuwa krawędzie dotykające promowanej pamięci (wychodzącą i przychodzącą) + audytuje relation_removed via=promote (roadmap v1.2, code review "promote zostawia martwe krawędzie")', async () => {
+      const seeded = await seedApprovedMemory({
+        header: 'Do promocji z relacjami',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+      const outNeighbor = await seedApprovedMemory({
+        header: 'Sasiad wychodzacy promote',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+      const inNeighbor = await seedApprovedMemory({
+        header: 'Sasiad przychodzacy promote',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+      const { admin } = buildAdmin(new StubEmbeddingProvider('promote-relations-model'));
+
+      const outRelation = await admin.createRelation({ fromId: seeded.id, toId: outNeighbor.id, type: 'follows' });
+      const inRelation = await admin.createRelation({ fromId: inNeighbor.id, toId: seeded.id, type: 'caused_by' });
+
+      await admin.promoteToGlobal(seeded.id);
+
+      const [row] = await db.select().from(memories).where(eq(memories.id, seeded.id));
+      expect(row.scope).toBe('global'); // memory faktycznie promowana mimo krawędzi
+
+      // Krawędzie dotykające promowanej pamięci zniknęły — endpoint global byłby martwymi danymi
+      // dla graph boostu (`fetchInSetEdges` wymaga OBU końców w tym samym per-project zapytaniu).
+      const rows = await db
+        .select()
+        .from(memoryRelations)
+        .where(or(eq(memoryRelations.fromMemoryId, seeded.id), eq(memoryRelations.toMemoryId, seeded.id)));
+      expect(rows).toHaveLength(0);
+
+      const removedAudit = await db.select().from(auditLog).where(eq(auditLog.eventType, 'relation_removed'));
+      const removedOut = removedAudit.find(
+        (r) => (r.metadata as { relationId?: string }).relationId === outRelation.id,
+      );
+      expect(removedOut).toBeDefined();
+      expect([...removedOut!.affectedIds].sort()).toEqual([seeded.id, outNeighbor.id].sort());
+      expect((removedOut!.metadata as { via?: string }).via).toBe('promote');
+      const removedIn = removedAudit.find(
+        (r) => (r.metadata as { relationId?: string }).relationId === inRelation.id,
+      );
+      expect(removedIn).toBeDefined();
+      expect((removedIn!.metadata as { via?: string }).via).toBe('promote');
     });
 
     it('promocja już-global -> validation_error', async () => {

@@ -63,7 +63,7 @@ function PurgeMemoryForm({ onOpenChange, memoryId, memoryHeader }: PurgeMemoryFo
     onSuccess: (result) => {
       toast.success(
         `Wymazano — embeddingi: ${result.embeddingsDeleted}, propozycje: ${result.proposalsRedacted}, ` +
-          `rewizje: ${result.revisionsRedacted}`,
+          `rewizje: ${result.revisionsRedacted}, relacje: ${result.relationsDeleted}`,
       );
       queryClient.invalidateQueries({ queryKey: ['memories'] });
       queryClient.invalidateQueries({ queryKey: queryKeys.memory(memoryId) });
@@ -95,6 +95,8 @@ function PurgeMemoryForm({ onOpenChange, memoryId, memoryHeader }: PurgeMemoryFo
           <dd className="font-mono">{preview.relatedProposalsCount}</dd>
           <dt className="text-muted-foreground">Rewizje z treścią</dt>
           <dd className="font-mono">{preview.revisionsWithContentCount}</dd>
+          <dt className="text-muted-foreground">Relacje</dt>
+          <dd className="font-mono">{preview.relationsCount}</dd>
         </dl>
       ) : null}
 

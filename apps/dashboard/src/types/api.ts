@@ -7,6 +7,7 @@ import type {
   ProposalOrigin,
   ProposalStatus,
   ProposalType,
+  RelationType,
   RevisionAction,
 } from './domain';
 
@@ -19,6 +20,12 @@ export interface ProposalPayloadShape {
   body?: string;
   tags?: string[];
   kind?: MemoryKind;
+  /** Attach-on-save (roadmap v1.2, "memory-relations + 1-hop graph boost") — lustro
+   * `RelationPayloadEntry`/`CreatePayload.relations`/`UpdatePayload.relations`
+   * (`apps/server/src/proposals/proposals.types.ts`); materializowane dopiero w `ProposalsService.approve()`,
+   * NIE tutaj. Renderowane w kolejce PRZED akceptacją (`QueueScreen.tsx` → `ProposalRelations`,
+   * FINDING 1 review PR #15) — recenzent musi widzieć krawędzie, które approve utworzy. */
+  relations?: { type: RelationType; targetId: string }[];
 }
 
 export interface ProposalView {
@@ -76,6 +83,17 @@ export interface MemoryListItem {
 export interface MemoryDetail extends MemoryListItem {
   body: string;
   approvedAt: string | null;
+}
+
+/** Zakładka "Relacje" (roadmap v1.2, "memory-relations + 1-hop graph boost") — lustro
+ * `RelationListItem` (`apps/server/src/memory/memory-admin.service.ts`). */
+export interface RelationListItemApi {
+  id: string;
+  type: RelationType;
+  direction: 'outgoing' | 'incoming';
+  source: MemorySource;
+  createdAt: string;
+  neighbor: { id: string; header: string; kind: MemoryKind; status: MemoryStatus };
 }
 
 export interface RevisionRowApi {
@@ -213,6 +231,8 @@ export interface PurgePreview {
   embeddingsCount: number;
   relatedProposalsCount: number;
   revisionsWithContentCount: number;
+  /** Roadmap v1.2 — krawędzie `memory_relations` dotykające tę pamięć. */
+  relationsCount: number;
 }
 
 export interface PurgeResult {
@@ -221,4 +241,6 @@ export interface PurgeResult {
   stagingEmbeddingsDeleted: number;
   proposalsRedacted: number;
   revisionsRedacted: number;
+  /** Roadmap v1.2 — krawędzie usunięte razem z tombstone'em. */
+  relationsDeleted: number;
 }

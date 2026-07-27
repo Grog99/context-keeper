@@ -469,6 +469,99 @@ describe('MemoryService (integration, testcontainers)', () => {
     });
   });
 
+  describe('save — relations, resolveRelations taksonomia (roadmap v1.2, "memory-relations + 1-hop graph boost")', () => {
+    let projectRel: ProjectContext;
+
+    beforeAll(async () => {
+      const created = await projects.createProject('memory-test-relations');
+      projectRel = { projectId: created.project.id, projectName: created.project.name };
+    });
+
+    it('self-loop: relations targetId === self (supersedes target) -> validation_error', async () => {
+      const target = await memory.devSeedApproved({
+        header: 'Self-loop target',
+        body: 'Tresc.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectRel.projectId,
+      });
+
+      await expect(
+        memory.save(
+          {
+            header: 'Self-loop probe',
+            body: 'Tresc.',
+            supersedes: target.id,
+            relations: [{ type: 'follows', targetId: target.id }],
+          },
+          projectRel,
+        ),
+      ).rejects.toMatchObject({ code: 'validation_error' });
+    });
+
+    it('relations targetId z INNEGO projektu -> not_found (IDOR-safe, identycznie jak supersedes)', async () => {
+      const targetB = await memory.devSeedApproved({
+        header: 'Relacja do cudzego projektu',
+        body: 'Widoczny tylko w B.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectB.projectId,
+      });
+
+      await expect(
+        memory.save(
+          {
+            header: 'Proba relacji do innego projektu',
+            body: 'Tresc.',
+            relations: [{ type: 'follows', targetId: targetB.id }],
+          },
+          projectRel,
+        ),
+      ).rejects.toMatchObject({ code: 'not_found' });
+    });
+
+    it('relations > MAX_RELATIONS_PER_SAVE (16) -> validation_error, PRZED jakimkolwiek lookupem targetu', async () => {
+      const tooMany = Array.from({ length: 17 }, (_, i) => ({
+        type: 'follows' as const,
+        targetId: `mem_doesnotexist_rel${i}`,
+      }));
+
+      await expect(
+        memory.save({ header: 'Zbyt wiele relations', body: 'Tresc.', relations: tooMany }, projectRel),
+      ).rejects.toMatchObject({ code: 'validation_error' });
+    });
+
+    it('duplikat {type,targetId} w relations -> ciche scalanie do JEDNEGO wpisu w payload proposala (bez błędu)', async () => {
+      const target = await memory.devSeedApproved({
+        header: 'Cel duplikatu relations',
+        body: 'Tresc.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectRel.projectId,
+      });
+
+      const res = await memory.save(
+        {
+          header: 'Fakt z duplikatem relations',
+          body: 'Tresc.',
+          relations: [
+            { type: 'follows', targetId: target.id },
+            { type: 'follows', targetId: target.id },
+          ],
+        },
+        projectRel,
+      );
+      expect(res.status).toBe('pending');
+
+      const rows = await db.select().from(proposals).where(eq(proposals.projectId, projectRel.projectId));
+      const match = rows.find((p) => (p.payload as { memoryId: string }).memoryId === res.id);
+      expect(match).toBeDefined();
+      const payload = match!.payload as { relations?: { type: string; targetId: string }[] };
+      expect(payload.relations).toHaveLength(1);
+      expect(payload.relations![0]).toEqual({ type: 'follows', targetId: target.id });
+    });
+  });
+
   describe('get — scope/IDOR (FR-M2, NFR-1, priorytet 2 wg §15)', () => {
     it('zwraca pełne body dla approved memory we własnym projekcie + bumpuje access_count', async () => {
       const seeded = await memory.devSeedApproved({
@@ -1020,6 +1113,145 @@ describe('MemoryService (integration, testcontainers)', () => {
       const results = await memory.search({ query: marker }, projectDecay);
       expect(results.length).toBe(1);
       expect(results[0].score).toBeCloseTo(1 / (config.get('RRF_K') + 1), 10);
+    });
+  });
+
+  describe('search — 1-hop graph boost (roadmap v1.2, "memory-relations + 1-hop graph boost")', () => {
+    let projectBoost: ProjectContext;
+
+    beforeAll(async () => {
+      const created = await projects.createProject('memory-test-graph-boost');
+      projectBoost = { projectId: created.project.id, projectName: created.project.name };
+    });
+
+    async function seedRelation(fromId: string, toId: string, projectId: string): Promise<void> {
+      await db.insert(schema.memoryRelations).values({
+        id: generateId(ID_PREFIX.relation),
+        fromMemoryId: fromId,
+        toMemoryId: toId,
+        type: 'follows',
+        projectId,
+        source: 'human',
+      });
+    }
+
+    it('boost ×(1+w) na krawędzi w sfuzjowanym zbiorze podnosi score i może poprawić ranking względem niepowiązanego sąsiada', async () => {
+      const marker = 'graphboostorderingmarker1';
+      // Provider zawsze down -> ramię wektorowe puste, ranking WYŁĄCZNIE z ts_rank FTS
+      // (deterministyczne, jak w istniejących testach hybrid/decay powyżej).
+      const throwingProvider = new StubEmbeddingProvider('graph-boost-ordering-throwing');
+      throwingProvider.throwOnEmbed = true;
+
+      const { memory: seedMemory } = buildMemoryService(throwingProvider);
+      // A: marker 4x (header 3x + body 1x) -> najwyższy ts_rank, rank 1.
+      const a = await seedMemory.devSeedApproved({
+        header: `${marker} ${marker} ${marker}`,
+        body: `${marker} czwarty raz w tresci.`,
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectBoost.projectId,
+      });
+      // C: marker 2x, BEZ żadnej krawędzi -> rank 2, kontrolny (nietknięty boostem).
+      const c = await seedMemory.devSeedApproved({
+        header: `Fakt ${marker} ${marker}`,
+        body: 'Fakt kontrolny, bez powiazan grafowych.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectBoost.projectId,
+      });
+      // B: marker 1x -> najsłabszy ts_rank (rank 3), POWIĄZANY z A.
+      const b = await seedMemory.devSeedApproved({
+        header: `Fakt B ${marker}`,
+        body: 'Powiazany z A przez relacje follows.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectBoost.projectId,
+      });
+      await seedRelation(a.id, b.id, projectBoost.projectId);
+
+      const { memory: baselineMemory } = buildMemoryService(throwingProvider, { GRAPH_BOOST_WEIGHT: 0 });
+      const baseline = await baselineMemory.search({ query: marker }, projectBoost);
+      expect(baseline.map((r) => r.id)).toEqual([a.id, c.id, b.id]); // czysty ts_rank, bez boosta
+
+      // w=1 -> factor=1+1=2, łatwe do zweryfikowania dokładną wartością.
+      const { memory: boostMemory } = buildMemoryService(throwingProvider, { GRAPH_BOOST_WEIGHT: 1 });
+      const boosted = await boostMemory.search({ query: marker }, projectBoost);
+      const boostedIds = boosted.map((r) => r.id);
+      // B (boostowany) wyprzedza C (niepowiązany) mimo słabszego ts_rank -> ranking się poprawia.
+      expect(boostedIds.indexOf(b.id)).toBeLessThan(boostedIds.indexOf(c.id));
+
+      const baseA = baseline.find((r) => r.id === a.id)!.score;
+      const baseB = baseline.find((r) => r.id === b.id)!.score;
+      const baseC = baseline.find((r) => r.id === c.id)!.score;
+      expect(boosted.find((r) => r.id === a.id)!.score).toBeCloseTo(baseA * 2, 10); // A powiazany -> ×(1+w)
+      expect(boosted.find((r) => r.id === b.id)!.score).toBeCloseTo(baseB * 2, 10); // B powiazany -> ×(1+w)
+      expect(boosted.find((r) => r.id === c.id)!.score).toBeCloseTo(baseC, 10); // C niepowiazany -> bez zmian
+    });
+
+    it('weight=0 -> score dokładnie 1/(RRF_K+rank), krawędź między oboma trafionymi memories BEZ WPŁYWU (knob wyłącza efekt)', async () => {
+      const marker = 'graphboostdisabledmarker3';
+      const throwingProvider = new StubEmbeddingProvider('graph-boost-disabled-throwing');
+      throwingProvider.throwOnEmbed = true;
+      const { memory: zeroWeightMemory, config: zeroConfig } = buildMemoryService(throwingProvider, {
+        GRAPH_BOOST_WEIGHT: 0,
+      });
+
+      // X: marker 2x -> rank 1. Y: marker 1x -> rank 2. Powiązane krawędzią.
+      const x = await zeroWeightMemory.devSeedApproved({
+        header: `${marker} ${marker}`,
+        body: 'Fakt X.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectBoost.projectId,
+      });
+      const y = await zeroWeightMemory.devSeedApproved({
+        header: `Fakt Y ${marker}`,
+        body: 'Powiazany z X.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectBoost.projectId,
+      });
+      await seedRelation(x.id, y.id, projectBoost.projectId);
+
+      const results = await zeroWeightMemory.search({ query: marker }, projectBoost);
+      const scoreX = results.find((r) => r.id === x.id)!.score;
+      const scoreY = results.find((r) => r.id === y.id)!.score;
+      const k = zeroConfig.get('RRF_K');
+      expect(scoreX).toBeCloseTo(1 / (k + 1), 10);
+      expect(scoreY).toBeCloseTo(1 / (k + 2), 10);
+    });
+
+    it('re-rank only: pamięć POZA sfuzjowanym zbiorem (nietrafiona przez query) nigdy nie zostaje wstrzyknięta mimo krawędzi do trafionej pamięci', async () => {
+      const marker = 'graphboostinjectionmarker2';
+      const throwingProvider = new StubEmbeddingProvider('graph-boost-injection-throwing');
+      throwingProvider.throwOnEmbed = true;
+      // Maksymalna dopuszczalna waga (sufit `.max(1)` w `envSchema` — §config/env.ts): re-rank-only
+      // jest własnością ZBIORU, nie skali, więc wielkość wagi i tak nie decyduje o tym, czy `outside`
+      // wejdzie do wyników. Bierzemy sufit, żeby test pokazywał, że nawet przy najsilniejszym
+      // dopuszczalnym boostcie nic się nie wstrzykuje.
+      const { memory: injMemory } = buildMemoryService(throwingProvider, { GRAPH_BOOST_WEIGHT: 1 });
+
+      const hit = await injMemory.devSeedApproved({
+        header: `Trafiony fakt ${marker}`,
+        body: marker,
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectBoost.projectId,
+      });
+      const outside = await injMemory.devSeedApproved({
+        header: 'Fakt zupelnie niepowiazany tresciowo',
+        body: 'Bez zadnego zwiazku z zapytaniem wyszukiwania.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectBoost.projectId,
+      });
+      await seedRelation(hit.id, outside.id, projectBoost.projectId);
+
+      const results = await injMemory.search({ query: marker }, projectBoost);
+      const ids = results.map((r) => r.id);
+      expect(ids).toContain(hit.id);
+      // `fetchInSetEdges` wymaga OBU końców w fused -> `outside` (poza fused) nigdy nie wchodzi.
+      expect(ids).not.toContain(outside.id);
     });
   });
 

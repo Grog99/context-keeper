@@ -4,6 +4,7 @@ export * from './enums';
 export * from './projects';
 export * from './memories';
 export * from './embeddings';
+export * from './memory-relations';
 export * from './proposals';
 export * from './revisions';
 export * from './audit-log';

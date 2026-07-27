@@ -17,6 +17,7 @@ import {
   EMBEDDING_DIM,
   embeddings,
   memories,
+  memoryRelations,
   proposals,
   revisions,
   stagingEmbeddings,
@@ -437,6 +438,216 @@ describe('ProposalsService (integration, testcontainers) — kolejka akceptacji 
     });
   });
 
+  describe('approve — type=merge repina krawędzie grafu na C (roadmap v1.2, code review "merge niszczy graf")', () => {
+    it('przepina krawędzie wychodzące i przychodzące scalanych A/B na nowe C, audytuje relation_removed dla oryginałów i relation_created dla przepiętych', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('merge-repin-model'));
+
+      const a = await seedApprovedMemory({ header: 'A repin', body: 'Tresc A.', projectId: projectA.projectId });
+      const b = await seedApprovedMemory({ header: 'B repin', body: 'Tresc B.', projectId: projectA.projectId });
+      const neighborOut = await seedApprovedMemory({
+        header: 'Sasiad wychodzacy z A',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+      const neighborIn = await seedApprovedMemory({
+        header: 'Sasiad przychodzacy do B',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+
+      // A -> neighborOut (wychodząca z A) i neighborIn -> B (przychodząca do B) — po merge powinny
+      // stać się odpowiednio C -> neighborOut i neighborIn -> C.
+      await db.insert(memoryRelations).values([
+        {
+          id: generateId(ID_PREFIX.relation),
+          fromMemoryId: a.id,
+          toMemoryId: neighborOut.id,
+          type: 'follows',
+          projectId: projectA.projectId,
+          source: 'human',
+        },
+        {
+          id: generateId(ID_PREFIX.relation),
+          fromMemoryId: neighborIn.id,
+          toMemoryId: b.id,
+          type: 'caused_by',
+          projectId: projectA.projectId,
+          source: 'agent',
+        },
+      ]);
+
+      const cId = generateId(ID_PREFIX.memory);
+      const proposalRow = await seedProposal({
+        type: 'merge',
+        payload: { memoryId: cId, header: 'C repin', body: 'Tresc scalona.', tags: [], kind: 'fact' },
+        affectedIds: [a.id, b.id],
+        baseVersions: { [a.id]: 0, [b.id]: 0 },
+        projectId: projectA.projectId,
+      });
+
+      await proposalsService.approve(proposalRow.id, { actor: 'tester' });
+
+      // Oryginalne krawędzie A/B zniknęły (kasowane przez archiveMemory razem z resztą grafu A/B).
+      const aEdgesAfter = await db.select().from(memoryRelations).where(eq(memoryRelations.fromMemoryId, a.id));
+      expect(aEdgesAfter).toHaveLength(0);
+      const bEdgesAfter = await db.select().from(memoryRelations).where(eq(memoryRelations.toMemoryId, b.id));
+      expect(bEdgesAfter).toHaveLength(0);
+
+      // C dziedziczy obie krawędzie, kierunek i type zachowane, source przepisany z oryginału.
+      const cOutgoing = await db.select().from(memoryRelations).where(eq(memoryRelations.fromMemoryId, cId));
+      expect(cOutgoing).toHaveLength(1);
+      expect(cOutgoing[0].toMemoryId).toBe(neighborOut.id);
+      expect(cOutgoing[0].type).toBe('follows');
+      expect(cOutgoing[0].source).toBe('human');
+
+      const cIncoming = await db.select().from(memoryRelations).where(eq(memoryRelations.toMemoryId, cId));
+      expect(cIncoming).toHaveLength(1);
+      expect(cIncoming[0].fromMemoryId).toBe(neighborIn.id);
+      expect(cIncoming[0].type).toBe('caused_by');
+      expect(cIncoming[0].source).toBe('agent');
+
+      // Audyt: oryginały usunięte przez kaskadę archiwizacji (via='archive-cascade').
+      const removedAudit = await db.select().from(auditLog).where(eq(auditLog.eventType, 'relation_removed'));
+      const removedOut = removedAudit.find(
+        (r) =>
+          (r.metadata as { fromMemoryId?: string; toMemoryId?: string }).fromMemoryId === a.id &&
+          (r.metadata as { toMemoryId?: string }).toMemoryId === neighborOut.id,
+      );
+      expect(removedOut).toBeDefined();
+      expect((removedOut!.metadata as { via?: string }).via).toBe('archive-cascade');
+      const removedIn = removedAudit.find(
+        (r) =>
+          (r.metadata as { fromMemoryId?: string }).fromMemoryId === neighborIn.id &&
+          (r.metadata as { toMemoryId?: string }).toMemoryId === b.id,
+      );
+      expect(removedIn).toBeDefined();
+
+      // Audyt: przepięte krawędzie na C jako relation_created via='merge' (odróżnione od
+      // 'agent'/'human' z materializeRelations/createRelation).
+      const createdAudit = await db.select().from(auditLog).where(eq(auditLog.eventType, 'relation_created'));
+      const createdOut = createdAudit.find(
+        (r) =>
+          (r.metadata as { fromMemoryId?: string }).fromMemoryId === cId &&
+          (r.metadata as { toMemoryId?: string }).toMemoryId === neighborOut.id,
+      );
+      expect(createdOut).toBeDefined();
+      expect((createdOut!.metadata as { via?: string }).via).toBe('merge');
+      const createdIn = createdAudit.find(
+        (r) =>
+          (r.metadata as { fromMemoryId?: string }).fromMemoryId === neighborIn.id &&
+          (r.metadata as { toMemoryId?: string }).toMemoryId === cId,
+      );
+      expect(createdIn).toBeDefined();
+      expect((createdIn!.metadata as { via?: string }).via).toBe('merge');
+    });
+
+    it('pomija krawędź WEWNĄTRZ zbioru scalanego (A→B) — żaden self-loop C→C nie powstaje', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('merge-internal-edge-model'));
+
+      const a = await seedApprovedMemory({ header: 'A wewnetrzna', body: 'T.', projectId: projectA.projectId });
+      const b = await seedApprovedMemory({ header: 'B wewnetrzna', body: 'T.', projectId: projectA.projectId });
+
+      // Krawędź WEWNĄTRZ zbioru scalanego — oba końce w affectedIds. Po przepięciu byłaby C->C,
+      // co łamie CHECK memory_relations_no_self_loop — musi zostać POMINIĘTA, nie przepięta.
+      await db.insert(memoryRelations).values({
+        id: generateId(ID_PREFIX.relation),
+        fromMemoryId: a.id,
+        toMemoryId: b.id,
+        type: 'context_for',
+        projectId: projectA.projectId,
+        source: 'human',
+      });
+
+      const cId = generateId(ID_PREFIX.memory);
+      const proposalRow = await seedProposal({
+        type: 'merge',
+        payload: { memoryId: cId, header: 'C wewnetrzna', body: 'Tresc.', tags: [], kind: 'fact' },
+        affectedIds: [a.id, b.id],
+        baseVersions: { [a.id]: 0, [b.id]: 0 },
+        projectId: projectA.projectId,
+      });
+
+      // Approve nie rzuca (self-loop guard w kodzie, nie w bazie) — gdyby kod próbował wstawić
+      // C->C, złapałby to dopiero CHECK constraint (błąd bazy), test i tak wykryłby regresję.
+      await expect(proposalsService.approve(proposalRow.id, { actor: 'tester' })).resolves.toBeDefined();
+
+      const cEdges = await db
+        .select()
+        .from(memoryRelations)
+        .where(eq(memoryRelations.fromMemoryId, cId));
+      expect(cEdges.filter((e) => e.toMemoryId === cId)).toHaveLength(0); // brak self-loop
+      expect(cEdges).toHaveLength(0); // krawędź wewnętrzna w ogóle nie ma odpowiednika na C
+
+      // Oryginalna krawędź A->B mimo to zniknęła (kaskada archiwizacji), zaudytowana jako usunięta.
+      const aEdgesAfter = await db.select().from(memoryRelations).where(eq(memoryRelations.fromMemoryId, a.id));
+      expect(aEdgesAfter).toHaveLength(0);
+
+      const removedAudit = await db.select().from(auditLog).where(eq(auditLog.eventType, 'relation_removed'));
+      expect(
+        removedAudit.some(
+          (r) =>
+            (r.metadata as { fromMemoryId?: string }).fromMemoryId === a.id &&
+            (r.metadata as { toMemoryId?: string }).toMemoryId === b.id,
+        ),
+      ).toBe(true);
+    });
+
+    it('merge z dwiema krawędziami tego samego typu do tego samego targetu (A→X, B→X) -> jedna krawędź C→X, onConflictDoNothing bez błędu', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('merge-dedup-model'));
+
+      const a = await seedApprovedMemory({ header: 'A dedup', body: 'T.', projectId: projectA.projectId });
+      const b = await seedApprovedMemory({ header: 'B dedup', body: 'T.', projectId: projectA.projectId });
+      const x = await seedApprovedMemory({ header: 'X dedup target', body: 'T.', projectId: projectA.projectId });
+
+      // A->X i B->X, TEN SAM type — po przepięciu obie chciałyby wstawić C->X/follows, co bez
+      // onConflictDoNothing rzuciłoby unique violation na UNIQUE(from,to,type).
+      await db.insert(memoryRelations).values([
+        {
+          id: generateId(ID_PREFIX.relation),
+          fromMemoryId: a.id,
+          toMemoryId: x.id,
+          type: 'follows',
+          projectId: projectA.projectId,
+          source: 'human',
+        },
+        {
+          id: generateId(ID_PREFIX.relation),
+          fromMemoryId: b.id,
+          toMemoryId: x.id,
+          type: 'follows',
+          projectId: projectA.projectId,
+          source: 'human',
+        },
+      ]);
+
+      const cId = generateId(ID_PREFIX.memory);
+      const proposalRow = await seedProposal({
+        type: 'merge',
+        payload: { memoryId: cId, header: 'C dedup', body: 'Tresc.', tags: [], kind: 'fact' },
+        affectedIds: [a.id, b.id],
+        baseVersions: { [a.id]: 0, [b.id]: 0 },
+        projectId: projectA.projectId,
+      });
+
+      await expect(proposalsService.approve(proposalRow.id, { actor: 'tester' })).resolves.toBeDefined();
+
+      const cEdges = await db.select().from(memoryRelations).where(eq(memoryRelations.fromMemoryId, cId));
+      expect(cEdges).toHaveLength(1); // dwie źródłowe krawędzie skolapsowały się do jednej na C
+      expect(cEdges[0].toMemoryId).toBe(x.id);
+      expect(cEdges[0].type).toBe('follows');
+
+      // Dokładnie jeden relation_created audit dla (C,X,follows) — druga próba (onConflictDoNothing)
+      // nie wstawiła nic, więc nie audytowała nic.
+      const createdAudit = await db.select().from(auditLog).where(eq(auditLog.eventType, 'relation_created'));
+      const matches = createdAudit.filter(
+        (r) =>
+          (r.metadata as { fromMemoryId?: string }).fromMemoryId === cId &&
+          (r.metadata as { toMemoryId?: string }).toMemoryId === x.id,
+      );
+      expect(matches).toHaveLength(1);
+    });
+  });
+
   describe('approve — type=delete', () => {
     it('archiwizuje + bump version + usuwa embeddingi + revisions action=archive', async () => {
       const { proposalsService } = buildServices(new StubEmbeddingProvider('delete-model'));
@@ -476,6 +687,80 @@ describe('ProposalsService (integration, testcontainers) — kolejka akceptacji 
 
       const revRows = await db.select().from(revisions).where(eq(revisions.memoryId, seeded.id));
       expect(revRows.some((r) => r.action === 'archive')).toBe(true);
+    });
+
+    it('archiwizuje krawędzie grafu dotykające pamięci (wychodzącą i przychodzącą) + audytuje relation_removed dla obu', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('delete-relations-model'));
+      const seeded = await seedApprovedMemory({
+        header: 'Do usuniecia z relacjami',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+      const outNeighbor = await seedApprovedMemory({
+        header: 'Sasiad wychodzacy delete',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+      const inNeighbor = await seedApprovedMemory({
+        header: 'Sasiad przychodzacy delete',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+      await db.insert(memoryRelations).values([
+        {
+          id: generateId(ID_PREFIX.relation),
+          fromMemoryId: seeded.id,
+          toMemoryId: outNeighbor.id,
+          type: 'follows',
+          projectId: projectA.projectId,
+          source: 'human',
+        },
+        {
+          id: generateId(ID_PREFIX.relation),
+          fromMemoryId: inNeighbor.id,
+          toMemoryId: seeded.id,
+          type: 'caused_by',
+          projectId: projectA.projectId,
+          source: 'agent',
+        },
+      ]);
+
+      const proposalRow = await seedProposal({
+        type: 'delete',
+        payload: { memoryId: seeded.id },
+        affectedIds: [seeded.id],
+        baseVersions: { [seeded.id]: 0 },
+        projectId: projectA.projectId,
+      });
+
+      await proposalsService.approve(proposalRow.id, { actor: 'tester' });
+
+      const remaining = await db
+        .select()
+        .from(memoryRelations)
+        .where(eq(memoryRelations.fromMemoryId, seeded.id));
+      expect(remaining).toHaveLength(0);
+      const remainingIncoming = await db
+        .select()
+        .from(memoryRelations)
+        .where(eq(memoryRelations.toMemoryId, seeded.id));
+      expect(remainingIncoming).toHaveLength(0);
+
+      const removedAudit = await db.select().from(auditLog).where(eq(auditLog.eventType, 'relation_removed'));
+      const removedOut = removedAudit.find(
+        (r) =>
+          (r.metadata as { fromMemoryId?: string }).fromMemoryId === seeded.id &&
+          (r.metadata as { toMemoryId?: string }).toMemoryId === outNeighbor.id,
+      );
+      expect(removedOut).toBeDefined();
+      expect((removedOut!.metadata as { via?: string }).via).toBe('archive-cascade');
+      const removedIn = removedAudit.find(
+        (r) =>
+          (r.metadata as { fromMemoryId?: string }).fromMemoryId === inNeighbor.id &&
+          (r.metadata as { toMemoryId?: string }).toMemoryId === seeded.id,
+      );
+      expect(removedIn).toBeDefined();
+      expect((removedIn!.metadata as { via?: string }).via).toBe('archive-cascade');
     });
   });
 
@@ -728,6 +1013,175 @@ describe('ProposalsService (integration, testcontainers) — kolejka akceptacji 
       const [memRow] = await db.select().from(memories).where(eq(memories.id, target.id));
       expect(memRow.header).toBe('Fakt do driftu'); // approve NIE dotknęło targetu
       expect(memRow.version).toBe(1); // tylko bump z symulacji, nie z approve
+    });
+  });
+
+  describe('materializeRelations — attach-on-save krawędzie (roadmap v1.2, "memory-relations + 1-hop graph boost")', () => {
+    it('save(supersedes+relations) -> approve() type=update materializuje krawędzie NA TARGET (nie na nowej pamięci)', async () => {
+      const { memoryService, proposalsService } = buildServices(new StubEmbeddingProvider('update-relations-model'));
+
+      const target = await seedApprovedMemory({
+        header: 'Target do poprawy z relacja',
+        body: 'Stara tresc.',
+        projectId: projectA.projectId,
+      });
+      const neighbor = await seedApprovedMemory({
+        header: 'Sasiad relacji update',
+        body: 'Tresc sasiada.',
+        projectId: projectA.projectId,
+      });
+
+      const saveRes = await memoryService.save(
+        {
+          header: 'Poprawiony target z relacja',
+          body: 'Nowa tresc.',
+          supersedes: target.id,
+          relations: [{ type: 'caused_by', targetId: neighbor.id }],
+        },
+        projectA,
+      );
+      expect(saveRes.status).toBe('pending');
+
+      // Przed approve — zero wierszy (materializacja WYŁĄCZNIE w approve()).
+      const beforeRows = await db.select().from(memoryRelations).where(eq(memoryRelations.fromMemoryId, target.id));
+      expect(beforeRows).toHaveLength(0);
+
+      const result = await proposalsService.approve(saveRes.id, { actor: 'tester' });
+      expect(result.materializedId).toBe(target.id);
+
+      const afterRows = await db.select().from(memoryRelations).where(eq(memoryRelations.fromMemoryId, target.id));
+      expect(afterRows).toHaveLength(1);
+      expect(afterRows[0].toMemoryId).toBe(neighbor.id);
+      expect(afterRows[0].type).toBe('caused_by');
+      expect(afterRows[0].source).toBe('agent');
+
+      const auditRows = await db.select().from(auditLog).where(eq(auditLog.eventType, 'relation_created'));
+      expect(
+        auditRows.some(
+          (a) => a.affectedIds.includes(target.id) && a.affectedIds.includes(neighbor.id),
+        ),
+      ).toBe(true);
+    });
+
+    it('edit-before-approve zachowuje relations z oryginalnego payloadu (spread ...base w ProposalsService.edit)', async () => {
+      const { memoryService, proposalsService } = buildServices(new StubEmbeddingProvider('edit-relations-model'));
+
+      const neighbor = await seedApprovedMemory({
+        header: 'Sasiad edit-before-approve',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+
+      const saveRes = await memoryService.save(
+        {
+          header: 'Oryginalny naglowek z relacja',
+          body: 'Oryginalna tresc.',
+          relations: [{ type: 'follows', targetId: neighbor.id }],
+        },
+        projectA,
+      );
+      expect(saveRes.status).toBe('pending');
+
+      const proposalRow = await findProposalForMemory(saveRes.id, projectA.projectId);
+      expect((proposalRow.payload as { relations?: unknown[] }).relations).toHaveLength(1);
+
+      await proposalsService.edit(proposalRow.id, { header: 'Edytowany naglowek' }, { actor: 'reviewer' });
+
+      const [afterEdit] = await db.select().from(proposals).where(eq(proposals.id, proposalRow.id));
+      expect((afterEdit.editedPayload as { header: string }).header).toBe('Edytowany naglowek');
+      // `...base` w `edit()` — relations przeżywają edycję treści bez zmiany, mimo że recenzent
+      // edytował WYŁĄCZNIE header.
+      expect((afterEdit.editedPayload as { relations?: { type: string; targetId: string }[] }).relations).toEqual([
+        { type: 'follows', targetId: neighbor.id },
+      ]);
+
+      await proposalsService.approve(proposalRow.id, { actor: 'reviewer' });
+
+      const rows = await db.select().from(memoryRelations).where(eq(memoryRelations.fromMemoryId, saveRes.id));
+      expect(rows).toHaveLength(1);
+      expect(rows[0].toMemoryId).toBe(neighbor.id);
+      expect(rows[0].type).toBe('follows');
+    });
+
+    it('fail-open: target relacji zarchiwizowany MIĘDZY save a approve -> krawędź pominięta, approve i tak sukces (nie blokuje całej akceptacji)', async () => {
+      const { memoryService, proposalsService } = buildServices(
+        new StubEmbeddingProvider('fail-open-relations-model'),
+      );
+
+      const target = await seedApprovedMemory({
+        header: 'Cel relacji ktory zniknie',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+
+      const saveRes = await memoryService.save(
+        {
+          header: 'Fakt z relacja do znikajacego celu',
+          body: 'Tresc.',
+          relations: [{ type: 'context_for', targetId: target.id }],
+        },
+        projectA,
+      );
+      expect(saveRes.status).toBe('pending');
+
+      // Archiwizacja celu MIĘDZY save() agenta a approve() człowieka (poza tym proposalem) —
+      // symuluje np. `MemoryAdminService.archiveMemory` gdzie indziej w dashboardzie.
+      await db.update(memories).set({ status: 'archived' }).where(eq(memories.id, target.id));
+
+      const proposalRow = await findProposalForMemory(saveRes.id, projectA.projectId);
+      const result = await proposalsService.approve(proposalRow.id, { actor: 'tester' });
+      expect(result.materializedId).toBe(saveRes.id); // approve i tak sukces
+
+      const rows = await db.select().from(memoryRelations).where(eq(memoryRelations.fromMemoryId, saveRes.id));
+      expect(rows).toHaveLength(0); // krawędź pominięta (fail-open), NIE blokuje reszty approve
+    });
+
+    it('idempotencja: approve() nie tworzy duplikatu krawędzi, gdy identyczna już istnieje (onConflictDoNothing)', async () => {
+      const { memoryService, proposalsService } = buildServices(
+        new StubEmbeddingProvider('idempotent-relations-model'),
+      );
+
+      // Ścieżka supersedes (nie create) — `target` musi istnieć w bazie PRZED `save()`, żeby human
+      // dashboard w ogóle mógł dołożyć konkurencyjną krawędź w oknie między save a approve. Na
+      // create-path `fromId` to dopiero `mintedMemoryId`, który materializuje się DOPIERO w tej
+      // samej transakcji approve() co `materializeRelations` — takiego okna tam nie ma.
+      const target = await seedApprovedMemory({
+        header: 'Target idempotencji (juz istnieje przed save)',
+        body: 'Stara tresc.',
+        projectId: projectA.projectId,
+      });
+      const neighbor = await seedApprovedMemory({
+        header: 'Cel idempotencji',
+        body: 'T.',
+        projectId: projectA.projectId,
+      });
+
+      const saveRes = await memoryService.save(
+        {
+          header: 'Poprawka z relacja idempotentna',
+          body: 'Nowa tresc.',
+          supersedes: target.id,
+          relations: [{ type: 'follows', targetId: neighbor.id }],
+        },
+        projectA,
+      );
+      expect(saveRes.status).toBe('pending');
+
+      // Ktoś (np. human dashboard) już ręcznie dodał DOKŁADNIE taką samą krawędź MIĘDZY save a approve.
+      await db.insert(memoryRelations).values({
+        id: generateId(ID_PREFIX.relation),
+        fromMemoryId: target.id,
+        toMemoryId: neighbor.id,
+        type: 'follows',
+        projectId: projectA.projectId,
+        source: 'human',
+      });
+
+      await proposalsService.approve(saveRes.id, { actor: 'tester' });
+
+      const rows = await db.select().from(memoryRelations).where(eq(memoryRelations.fromMemoryId, target.id));
+      expect(rows).toHaveLength(1); // wciąż dokładnie jedna — onConflictDoNothing nie zduplikował
+      expect(rows[0].source).toBe('human'); // oryginalny (ręczny) wiersz nietknięty, insert po prostu nic nie zrobił
     });
   });
 

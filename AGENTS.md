@@ -32,6 +32,8 @@ Narzędzia: `mcp__context-keeper__search_memory`, `get_memory`, `save_memory`.
   opis konwencji). Przekaż `kind: "document"`.
 - Żeby poprawić coś, co już jest w pamięci, znajdź to przez `search_memory` i zapisz ponownie z
   `supersedes: <id>` — zamiast dokładać luźny duplikat.
+- Żeby powiązać zapisywaną pamięć z inną już istniejącą, dołóż `relations: [{type, targetId}]`
+  (`caused_by` | `follows` | `context_for`, max 16) — trafia do tego samego proposala.
 - `event` jest human-only — agent go nie tworzy.
 
 ---

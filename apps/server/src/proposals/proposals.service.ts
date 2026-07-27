@@ -1,12 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, or, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { ToolError } from '../common/errors';
 import { generateId, ID_PREFIX } from '../common/ids';
 import { scanForSecrets } from '../common/secret-scanner';
 import { AppConfigService } from '../config/config.service';
 import { DB, type Database, type Tx } from '../db/db.tokens';
-import { embeddings, memories, proposals, revisions, stagingEmbeddings } from '../db/schema';
+import { embeddings, memories, memoryRelations, proposals, revisions, stagingEmbeddings } from '../db/schema';
 import type {
   MemoryKind,
   MemoryScope,
@@ -14,7 +14,7 @@ import type {
   ProposalOrigin,
   RevisionAction,
 } from '../db/schema/enums';
-import type { MemoryRow, ProposalRow } from '../db/schema';
+import type { MemoryRelationRow, MemoryRow, ProposalRow } from '../db/schema';
 import { EmbeddingService } from '../embeddings/embedding.service';
 import { normalizeHeader, normalizeTags, validateBody } from '../memory/validation';
 import { ProposalError } from './proposals.errors';
@@ -31,6 +31,7 @@ import type {
   MergePayload,
   ProposalPayload,
   ProposalView,
+  RelationPayloadEntry,
   RejectOptions,
   UpdatePayload,
 } from './proposals.types';
@@ -263,7 +264,7 @@ export class ProposalsService {
             embeddingDisposition = embeddingPrep.disposition;
           }
           if (supersedeRow) {
-            await this.archiveMemory(tx, supersedeRow);
+            await this.archiveMemory(tx, supersedeRow, actor);
             await this.writeRevision(tx, {
               memoryId: supersedeRow.id,
               action: 'superseded_by',
@@ -273,6 +274,9 @@ export class ProposalsService {
             });
             archivedIds.push(supersedeRow.id);
           }
+          // Attach-on-save (roadmap v1.2) — materializacja PO wszystkim innym (embeddingi, ewentualne
+          // supersede-archive), symetrycznie z kolejnością reszty efektów ubocznych `create`.
+          await this.materializeRelations(tx, created.id, propRow.projectId, createPayload.relations, actor);
           break;
         }
         case 'update': {
@@ -300,6 +304,9 @@ export class ProposalsService {
             await this.applyEmbeddings(tx, target.id, embeddingPrep, false);
             embeddingDisposition = embeddingPrep.disposition;
           }
+          // Attach-on-save (roadmap v1.2) — `saveAsSupersede` niesie krawędzie OD targetu (self=targetId),
+          // materializowane tu, tak samo jak dla `create`.
+          await this.materializeRelations(tx, target.id, propRow.projectId, updatePayload.relations, actor);
           materializedId = target.id;
           break;
         }
@@ -319,10 +326,28 @@ export class ProposalsService {
             await this.applyEmbeddings(tx, created.id, embeddingPrep, true);
             embeddingDisposition = embeddingPrep.disposition;
           }
+
+          // Repin krawędzi scalanych pamięci NA C — MUSI być odczytane PRZED pętlą `archiveMemory`
+          // niżej, bo `archiveMemory` kasuje (i audytuje jako `relation_removed`) wszystkie krawędzie
+          // dotykające archiwizowanego wiersza. Bez tego snapshotu C dziedziczyłaby zero krawędzi,
+          // mimo że A/B je miały (code review finding "merge niszczy graf", roadmap v1.2).
+          const edgesToRepin: MemoryRelationRow[] =
+            affectedIds.length > 0
+              ? await tx
+                  .select()
+                  .from(memoryRelations)
+                  .where(
+                    or(
+                      inArray(memoryRelations.fromMemoryId, affectedIds),
+                      inArray(memoryRelations.toMemoryId, affectedIds),
+                    ),
+                  )
+              : [];
+
           for (const archivedId of affectedIds) {
             const row = byId.get(archivedId);
             if (!row) continue; // niemożliwe po assertNotStale — strażnik dla typechecka
-            await this.archiveMemory(tx, row);
+            await this.archiveMemory(tx, row, actor);
             await this.writeRevision(tx, {
               memoryId: row.id,
               action: 'superseded_by',
@@ -332,6 +357,15 @@ export class ProposalsService {
             });
             archivedIds.push(row.id);
           }
+
+          await this.repinRelationsToSurvivor(
+            tx,
+            edgesToRepin,
+            new Set(affectedIds),
+            created.id,
+            propRow.projectId,
+            actor,
+          );
           break;
         }
         case 'delete': {
@@ -342,7 +376,7 @@ export class ProposalsService {
               deletePayload.memoryId,
             ]);
           }
-          await this.archiveMemory(tx, target);
+          await this.archiveMemory(tx, target, actor);
           await this.writeRevision(tx, {
             memoryId: target.id,
             action: 'archive',
@@ -456,6 +490,8 @@ export class ProposalsService {
       );
     }
 
+    // `...base` (nie pola po polu) — zachowuje `relations` z oryginalnego payloadu bez zmian
+    // (roadmap v1.2, attach-on-save): recenzent edytuje treść, nie edytuje krawędzi tutaj.
     const editedPayload: ProposalPayload = { ...base, header, body, tags };
 
     await this.db.transaction(async (tx) => {
@@ -563,14 +599,194 @@ export class ProposalsService {
     return row;
   }
 
-  /** Archiwizacja miękka (§1.3 planu — nigdy hard-delete, to osobne CLI purge): bump wersji +
-   * usunięcie authoritative embeddingów (NFR-6, archived nie bierze udziału w search). */
-  private async archiveMemory(tx: Tx, row: MemoryRow): Promise<void> {
+  /**
+   * Attach-on-save materializacja (roadmap v1.2, "memory-relations + 1-hop graph boost") — WYŁĄCZNIE
+   * tutaj, wewnątrz `approve()`, nigdy w `MemoryService.save()` (§4 planu, human-gate integrity:
+   * krawędzie agenta powstają dopiero po zatwierdzeniu, tak samo jak reszta treści).
+   *
+   * Fail-open per krawędź (NIE per proposal): cel mógł zniknąć/zmienić stan między `save()` (gdzie
+   * `resolveRelations` go zwalidował) a `approve()` — zarchiwizowany, wypromowany do global, albo (w
+   * teorii, memories nigdy hard-delete) usunięty. Taka krawędź jest po prostu POMIJANA, NIE blokuje
+   * całej akceptacji (relacje nie są w `assertNotStale`/`base_versions` — nie mają własnej wersji, a
+   * odrzucenie approve z powodu jednej martwej krawędzi byłoby nieproporcjonalne). `onConflictDoNothing`
+   * na `UNIQUE(from,to,type)` — idempotentne, gdyby ta sama krawędź już istniała (np. dodana ręcznie
+   * w dashboardzie między save a approve).
+   */
+  private async materializeRelations(
+    tx: Tx,
+    fromId: string,
+    projectId: string | null,
+    relations: RelationPayloadEntry[] | undefined,
+    actor: string,
+  ): Promise<void> {
+    // `projectId` null tylko dla scope=global proposali — `resolveRelations` po stronie
+    // `MemoryService` nigdy nie dopuszcza relations na takich (agent-save jest zawsze project-scoped,
+    // FR-M4), ale strażnik typu zamiast zakładania.
+    if (!relations || relations.length === 0 || !projectId) return;
+
+    const targetIds = Array.from(new Set(relations.map((r) => r.targetId)));
+    const targetRows = await tx.select().from(memories).where(inArray(memories.id, targetIds));
+    const byId = new Map(targetRows.map((r) => [r.id, r]));
+
+    for (const rel of relations) {
+      const target = byId.get(rel.targetId);
+      if (
+        !target ||
+        target.status !== 'approved' ||
+        target.scope !== 'project' ||
+        target.projectId !== projectId ||
+        target.id === fromId
+      ) {
+        continue; // fail-open — patrz komentarz metody
+      }
+
+      const [inserted] = await tx
+        .insert(memoryRelations)
+        .values({
+          id: generateId(ID_PREFIX.relation),
+          fromMemoryId: fromId,
+          toMemoryId: rel.targetId,
+          type: rel.type,
+          projectId,
+          source: 'agent',
+        })
+        .onConflictDoNothing()
+        .returning({ id: memoryRelations.id });
+
+      if (inserted) {
+        await this.audit.log(
+          {
+            eventType: 'relation_created',
+            actor,
+            affectedIds: [fromId, rel.targetId],
+            metadata: {
+              relationId: inserted.id,
+              type: rel.type,
+              fromMemoryId: fromId,
+              toMemoryId: rel.targetId,
+              via: 'agent',
+            },
+          },
+          tx,
+        );
+      }
+    }
+  }
+
+  /**
+   * Merge repina krawędzie scalanych pamięci (A, B, …) NA nowo powstałą C (code review finding
+   * "merge niszczy graf", roadmap v1.2) — wołane PO pętli `archiveMemory` w `case 'merge'`, ale na
+   * snapshocie krawędzi odczytanym PRZED nią (`archiveMemory` je już skasowała + zaudytowała jako
+   * `relation_removed`, patrz komentarz tamże). Zasady:
+   * - `X → A` staje się `X → C`, `A → X` staje się `C → X` (kierunek zachowany, `type`/`source`
+   *   przepisane z krawędzi źródłowej).
+   * - Krawędź WEWNĄTRZ zbioru scalanego (oba końce w `archivedIds`, np. `A → B`) jest POMIJANA —
+   *   po przepięciu byłaby self-loopem `C → C`, co łamie `CHECK memory_relations_no_self_loop`
+   *   (§db/schema/memory-relations.ts). Ta krawędź i tak zniknęła (audytowana jako `relation_removed`
+   *   przez `archiveMemory`), tu po prostu nie ma jej odpowiednika na C.
+   * - `onConflictDoNothing` na `UNIQUE(from,to,type)` — dwie krawędzie tego samego typu do tego
+   *   samego targetu (np. `A→X` i `B→X`) kolapsują się do jednej `C→X`, tak samo jak w
+   *   `materializeRelations` wyżej.
+   * `via: 'merge'` w audycie — odróżnia przepięcie przy scaleniu od nowej krawędzi agenta
+   * (`materializeRelations`, `via: 'agent'`) albo ręcznej z dashboardu (`via: 'human'`).
+   */
+  private async repinRelationsToSurvivor(
+    tx: Tx,
+    edges: MemoryRelationRow[],
+    archivedIds: Set<string>,
+    survivorId: string,
+    projectId: string | null,
+    actor: string,
+  ): Promise<void> {
+    if (edges.length === 0 || !projectId) return;
+
+    for (const edge of edges) {
+      const fromArchived = archivedIds.has(edge.fromMemoryId);
+      const toArchived = archivedIds.has(edge.toMemoryId);
+      if (fromArchived && toArchived) continue; // wewnątrz zbioru scalanego -> pomiń (self-loop guard)
+
+      const newFrom = fromArchived ? survivorId : edge.fromMemoryId;
+      const newTo = toArchived ? survivorId : edge.toMemoryId;
+
+      const [inserted] = await tx
+        .insert(memoryRelations)
+        .values({
+          id: generateId(ID_PREFIX.relation),
+          fromMemoryId: newFrom,
+          toMemoryId: newTo,
+          type: edge.type,
+          projectId,
+          source: edge.source,
+        })
+        .onConflictDoNothing()
+        .returning({ id: memoryRelations.id });
+
+      if (inserted) {
+        await this.audit.log(
+          {
+            eventType: 'relation_created',
+            actor,
+            affectedIds: [newFrom, newTo],
+            metadata: {
+              relationId: inserted.id,
+              type: edge.type,
+              fromMemoryId: newFrom,
+              toMemoryId: newTo,
+              via: 'merge',
+            },
+          },
+          tx,
+        );
+      }
+    }
+  }
+
+  /**
+   * Archiwizacja miękka (§1.3 planu — nigdy hard-delete, to osobne CLI purge): bump wersji +
+   * usunięcie authoritative embeddingów (NFR-6, archived nie bierze udziału w search) + usunięcie
+   * krawędzi grafu (roadmap v1.2), audytowane per-krawędź jako `relation_removed` (code review
+   * finding "kaskada bez audytu" — bez tego krawędzie znikały bez śladu w append-only audycie).
+   *
+   * UWAGA na uzasadnienie: to NIE jest ochrona przed graph boostem ("archived memory nie powinna
+   * dalej boostować/być boostowana" — poprzednie, mylące uzasadnienie). Boost widzi WYŁĄCZNIE
+   * `fusedIds`, czyli kandydatów z `search()` (`memory.service.ts`), a oba ramiona (`ftsArm`,
+   * `findAnnNeighbors`/`vectorArm`) filtrują `status='approved'` — zarchiwizowana pamięć nigdy nie
+   * jest kandydatem, więc boost i tak by nie strzelił. Prawdziwy powód: krawędź do pamięci wyjętej
+   * z grafu projektu jest martwą daną — `listRelations` w dashboardzie i tak by ją pokazywał jako
+   * relację do martwego wiersza. Usunięcie jest teraz audytowane, więc utrata jest widoczna w
+   * historii, zamiast znikać po cichu (mirror embeddings; `ON DELETE CASCADE` na
+   * `memory_relations` jest tylko belt-and-suspenders dla hard-delete, którego v1 nie robi —
+   * status='archived' NIE usuwa wiersza `memories`).
+   */
+  private async archiveMemory(tx: Tx, row: MemoryRow, actor: string): Promise<void> {
     await tx
       .update(memories)
       .set({ status: 'archived', version: sql`${memories.version} + 1`, updatedAt: new Date() })
       .where(eq(memories.id, row.id));
     await tx.delete(embeddings).where(eq(embeddings.memoryId, row.id));
+    const deletedRelations = await tx
+      .delete(memoryRelations)
+      .where(or(eq(memoryRelations.fromMemoryId, row.id), eq(memoryRelations.toMemoryId, row.id)))
+      .returning();
+    for (const rel of deletedRelations) {
+      await this.audit.log(
+        {
+          eventType: 'relation_removed',
+          actor,
+          affectedIds: [rel.fromMemoryId, rel.toMemoryId],
+          metadata: {
+            relationId: rel.id,
+            type: rel.type,
+            fromMemoryId: rel.fromMemoryId,
+            toMemoryId: rel.toMemoryId,
+            // Kaskada z archiwizacji (case 'merge'/'delete'/supersedes), NIE ręczne usunięcie z
+            // dashboardu (`MemoryAdminService.removeRelation`, `via: 'human'`) — rozróżnialne w audycie.
+            via: 'archive-cascade',
+          },
+        },
+        tx,
+      );
+    }
   }
 
   private async writeRevision(

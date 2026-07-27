@@ -4,12 +4,14 @@ import {
   CircleCheck,
   DatabaseBackup,
   KeyRound,
+  Link2,
   Moon,
   Pencil,
   Plus,
   Settings,
   ShieldAlert,
   Trash2,
+  Unlink2,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -45,6 +47,8 @@ const EVENT_TYPES: AuditEventType[] = [
   'nightly_run',
   'backup_completed',
   'project_settings_changed',
+  'relation_created',
+  'relation_removed',
 ];
 
 const EVENT_CONFIG: Record<AuditEventType, { icon: LucideIcon; variant: NonNullable<BadgeProps['variant']> }> = {
@@ -62,6 +66,10 @@ const EVENT_CONFIG: Record<AuditEventType, { icon: LucideIcon; variant: NonNulla
   nightly_run: { icon: Moon, variant: 'info' },
   backup_completed: { icon: DatabaseBackup, variant: 'info' },
   project_settings_changed: { icon: Settings, variant: 'info' },
+  // Roadmap v1.2 ("memory-relations + 1-hop graph boost") — utworzenie/usunięcie krawędzi
+  // `memory_relations`, przez agenta (attach-on-save) albo człowieka (dashboard).
+  relation_created: { icon: Link2, variant: 'info' },
+  relation_removed: { icon: Unlink2, variant: 'neutral' },
 };
 
 function EventBadge({ eventType }: { eventType: AuditEventType }) {

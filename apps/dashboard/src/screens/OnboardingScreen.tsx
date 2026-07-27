@@ -34,6 +34,9 @@ What to save, and as which kind:
 - To fix something already in memory, find it via \`search_memory\` and re-save it
   with \`supersedes: <id>\` — your new header+body replace it in place — rather than
   adding a near-duplicate.
+- To link this memory to one you already found, pass \`relations: [{type, targetId}]\`
+  (\`caused_by\` | \`follows\` | \`context_for\`, up to 16) — boosts related results in
+  later searches.
 - \`event\` memories are human-only; you can't create them.
 
 Memory hygiene:

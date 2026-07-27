@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
-import type { MemoryKind, MemoryScope, MemoryStatus } from '../db/schema/enums';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
+import { relationType, type MemoryKind, type MemoryScope, type MemoryStatus, type RelationType } from '../db/schema/enums';
 import type { RevisionRow } from '../db/schema';
+import { ToolError } from '../common/errors';
 import {
   MemoryAdminService,
   type EditMemoryInput,
@@ -9,6 +10,7 @@ import {
   type ListMemoriesFilter,
   type MemoryDetail,
   type MemoryListItem,
+  type RelationListItem,
   type WithWarnings,
 } from '../memory/memory-admin.service';
 import { PurgeService, type PurgePreview, type PurgeResult } from '../purge/purge.service';
@@ -68,6 +70,50 @@ export class MemoriesController {
   @Get(':id/revisions')
   async revisions(@Param('id') id: string): Promise<RevisionRow[]> {
     return this.memoryAdmin.listRevisions(id);
+  }
+
+  /**
+   * Zakładka "Relacje" (roadmap v1.2, "memory-relations + 1-hop graph boost") — trzy cienkie routy
+   * nad `MemoryAdminService`, mirror wzorca `:id/revisions`/`:id/purge-preview` powyżej (żadna z
+   * tych 2-/3-segmentowych ścieżek nie koliduje z `:id` — Express matchuje po LICZBIE segmentów,
+   * ostrzeżenie o kolejności dotyczy tylko literalnych top-level tras typu `events` powyżej `:id`).
+   */
+  @Get(':id/relations')
+  async listRelations(@Param('id') id: string): Promise<RelationListItem[]> {
+    return this.memoryAdmin.listRelations(id);
+  }
+
+  /** `@Body()` powyżej to czysta asercja typu TS — bez globalnego `ValidationPipe` w `main.ts`
+   * (świadome: MCP i tak waliduje zod-em na wejściu narzędzia, `main.ts` go nie potrzebował do
+   * teraz) request z `type: "bogus"` doleciałby aż do enuma Postgresa (500 zamiast 400), a brak
+   * `toId` wysypałby `MemoryAdminService.createRelation`'s `inArray(memories.id, [fromId, undefined])`.
+   * Walidujemy więc explicit, PRZED wejściem w serwis, tym samym `ToolError('validation_error', …)`
+   * co reszta ścieżek dashboardu — `DashboardErrorFilter` mapuje go na 400 (§dashboard-error.filter.ts).
+   * Wartości `type` czytane z jednego źródła prawdy (`relationType.enumValues`, §db/schema/enums.ts),
+   * bez przepisywania literałów. */
+  @Post(':id/relations')
+  async createRelation(
+    @Param('id') id: string,
+    @Body() body: { toId: string; type: RelationType },
+  ): Promise<{ id: string }> {
+    const toId = body?.toId;
+    if (typeof toId !== 'string' || toId.length === 0) {
+      throw new ToolError('validation_error', 'toId jest wymagany');
+    }
+    const type = body?.type;
+    if (!relationType.enumValues.includes(type)) {
+      throw new ToolError(
+        'validation_error',
+        `type musi być jednym z: ${relationType.enumValues.join(', ')}`,
+      );
+    }
+    return this.memoryAdmin.createRelation({ fromId: id, toId, type });
+  }
+
+  @Delete(':id/relations/:relationId')
+  async removeRelation(@Param('relationId') relationId: string): Promise<{ ok: true }> {
+    await this.memoryAdmin.removeRelation(relationId);
+    return { ok: true };
   }
 
   @Post()

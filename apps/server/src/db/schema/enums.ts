@@ -11,6 +11,11 @@ export const memoryStatus = pgEnum('memory_status', ['approved', 'archived', 'pu
 // `source` = autorstwo (kto utworzył), trzymane osobno od `kind`.
 export const memorySource = pgEnum('memory_source', ['agent', 'human', 'nightly']);
 
+// Słownik typów relacji (roadmap v1.2, "memory-relations + 1-hop graph boost") — świadomie
+// zamknięty, DOKŁADNIE 3 wartości (locked decision planu, nie pojedyncza nietypowana `relates_to`).
+// Trzymany w sync z zod enumem `relations[].type` w `mcp-server.factory.ts` (save_memory).
+export const relationType = pgEnum('relation_type', ['caused_by', 'follows', 'context_for']);
+
 export const proposalType = pgEnum('proposal_type', ['create', 'update', 'merge', 'delete']);
 export const proposalOrigin = pgEnum('proposal_origin', ['agent', 'human', 'nightly']);
 // `withdrawn` = samo-wycofanie maszynowe (nocny job, Faza 6) — odróżnione od `rejected` (decyzja
@@ -46,6 +51,11 @@ export const auditEventType = pgEnum('audit_event_type', [
   // roadmap v1.2 ("kind=event episodic") — zmiana ustawień projektu z dialogu szczegółów na
   // ekranie "Projekty i tokeny" (dziś tylko `include_events_in_default_search`).
   'project_settings_changed',
+  // roadmap v1.2 ("memory-relations + 1-hop graph boost") — utworzenie/usunięcie krawędzi
+  // `memory_relations`, przez agenta (materializacja w `ProposalsService.approve`) albo człowieka
+  // (dashboard, `MemoryAdminService`).
+  'relation_created',
+  'relation_removed',
 ]);
 
 // Aliasy TS dla wartości enumów (Faza 2+) — jedno źródło prawdy (enumValues), bez duplikowania literałów.
@@ -53,6 +63,7 @@ export type MemoryKind = (typeof memoryKind.enumValues)[number];
 export type MemoryScope = (typeof memoryScope.enumValues)[number];
 export type MemoryStatus = (typeof memoryStatus.enumValues)[number];
 export type MemorySource = (typeof memorySource.enumValues)[number];
+export type RelationType = (typeof relationType.enumValues)[number];
 export type ProposalType = (typeof proposalType.enumValues)[number];
 export type ProposalOrigin = (typeof proposalOrigin.enumValues)[number];
 export type ProposalStatus = (typeof proposalStatus.enumValues)[number];

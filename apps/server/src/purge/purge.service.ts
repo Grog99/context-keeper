@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, arrayOverlaps, eq, inArray, isNotNull, or, sql, type SQL } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { DB, type Database, type Tx } from '../db/db.tokens';
-import { embeddings, memories, proposals, revisions, stagingEmbeddings } from '../db/schema';
+import { embeddings, memories, memoryRelations, proposals, revisions, stagingEmbeddings } from '../db/schema';
 import type { MemoryStatus } from '../db/schema/enums';
 import { PurgeError } from './purge.errors';
 
@@ -15,6 +15,9 @@ export interface PurgePreview {
   embeddingsCount: number;
   relatedProposalsCount: number;
   revisionsWithContentCount: number;
+  /** Krawędzie `memory_relations` dotykające tę pamięć — roadmap v1.2 (nie niosą treści same w
+   * sobie, ale purge je i tak usuwa razem z resztą, patrz `purge()`). */
+  relationsCount: number;
 }
 
 export interface PurgeOptions {
@@ -30,6 +33,8 @@ export interface PurgeResult {
   stagingEmbeddingsDeleted: number;
   proposalsRedacted: number;
   revisionsRedacted: number;
+  /** Roadmap v1.2 — krawędzie usunięte razem z tombstone'em (mirror embeddings, §PurgeService.purge). */
+  relationsDeleted: number;
 }
 
 /** Proposale referencujące `memoryId` — przez `affected_ids` (update/merge/delete) ALBO
@@ -94,6 +99,11 @@ export class PurgeService {
       .from(revisions)
       .where(and(eq(revisions.memoryId, memoryId), isNotNull(revisions.snapshot)));
 
+    const [relRow] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(memoryRelations)
+      .where(or(eq(memoryRelations.fromMemoryId, memoryId), eq(memoryRelations.toMemoryId, memoryId)));
+
     return {
       id: row.id,
       status: row.status,
@@ -101,6 +111,7 @@ export class PurgeService {
       embeddingsCount: embRow?.count ?? 0,
       relatedProposalsCount: relatedProposals.length,
       revisionsWithContentCount: revRow?.count ?? 0,
+      relationsCount: relRow?.count ?? 0,
     };
   }
 
@@ -144,6 +155,14 @@ export class PurgeService {
         .delete(embeddings)
         .where(eq(embeddings.memoryId, memoryId))
         .returning({ id: embeddings.id });
+
+      // Roadmap v1.2 — krawędzie grafu nie niosą treści, ale purge jest nieodwracalnym wymazaniem
+      // WSZYSTKICH śladów pamięci (nie tylko sekretu w treści) — mirror embeddings, przed
+      // redagowaniem proposali niżej (kolejność nieistotna, osobna tabela bez zależności).
+      const deletedRelations = await tx
+        .delete(memoryRelations)
+        .where(or(eq(memoryRelations.fromMemoryId, memoryId), eq(memoryRelations.toMemoryId, memoryId)))
+        .returning({ id: memoryRelations.id });
 
       const relatedProposals = await tx
         .select()
@@ -189,6 +208,7 @@ export class PurgeService {
             proposalsRedacted: relatedProposals.length,
             revisionsRedacted: redactedRevisions.length,
             stagingEmbeddingsDeleted,
+            relationsDeleted: deletedRelations.length,
           },
         },
         tx,
@@ -198,6 +218,7 @@ export class PurgeService {
         id: memoryId,
         embeddingsDeleted: deletedEmbeddings.length,
         stagingEmbeddingsDeleted,
+        relationsDeleted: deletedRelations.length,
         proposalsRedacted: relatedProposals.length,
         revisionsRedacted: redactedRevisions.length,
       };

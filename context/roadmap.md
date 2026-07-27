@@ -90,18 +90,20 @@ _przed_ warunkowym pluginem — najpierw wyciskamy maksimum z samego MCP + kontr
   toggle `include_events_in_default_search` (dialog szczegółów projektu, audytowany jako
   `project_settings_changed`) — decyduje, czy `event` wchodzi do domyślnego `kind` w `search_memory`
   gdy agent go nie poda jawnie (`kind=event` jawny działa zawsze).
-  - **memory-relations + 1-hop graph boost** ⬜ — świadomie odłożone, osobny przyszły task (tabela
-    krawędzi kluczowana `memory_id`, ortogonalna do `event_time`; graph boost komponowałby się z
-    age-decay post-fuzją, nie konkurował). Ustalone z góry (quick-clarify przed planowaniem
-    `kind=event`, żeby nie pytać ponownie): krawędzie tworzy **zarówno agent** (przez `save_memory`,
-    human-gated jak reszta treściowych mutacji) **jak i człowiek** ręcznie w dashboardzie; relacje są
-    **typowane** (stały słownik typów, np. `caused_by`/`follows`/`context_for`), nie pojedyncza
-    nietypowana krawędź `relates_to`.
-  - **Edycja `event_time` po utworzeniu** ✅ — formularz edycji w przeglądarce pamięci (dla
-    `kind='event'`) pozwala skorygować backdate po fakcie, ten sam `datetime-local` widget co przy
-    tworzeniu. `editMemory` odrzuca `event_time` twardym `validation_error` dla fact/document
-    (zamiast cicho ignorować); stara wartość trafia do snapshotu rewizji `edited`, bez osobnego
-    pola w audit metadata (symetrycznie z header/body).
+  - **memory-relations + 1-hop graph boost** ✅ — tabela krawędzi `memory_relations` (surogatowy
+    `rel_…` PK, `UNIQUE(from,to,type)`, ściśle intra-project, `kind=event` jako endpoint DOZWOLONY —
+    ortogonalna do `event_time`). Krawędzie tworzy **zarówno agent** (`save_memory` opcjonalny
+    `relations: [{type, targetId}]`, ATTACH-ON-SAVE — jedzie na TYM SAMYM human-gated proposalu
+    create/update, materializacja dopiero w `ProposalsService.approve`) **jak i człowiek** (dashboard,
+    zakładka "Relacje" w przeglądarce pamięci). Relacje **typowane**, dokładnie 3 wartości:
+    `caused_by`/`follows`/`context_for`, nie pojedyncza nietypowana krawędź `relates_to`. Graph boost
+    (`GRAPH_BOOST_WEIGHT`, domyślnie 0.1) jest RE-RANK ONLY — binarny, multiplikatywny `*(1+w)` na
+    sąsiadach już obecnych w sfuzjowanym zbiorze `search_memory`, komponuje się z age-decay
+    (`rrfScore * decayFactor * graphBoostFactor`). Kontrakt `save_memory` (warstwa 1 i 2 — narzędzie
+    MCP + snippet onboardingu) i `AGENTS.md` zaktualizowane.
+  - **Edycja `event_time` po utworzeniu** ⬜ — świadomie odłożone w v1: formularz edycji w
+    przeglądarce pamięci nie eksponuje `event_time` (ustawiany tylko raz, przy human-create). Mały
+    follow-up, gdy zajdzie potrzeba korekty backdate po fakcie.
 - **Agent tworzy `kind=document`** ✅ — `save_memory` przyjmuje opcjonalny `kind` (`fact` domyślnie |
   `document`), te same guardy (human-gate, skaner sekretów, limity rozmiaru per-kind). `kind=event`
   pozostaje wykluczony (human-only). Deduplikacja świadomie zostaje kind-blind — patrz
