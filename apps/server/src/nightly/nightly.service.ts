@@ -368,6 +368,11 @@ export class NightlyService {
    * brakujący klucz i wywalał cały przebieg (TOCTOU) — taki fakt po prostu poczeka na kolejny
    * stateless re-scan. `ne(memories.id, fact.id)` (też w `extraConditions`) wyklucza sam fakt z
    * własnego wyniku ANN.
+   *
+   * `eq(memories.kind, fact.kind)` (roadmap v1.3 "Dedup kind-aware", defense-in-depth): partycja ANN
+   * jest ścisła też po `kind`, symetrycznie ze `scope`/`projectId` wyżej — klaster nigdy nie miesza
+   * kindów. NO-OP dzisiaj (`loadApprovedFacts` już filtruje do `kind='fact'`, więc `fact.kind` jest
+   * zawsze `'fact'`) — zabezpieczenie na wypadek, gdyby skan kiedyś rozszerzył się o document/event.
    */
   private async findNeighborPairs(
     fact: FactRow,
@@ -389,7 +394,7 @@ export class NightlyService {
       embeddingModel: activeModel,
       scopeCondition,
       extraConditions: [
-        eq(memories.kind, 'fact'),
+        eq(memories.kind, fact.kind),
         inArray(memories.id, snapshotIds),
         ne(memories.id, fact.id),
       ],

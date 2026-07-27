@@ -45,7 +45,7 @@ NEVER include secrets (API keys, passwords, private keys, tokens, credentials) i
 Return value: {id, status}.
 - status "pending": a new proposal was created and is awaiting human review. With \`supersedes\`, \`id\` refers to the correction proposal (not the target memory, which keeps its own id until approved).
 - status "duplicate_pending": an identical proposal is already pending — \`id\` refers to that existing proposal, not a new one. With \`supersedes\`, this means an identical correction (same target + same corrected content) is already pending.
-- status "already_exists": an identical memory is already approved — \`id\` refers to that memory. Note: duplicate detection currently keys only on header+body, not kind — saving the same header+body under a different \`kind\` than an existing fact/document will also be classified as a duplicate. Not applicable to \`supersedes\` — corrections are exempt from duplicate detection (see above).
+- status "already_exists": an identical memory is already approved — \`id\` refers to that memory. Duplicate detection keys on header+body+kind, so the same text saved under a different kind is a separate memory, not a duplicate. Not applicable to \`supersedes\` — corrections are exempt from duplicate detection (see above).
 
 None of these statuses are errors. This is fire-and-forget — do not poll or wait for approval.
 

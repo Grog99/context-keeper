@@ -148,7 +148,7 @@ Jeden dyskryminator `kind` na tabeli `memories` (nie osobne tabele — reużycie
 
 - Kolejka to **tabela**, nie flaga `status=pending` na dokumencie — bo merge (A+B→C) to operacja „utwórz C, zarchiwizuj A, zarchiwizuj B", której flaga nie wyrazi. Jeden mechanizm i jedna powierzchnia audytu dla zapisów agenta, edycji człowieka i propozycji nocnego joba.
 - **Optimistic concurrency (nowe):** proposal celujący w istniejące pamięci zapisuje przy utworzeniu **`base_versions`** — `revision_id` bazowy każdego `affected_id` (stan, względem którego liczono payload). Przy akceptacji sprawdzany wewnątrz transakcji (§8bis). Drift → proposal jest **stale** (computed guard, bez nowej wartości w enumie `status`).
-- **Idempotencja / dedup (nowe):** twardy `duplicate_pending` tylko przy **exact match** `hash(header+body+scope+project)` wobec pending proposala; exact-match do approved → `already_exists`; podobne → proposal + hint (§5).
+- **Idempotencja / dedup (nowe):** twardy `duplicate_pending` tylko przy **exact match** `hash(header+body+scope+project+kind)` wobec pending proposala; exact-match do approved → `already_exists`; podobne → proposal + hint (§5).
 
 > **Forward-compat (v2):** miejsce na pole `confidence`/`auto_eligible` (anti-fatigue / sedymentacja).
 
@@ -230,7 +230,7 @@ pepper.** Lookup token→(projekt, token) = jeden trafiony indeks JOIN (§10).
 
 Embedding-similarity **nie odróżnia** korekty od duplikatu („PG15"→„PG16", negacja) → auto-suppression po podobieństwie jest niebezpieczne (jego failure mode to korekty). Dlatego:
 
-- exact `hash(header+body+scope+project)` == pending proposal → **`duplicate_pending`** (id proposala; łapie retry sieciowy),
+- exact `hash(header+body+scope+project+kind)` == pending proposal → **`duplicate_pending`** (id proposala; łapie retry sieciowy),
 - exact == approved memory → **`already_exists`** (id pamięci),
 - **podobne-ale-nie-exact → proposal ZAWSZE powstaje** + hint „similar to [ids]" dla recenzenta,
 - nowe → create.

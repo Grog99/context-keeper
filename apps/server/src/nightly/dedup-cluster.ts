@@ -75,10 +75,27 @@ export function buildClusters(pairs: NeighborPair[]): string[][] {
  * `body`; kolejny remis -> najniższy `id`. Tagi = suma zbiorów wszystkich członków (deduplikowana,
  * posortowana). Deterministyczne względem KOLEJNOŚCI `members` na wejściu — ten sam klaster zawsze
  * daje identyczny payload, co jest wymogiem idempotencji re-derivacji (plan §1).
+ *
+ * Kind-guard (roadmap v1.3 "Dedup kind-aware", defense-in-depth): ta funkcja jest tym miejscem,
+ * które faktycznie WYBIERA `kind` scalenia (`canonical.kind` niżej) — więc backstop na niezmiennik
+ * "klaster nie miesza kindów" należy właśnie tu, nie tylko w partycji ANN (`findNeighborPairs`,
+ * podstawowa linia obrony). Rzuca zamiast po cichu wybrać arbitralny `kind` i zgubić semantykę
+ * pozostałych członków. Dziś nieosiągalne (oba końce ANN są już `kind='fact'`) — jeśli nocny skan
+ * kiedyś rozszerzy się o document/event, przyszły autor decyduje: zostawić throw (wywala cały
+ * przebieg przez `buildMergeCondition` → `runLocked`, jak istniejący `brak faktu ${id}`) czy
+ * zdegradować do skip-and-warn.
  */
 export function pickCanonicalMerge(members: MergeCandidateInput[]): MergePayload {
   if (members.length < 2) {
     throw new Error('pickCanonicalMerge wymaga klastra o rozmiarze >= 2');
+  }
+
+  const kinds = new Set(members.map((m) => m.kind));
+  if (kinds.size > 1) {
+    throw new Error(
+      `pickCanonicalMerge: klaster miesza kind (${[...kinds].sort().join(', ')}) — ` +
+        'scalenie wybrałoby jeden kind arbitralnie i zgubiło semantykę pozostałych',
+    );
   }
 
   const canonical = [...members].sort((x, y) => {

@@ -116,4 +116,21 @@ describe('pickCanonicalMerge (Faza 6 — kanoniczna treść scalenia, determinis
   it('klaster o rozmiarze < 2 rzuca błąd (wymaganie >= 2 członków)', () => {
     expect(() => pickCanonicalMerge([candidate({ id: 'mem_a' })])).toThrow();
   });
+
+  it('klaster mieszający kind (fact + document) rzuca błąd (roadmap v1.3 "Dedup kind-aware", defense-in-depth — nieosiągalne dziś, bo ANN jest już kind-scoped, ale scalenie nigdy nie może po cichu wybrać jednego kind i zgubić semantyki pozostałych)', () => {
+    expect(() =>
+      pickCanonicalMerge([
+        candidate({ id: 'mem_a', kind: 'fact', accessCount: 1 }),
+        candidate({ id: 'mem_b', kind: 'document', accessCount: 0 }),
+      ]),
+    ).toThrow();
+  });
+
+  it('wszyscy członkowie tego samego kind (document) -> scalenie zwraca kind=document', () => {
+    const payload = pickCanonicalMerge([
+      candidate({ id: 'mem_a', kind: 'document', accessCount: 1 }),
+      candidate({ id: 'mem_b', kind: 'document', accessCount: 0 }),
+    ]);
+    expect(payload.kind).toBe('document');
+  });
 });
