@@ -15,6 +15,17 @@ export function formatAbsoluteTime(iso: string): string {
   return new Date(iso).toLocaleString('pl-PL', { dateStyle: 'medium', timeStyle: 'medium' });
 }
 
+/** Wartość `<input type="datetime-local">` — LOKALNA strefa (roadmap v1.2, "kind=event episodic":
+ * `event_time` domyślnie teraz przy tworzeniu, backdatable przy edycji, przyszłe daty dozwolone bez
+ * walidacji blokującej — patrz `validateEventTime` po stronie serwera). `datetime-local` nie ma
+ * strefy — budujemy string ręcznie z lokalnych składowych `Date`, żeby uniknąć przesunięcia UTC,
+ * które dałoby `toISOString()` na maszynie z inną strefą niż przeglądarka.
+ */
+export function toDatetimeLocalValue(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /** Ekran "Oś czasu" (roadmap v1.2, "kind=event episodic") — klucz grupowania wg DNIA KALENDARZOWEGO
  * w strefie lokalnej przeglądarki (nie UTC — recenzent grupuje po swoim dniu, nie po dniu serwera). */
 export function dayKey(iso: string): string {
