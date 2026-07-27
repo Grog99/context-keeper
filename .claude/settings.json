@@ -16,5 +16,30 @@
       "PowerShell(docker volume prune*)",
       "PowerShell(docker system prune*)"
     ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git worktree add *)",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/worktree-install.mjs\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/grep-windows-path-guard.mjs\""
+          }
+        ]
+      }
+    ]
   }
 }

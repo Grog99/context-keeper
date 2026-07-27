@@ -36,6 +36,34 @@ Narzędzia: `mcp__context-keeper__search_memory`, `get_memory`, `save_memory`.
   (`caused_by` | `follows` | `context_for`, max 16) — trafia do tego samego proposala.
 - `event` jest human-only — agent go nie tworzy.
 
+## Zasady pracy
+
+Zebrane z audytu transkryptów sesji ([`agent-patterns-report.md`](context/agent-patterns-report.md))
+— powtarzające się błędy i wzorce, warte zapobiegawczego uwzględnienia:
+
+- **Weryfikacja:** po nietrywialnej zmianie odpal `pnpm verify` (lint + typecheck + test dla
+  całego monorepo) zamiast ręcznie sklejać `pnpm lint` / `tsc --noEmit` / `pnpm -r test` za
+  każdym razem.
+- **Duże zadania:** faza typu „cała implementacja w jednym ciągłym przebiegu subagenta" (setki
+  tysięcy tokenów, dziesiątki użyć narzędzi) zwiększa ryzyko dryfu kontekstu i zostawia mało
+  naturalnych punktów na przegląd. Rozdzielaj plan → implementację → weryfikację na osobne
+  przebiegi z checkpointem człowieka pomiędzy, zamiast jednego maratonu.
+- **Raporty subagentów:** zanim użyjesz `plik:linia` zacytowanego w raporcie subagenta, zweryfikuj
+  je w źródle — subagenci potrafią podać niespójny numer linii.
+- **Przeglądarka (`Claude_Browser`):** `read_page` jako pierwszy krok każdej nowej interakcji,
+  zanim `find`/`form_input`/`click` — drzewo strony musi być scache'owane. Przed `screenshot`
+  upewnij się, że pane jest faktycznie widoczna/otwarta.
+- **`Edit` po `Read`:** jeśli między odczytem a edycją poszedł build/lint/format (mógł zmienić
+  plik na dysku), zrób re-read przed `Edit` — `old_string` mógł już nie pasować.
+- **Narzędzia:** nie zgaduj nazw narzędzi (np. `Grep`, nie `Grag`) — sprawdź, co faktycznie jest
+  dostępne, zamiast zakładać.
+- **Grep/ripgrep na Windows:** w patternie używaj `/` albo escapuj `\`, nawet wklejając ścieżkę z
+  Windows — nieescapowany backslash w regexie ripgrepa jest błędem. Egzekwowane hookiem
+  (`.claude/hooks/grep-windows-path-guard.mjs`): pattern wyglądający jak wklejona ścieżka Windows
+  jest blokowany z podpowiedzią.
+- **Nowy `git worktree`:** `pnpm install` w nowym katalogu uruchamia się automatycznie po
+  `git worktree add` (hook `.claude/hooks/worktree-install.mjs`) — nie trzeba pamiętać ręcznie.
+
 ---
 
 > **Setup połączenia** (token w zmiennej `CONTEXT_KEEPER_TOKEN`, restart, akceptacja serwera) —
