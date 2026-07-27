@@ -71,6 +71,13 @@
       "when": 1784892318290,
       "tag": "0009_thankful_shocker",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785144695573,
+      "tag": "0010_overjoyed_chameleon",
+      "breakpoints": true
     }
   ]
 }

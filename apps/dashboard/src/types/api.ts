@@ -1,9 +1,11 @@
 import type {
   AuditEventType,
+  EffectiveTokenStatus,
   MemoryKind,
   MemoryScope,
   MemorySource,
   MemoryStatus,
+  ProjectTokenState,
   ProposalOrigin,
   ProposalStatus,
   ProposalType,
@@ -112,23 +114,62 @@ export interface HumanCreateResponse {
   warnings: string[];
 }
 
+/** Zgrupowane liczniki tokenów per projekt (roadmap v1.3, "Wiele tokenów per projekt + graceful
+ * rotation") — lustro `TokenCounts` (`apps/server/src/projects/projects.service.ts`). Zastępuje
+ * dawne `tokenStatus`/`tokenHash`/`tokenRotatedAt` (1 token = 1 status → N tokenów = liczniki). */
+export interface TokenCounts {
+  active: number;
+  grace: number;
+  revoked: number;
+}
+
 export interface ProjectListItem {
   id: string;
   name: string;
-  tokenHash: string | null;
-  tokenStatus: 'none' | 'active' | 'rotated';
   createdAt: string;
-  tokenRotatedAt: string | null;
   memoryCount: number;
+  tokenCounts: TokenCounts;
   /** Per-projektowy toggle (roadmap v1.2, "kind=event episodic") — czy `event` dokłada się do
    * domyślnego `kind` w `search_memory` gdy agent go nie poda jawnie. Edytowany w
    * `ProjectSettingsDialog`. */
   includeEventsInDefaultSearch: boolean;
 }
 
+/** Lustro `ProjectTokenDto` (`apps/server/src/dashboard/projects.controller.ts`) — wiersz w dialogu
+ * "Tokeny". NIGDY nie niesie `token_hash`/plaintext tokena (patrz `TokenReveal` dla jednorazowego
+ * reveal, osobna ścieżka). */
+export interface ProjectTokenApi {
+  id: string;
+  projectId: string;
+  label: string;
+  status: ProjectTokenState;
+  effectiveStatus: EffectiveTokenStatus;
+  createdAt: string;
+  graceStartedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  lastUsedAt: string | null;
+  /** Atrybucja wyszukań ostatnich 30 dni (§0 pkt 7 planu v1.3 — per-token breakdown na "Pomiary"
+   * odłożone, to jest jedyna widoczna atrybucja w tym passie). */
+  searches30d: number;
+}
+
 export interface CreatedProject {
-  project: Omit<ProjectListItem, 'memoryCount'>;
+  project: Omit<ProjectListItem, 'memoryCount' | 'tokenCounts'>;
   token: string;
+  tokenRow: ProjectTokenApi;
+}
+
+/** Wynik `createToken`/`rotateToken` (roadmap v1.3) — token widoczny RAZ + jego publiczny wiersz. */
+export interface CreatedTokenApi {
+  token: string;
+  tokenRow: ProjectTokenApi;
+}
+
+/** `rotateToken` zwraca też stary wiersz (teraz w `grace`) — `TokenReveal` pokazuje jego `expiresAt`
+ * jako deadline karencji. */
+export interface RotatedTokenApi extends CreatedTokenApi {
+  previousTokenRow: ProjectTokenApi;
 }
 
 export interface AuditLogRowApi {

@@ -10,6 +10,7 @@ import {
   Plus,
   Settings,
   ShieldAlert,
+  ShieldOff,
   Trash2,
   Unlink2,
   X,
@@ -42,6 +43,8 @@ const EVENT_TYPES: AuditEventType[] = [
   'promote',
   'token_created',
   'token_rotated',
+  'token_revoked',
+  'token_relabeled',
   'secret_blocked',
   'purge_tombstone',
   'nightly_run',
@@ -61,6 +64,10 @@ const EVENT_CONFIG: Record<AuditEventType, { icon: LucideIcon; variant: NonNulla
   promote: { icon: CircleCheck, variant: 'success' },
   token_created: { icon: KeyRound, variant: 'success' },
   token_rotated: { icon: KeyRound, variant: 'pending' },
+  // roadmap v1.3 ("Wiele tokenów per projekt + graceful rotation") — unieważnienie natychmiastowe
+  // (odrębne od `token_rotated`, które startuje okres karencji) i rename etykiety (kosmetyczny).
+  token_revoked: { icon: ShieldOff, variant: 'danger' },
+  token_relabeled: { icon: Pencil, variant: 'neutral' },
   secret_blocked: { icon: ShieldAlert, variant: 'danger' },
   purge_tombstone: { icon: Trash2, variant: 'danger' },
   nightly_run: { icon: Moon, variant: 'info' },
@@ -83,8 +90,10 @@ function EventBadge({ eventType }: { eventType: AuditEventType }) {
 }
 
 /** §9.4 design-systemu — tabela zdarzeń filtrowalna po `event_type`/zakresie czasu/projekcie.
- * `secret_blocked` wyróżniony wierszem danger + CTA "Rotuj credential →" (link na Projekty, bo tam
- * żyje rotacja tokenów, §FR-D3). */
+ * `secret_blocked` wyróżniony wierszem danger + CTA "Zarządzaj tokenem →" (link na Projekty, bo tam
+ * żyje CRUD tokenów, §FR-D3) — roadmap v1.3 dodał `revoke` (natychmiastowe, dla skompromitowanych
+ * danych) obok `rotate` (graceful), więc CTA już nie zakłada z góry którą z dwóch akcji operator
+ * wybierze. */
 export function AuditScreen() {
   const [eventType, setEventType] = useState<EventFilter>('all');
   const [projectId, setProjectId] = useState<string>('all');
@@ -204,7 +213,14 @@ export function AuditScreen() {
                     <td className="px-3.5 py-2.5">
                       <EventBadge eventType={row.eventType} />
                     </td>
-                    <td className="px-3.5 py-2.5 font-mono text-xs text-muted-foreground">{row.actor}</td>
+                    <td className="px-3.5 py-2.5 font-mono text-xs text-muted-foreground">
+                      {row.actor}
+                      {typeof row.metadata?.tokenLabel === 'string' && (
+                        <span className="ml-1.5 rounded-sm border border-border-strong bg-neutral-subtle px-1 py-0.5 text-2xs normal-case tracking-normal text-neutral-foreground">
+                          {row.metadata.tokenLabel}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-3.5 py-2.5 font-mono text-xs">
                       {row.affectedIds.length === 0
                         ? '—'
@@ -220,7 +236,7 @@ export function AuditScreen() {
                     <td className="px-3.5 py-2.5 text-right">
                       {row.eventType === 'secret_blocked' ? (
                         <Link to="/projekty" className="text-xs font-semibold text-danger underline">
-                          Rotuj credential →
+                          Zarządzaj tokenem →
                         </Link>
                       ) : row.revisionId ? (
                         <span className="font-mono text-xs text-muted-foreground">{row.revisionId}</span>

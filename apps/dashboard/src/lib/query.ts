@@ -23,6 +23,8 @@ export const queryKeys = {
   /** Ekran "Oś czasu" (roadmap v1.2, "kind=event episodic") — `GET /api/memories/events`. */
   events: (filter: Record<string, unknown>) => ['memories', 'events', filter] as const,
   projects: () => ['projects'] as const,
+  /** Dialog "Tokeny" (roadmap v1.3, "Wiele tokenów per projekt + graceful rotation"). */
+  projectTokens: (projectId: string) => ['projects', projectId, 'tokens'] as const,
   audit: (filter: Record<string, unknown>) => ['audit', filter] as const,
   metrics: () => ['metrics'] as const,
   usage: (filter: Record<string, unknown>) => ['metrics', 'usage', filter] as const,

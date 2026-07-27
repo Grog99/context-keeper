@@ -22,8 +22,14 @@ export const proposalOrigin = pgEnum('proposal_origin', ['agent', 'human', 'nigh
 // human) mimo podobnego skutku (zamknięcie bez materializacji), bo audyt ma pokazywać KTO zdecydował.
 export const proposalStatus = pgEnum('proposal_status', ['pending', 'approved', 'rejected', 'withdrawn']);
 
-// Stan tokena projektu: none = jeszcze nie wygenerowany.
-export const projectTokenStatus = pgEnum('project_token_status', ['none', 'active', 'rotated']);
+// Stan tokena (roadmap v1.3, "Wiele tokenów per projekt + graceful rotation") — persystowane NA
+// WIERSZU `project_tokens`, nie na projekcie (N tokenów per projekt, każdy z własnym cyklem życia).
+// `expired` jest CELOWO nieobecny — pochodna (`grace` + `expires_at <= now()`), nigdy nie
+// zapisywana (patrz `projects/token-status.ts` `effectiveTokenStatus`, jedyna autorytatywna reguła
+// dzielona z SQL-owym `usableTokenCondition()` w `projects.service.ts`). Zastępuje stary
+// `project_token_status` (`none`/`active`/`rotated`) — ten był project-shaped (`none`="brak tokena",
+// bez sensu gdy tokeny są wierszami; `rotated`="hard-cutover", bez sensu gdy istnieje `grace`).
+export const projectTokenState = pgEnum('project_token_state', ['active', 'grace', 'revoked']);
 
 export const revisionAction = pgEnum('revision_action', [
   'created',
@@ -44,6 +50,11 @@ export const auditEventType = pgEnum('audit_event_type', [
   'promote',
   'token_created',
   'token_rotated',
+  // roadmap v1.3 ("Wiele tokenów per projekt + graceful rotation") — unieważnienie natychmiastowe
+  // (`revokeToken`, odrębne od `token_rotated`, które startuje okres karencji) i rename etykiety
+  // (`updateTokenLabel`, kosmetyczna zmiana, nie dotyka `usableTokenCondition()`).
+  'token_revoked',
+  'token_relabeled',
   'secret_blocked',
   'purge_tombstone',
   'nightly_run',
@@ -67,5 +78,6 @@ export type RelationType = (typeof relationType.enumValues)[number];
 export type ProposalType = (typeof proposalType.enumValues)[number];
 export type ProposalOrigin = (typeof proposalOrigin.enumValues)[number];
 export type ProposalStatus = (typeof proposalStatus.enumValues)[number];
+export type ProjectTokenState = (typeof projectTokenState.enumValues)[number];
 export type RevisionAction = (typeof revisionAction.enumValues)[number];
 export type AuditEventType = (typeof auditEventType.enumValues)[number];

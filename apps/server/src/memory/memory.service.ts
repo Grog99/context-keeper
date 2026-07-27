@@ -84,7 +84,7 @@ export class MemoryService {
       await this.audit.log({
         eventType: 'secret_blocked',
         actor,
-        metadata: { secretType: hit.kind }, // BEZ materiału sekretu (§10)
+        metadata: { secretType: hit.kind, ...this.attribution(ctx) }, // BEZ materiału sekretu (§10)
       });
       throw new ToolError(
         'secret_blocked',
@@ -191,7 +191,7 @@ export class MemoryService {
       eventType: 'proposal_created',
       actor,
       affectedIds: [mintedMemoryId],
-      metadata: { proposalId, kind },
+      metadata: { proposalId, kind, ...this.attribution(ctx) },
     });
 
     // Best-effort staged embedding (§7 tech-stack "embedding nigdy nie blokuje proposala"):
@@ -331,7 +331,7 @@ export class MemoryService {
       eventType: 'proposal_created',
       actor,
       affectedIds: [targetId],
-      metadata: { proposalId, kind, type: 'update', supersedes: targetId },
+      metadata: { proposalId, kind, type: 'update', supersedes: targetId, ...this.attribution(ctx) },
     });
 
     // Best-effort staged embedding na POPRAWIONEJ treści — sam wzorzec co create-path wyżej.
@@ -534,7 +534,7 @@ export class MemoryService {
       });
     }
 
-    await this.recordSearchSafe(ctx.projectId, results.length, qvec === null);
+    await this.recordSearchSafe(ctx.projectId, ctx.tokenId, results.length, qvec === null);
     return results;
   }
 
@@ -542,15 +542,36 @@ export class MemoryService {
    * Fail-open (plan §1b "Hot-path safety", §5(e)): instrumentacja NIGDY nie może zamienić dobrego
    * `search()` w błąd — awaria insertu jest złapana i zalogowana, nie propagowana. `degraded` = brak
    * query-vectora (embedding provider down/timeout) — patrz komentarz przy `search_events` w
-   * `db/schema/search-events.ts`.
+   * `db/schema/search-events.ts`. `tokenId` (roadmap v1.3, "Wiele tokenów per projekt + graceful
+   * rotation") — atrybucja per-agent na `search_events`, `undefined` gdy `ctx` nie niesie tokena
+   * (np. ręcznie budowany kontekst w testach) -> kolumna zostaje `NULL`, symetrycznie z resztą
+   * opcjonalnych pól `ProjectContext`.
    */
-  private async recordSearchSafe(projectId: string, resultCount: number, degraded: boolean): Promise<void> {
+  private async recordSearchSafe(
+    projectId: string,
+    tokenId: string | undefined,
+    resultCount: number,
+    degraded: boolean,
+  ): Promise<void> {
     try {
-      await this.usage.recordSearch({ projectId, resultCount, degraded });
+      await this.usage.recordSearch({ projectId, tokenId: tokenId ?? null, resultCount, degraded });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`[usage] recordSearch nie powiódł się (fail-open, wynik search() nietknięty): ${message}`);
     }
+  }
+
+  /**
+   * Atrybucja per-agent (roadmap v1.3, "Wiele tokenów per projekt + graceful rotation") — spread do
+   * `metadata` na wszystkich agent-path audit calls (`secret_blocked`, `proposal_created` z obu
+   * ścieżek `save()`). `ctx.tokenId` opcjonalny (§ProjectContext) -> `{}` gdy nieobecny, żeby stare
+   * ręcznie budowane konteksty (testy) dalej dawały metadata bez `tokenId`/`tokenLabel` zamiast
+   * `undefined` wartości zaśmiecających JSON. `get()` CELOWO nie woła tego — nie jest w
+   * `search_events` z design (ma już `access_count`) i nie audytuje żadnego wpisu, więc nie ma
+   * gdzie by ta atrybucja miała trafić.
+   */
+  private attribution(ctx: ProjectContext): { tokenId?: string; tokenLabel?: string } {
+    return ctx.tokenId ? { tokenId: ctx.tokenId, tokenLabel: ctx.tokenLabel } : {};
   }
 
   /** Ramię FTS (FR-R2): `plainto_tsquery('simple', …)` + `ts_rank`, zwraca id-y w kolejności rankingu. */

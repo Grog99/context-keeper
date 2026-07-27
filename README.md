@@ -60,6 +60,10 @@ docker compose run --rm app node dist/cli.js create-project acme
 > Domyślnie `app` migruje bazę in-process przed nasłuchem — nie musisz odpalać osobnego kroku.
 > Przy `DB_AUTO_MIGRATE=false` migrujesz sam PRZED startem appki:
 > `docker compose run --rm app node dist/db/migrate.js`.
+>
+> Migracje bywają nieodwracalne (np. `0010` usuwa kolumny tokena z `projects` po przejściu na
+> model wielotokenowy) — deploy musi być **stop-then-start**, nie rolling/blue-green z dwiema
+> wersjami appki działającymi jednocześnie na tej samej bazie.
 
 Profile opcjonalne:
 
@@ -122,7 +126,11 @@ patrz `package.json`.
 
 ## Bezpieczeństwo
 
-- Bearer token `ck_` (256-bit); w bazie tylko **SHA-256** (`token_hash`), nigdy plaintext.
+- Bearer token `ck_` (256-bit); w bazie tylko **SHA-256** (`project_tokens.token_hash`), nigdy plaintext.
+- Wiele tokenów per projekt (jeden na agenta, etykieta wymagana) — rotacja **graceful** (nowy token
+  obok starego, stary wygasa po okresie karencji, `TOKEN_GRACE_PERIOD_HOURS`) albo **unieważnienie
+  natychmiastowe** dla skompromitowanych danych; CLI: `list-tokens` / `create-token` / `rotate-token`
+  / `revoke-token`.
 - `.env` poza repo; sekrety nie trafiają do obrazu.
 
 ## Operacje

@@ -169,7 +169,7 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
     db = drizzle(pool, { schema });
     await migrate(db, { migrationsFolder: resolve(process.cwd(), 'src/db/migrations') });
 
-    projects = new ProjectsService(db);
+    projects = new ProjectsService(db, new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' })));
     audit = new AuditService(db);
   });
 

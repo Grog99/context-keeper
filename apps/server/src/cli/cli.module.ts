@@ -10,13 +10,16 @@ import { ProposalsModule } from '../proposals/proposals.module';
 import { PurgeModule } from '../purge/purge.module';
 import { ApproveProposalCommand } from './approve-proposal.command';
 import { CreateProjectCommand } from './create-project.command';
+import { CreateTokenCommand } from './create-token.command';
 import { EditProposalCommand } from './edit-proposal.command';
 import { ListProjectsCommand } from './list-projects.command';
 import { ListProposalsCommand } from './list-proposals.command';
+import { ListTokensCommand } from './list-tokens.command';
 import { PurgeCommand } from './purge.command';
 import { RecordBackupCommand } from './record-backup.command';
 import { ReembedCommand } from './reembed.command';
 import { RejectProposalCommand } from './reject-proposal.command';
+import { RevokeTokenCommand } from './revoke-token.command';
 import { RotateTokenCommand } from './rotate-token.command';
 import { RunNightlyCommand } from './run-nightly.command';
 import { SeedMemoryCommand } from './seed-memory.command';
@@ -42,6 +45,9 @@ import { SeedMemoryCommand } from './seed-memory.command';
   providers: [
     CreateProjectCommand,
     RotateTokenCommand,
+    CreateTokenCommand,
+    RevokeTokenCommand,
+    ListTokensCommand,
     ListProjectsCommand,
     SeedMemoryCommand,
     ReembedCommand,

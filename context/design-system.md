@@ -301,7 +301,9 @@ Bazujemy na shadcn (kopiowane do repo → pełna kontrola). Poniżej — bazowe 
 
 **`MetricStat`** — kafelek paska zdrowia: label `text-2xs` uppercase, wartość `text-lg` tabular-nums, kropka statusu. Warianty: liczba (queue depth), health-dot (embedding up/degraded), wynik (nightly ✓ 3 created), licznik alertu (`secret_blocked` /24h — czerwony gdy >0).
 
-**`TokenReveal`** — Dialog jednorazowego pokazania `ck_…`: duży mono, `Kopiuj`, wyraźne ostrzeżenie „Zobaczysz to raz. W bazie trzymamy tylko hash." Po zamknięciu — nieodwracalnie zamaskowany.
+**`TokenReveal`** — Dialog jednorazowego pokazania `ck_…`: duży mono, `Kopiuj`, wyraźne ostrzeżenie „Zobaczysz to raz. W bazie trzymamy tylko hash." Po zamknięciu — nieodwracalnie zamaskowany. Pokazuje też etykietę tokena (atrybucja per-agent, v1.3); przy `reason="rotated"` ostrzeżenie zmienia się na okno karencji („Stary token działa jeszcze do [data] — zaktualizuj klientów MCP") zamiast hard-cutover.
+
+**`TokenStatusBadge`** (v1.3) — badge `effectiveStatus` tokena, ikona+kolor+label (P2): `active`→success „aktywny", `grace`→pending „karencja", `expired`→neutral „wygasły", `revoked`→danger „unieważniony". `effectiveStatus` liczony WYŁĄCZNIE server-side (`effectiveTokenStatus`, jedna reguła dzielona z auth) — SPA nigdy nie wyprowadza tego sama z `status`+`expiresAt`.
 
 **`ContextSwitcher`** — w top barze: `Wszystkie` / `Global` / `‹projekty…›` (Command-search po nazwie). Aktywny kontekst dziedziczy cała aplikacja (FR-D6). `Wszystkie` → tryb read/inbox (human-create **wyłączony**, widoczna adnotacja dlaczego).
 
@@ -370,9 +372,18 @@ Bazujemy na shadcn (kopiowane do repo → pełna kontrola). Poniżej — bazowe 
 
 ### 9.3 Projekty / tokeny (FR-D3) — poza context switcherem (lista wszystkich)
 
-- **Lista projektów:** nazwa, `project_id` (mono), liczba pamięci, data utworzenia, status tokena (aktywny/rotowany).
-- **Akcje:** `Nowy projekt`, `Generuj token`, `Rotuj token` (AlertDialog: „stary token przestanie działać natychmiast — hard-cutover"), ikona ⚙ → `ProjectSettingsDialog`.
-- **`TokenReveal`:** po generacji/rotacji — Dialog jednorazowy z `ck_…`, `Kopiuj`, ostrzeżenie „widoczny raz, w bazie tylko hash".
+- **Lista projektów:** nazwa, `project_id` (mono), liczba pamięci, data utworzenia, **liczniki tokenów**
+  (v1.3 — badge „N aktywne" + „M karencja", zastępuje dawny 1:1 status tokena — patrz `ProjectListItem.tokenCounts`).
+- **Akcje:** `Nowy projekt` (z wymaganą etykietą pierwszego tokena, prefill `default`), `Tokeny` (ikona
+  ⚙-sąsiad) → otwiera `ProjectTokensDialog` (v1.3), ikona ⚙ → `ProjectSettingsDialog`.
+- **`ProjectTokensDialog` (v1.3)** — dialog per projekt, sibling `ProjectSettingsDialog`: tabela
+  tokenów (etykieta inline-editable z ołówkiem, `TokenStatusBadge`, `tok_…` mono, utworzony/wygasa/
+  ostatnio użyty, wyszukań 30 dni, akcje), formularz „Nowy token" (etykieta wymagana), per-wiersz
+  `Rotuj` (tylko `active` — AlertDialog wyjaśnia okno karencji, potem `TokenReveal`) i `Unieważnij`
+  (dowolny nie-`revoked` — AlertDialog destrukcyjny, dodatkowe ostrzeżenie gdy to ostatni usable token
+  projektu, nie blokujące). Mutacje invalidują zarówno listę tokenów, jak i listę projektów (liczniki).
+- **`TokenReveal`:** po utworzeniu projektu/tokena LUB rotacji — Dialog jednorazowy z `ck_…`, etykietą,
+  `Kopiuj`; przy rotacji komunikat okna karencji zamiast hard-cutover (patrz §8.2).
 - **`ProjectSettingsDialog` (v1.2):** osobny dialog szczegółów projektu (NIE inline switch w wierszu
   tabeli) — dziś jedno pole: `Switch` „Dołączaj zdarzenia do domyślnego wyszukiwania"
   (`include_events_in_default_search`). Zmiana audytowana jako `project_settings_changed`, widoczna
@@ -383,7 +394,8 @@ Bazujemy na shadcn (kopiowane do repo → pełna kontrola). Poniżej — bazowe 
 
 - **Filtry:** `event_type` (m.in. `secret_blocked`, `purge_tombstone`, `nightly_run`, `proposal_*`, `promote`, `archive`, `token_*`), zakres czasu, projekt.
 - **Tabela:** czas (mono, tabular) · `event_type` (chip) · aktor (`OriginPath`/`human-dashboard`) · `affected_ids` (mono, klik → pamięć) · `rev_…`.
-- **`secret_blocked`** wyróżniony `danger` — to sygnał rotacji; wiersz linkuje do projektu/tokena z CTA „Rotuj credential".
+- **`secret_blocked`** wyróżniony `danger` — to sygnał rotacji/unieważnienia; wiersz linkuje do projektu/tokena z CTA „Zarządzaj tokenem" (v1.3 — operator wybiera `Rotuj` albo `Unieważnij` w `ProjectTokensDialog`).
+- **`token_revoked`** (v1.3, ikona `shield-off`, `danger`) i **`token_relabeled`** (v1.3, ikona `pencil`, `neutral`) dołączone do `token_*` — aktor niesie dodatkowy chip z `metadata.tokenLabel`, gdy obecny (agent-path eventy: `proposal_created`, `secret_blocked`).
 - **Sekcja `revisions`:** przegląd historii zmian (before/after) niezależnie od kolejki.
 
 ### 9.5 Human-create (FR-D5) — Dialog/drawer „Nowa pamięć"

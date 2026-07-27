@@ -26,6 +26,10 @@ function dateTruncExpr(bucket: UsageBucket, column: AnyColumn) {
 
 export interface RecordSearchInput {
   projectId: string;
+  /** Atrybucja per-agent (roadmap v1.3, "Wiele tokenów per projekt + graceful rotation") — opcjonalna
+   * i nullable, purely additive: `null`/pominięte -> `search_events.token_id` zostaje `NULL` (np.
+   * gdy `ctx` nie niesie tokena). */
+  tokenId?: string | null;
   resultCount: number;
   degraded: boolean;
 }
@@ -69,6 +73,7 @@ export class UsageService {
     await this.db.insert(searchEvents).values({
       id: generateId(ID_PREFIX.searchEvent),
       projectId: input.projectId,
+      tokenId: input.tokenId ?? null,
       resultCount: input.resultCount,
       degraded: input.degraded,
     });
@@ -139,6 +144,28 @@ export class UsageService {
     // date_trunc(...) (timestamptz) jako string, nie jako JS Date. Normalizujemy tu, żeby
     // `ProposalBucketRow.ts` faktycznie dotrzymywał zadeklarowanego typu `Date` dla DTO/konsumentów.
     return rows.map((row) => ({ ...row, ts: new Date(row.ts as unknown as string | Date) }));
+  }
+
+  /**
+   * Kolumna "Wyszukań (30 dni)" w dialogu Tokeny (roadmap v1.3, "Wiele tokenów per projekt +
+   * graceful rotation" — §0 pkt 7: per-token breakdown na ekranie "Pomiary" ODŁOŻONE, ten licznik
+   * jest jedyną atrybucją wyszukań widoczną w tym passie). Zwraca `token_id -> liczba wyszukań`
+   * dla WSZYSTKICH tokenów projektu od `since` — wiersze sprzed migracji v1.3 mają `token_id IS NULL`
+   * i są celowo pominięte (brak przypisania do jakiegokolwiek konkretnego tokena).
+   */
+  async countSearchesByToken(projectId: string, since: Date): Promise<Map<string, number>> {
+    const rows = await this.db
+      .select({ tokenId: searchEvents.tokenId, count: sql<number>`count(*)::int` })
+      .from(searchEvents)
+      .where(
+        and(
+          eq(searchEvents.projectId, projectId),
+          isNotNull(searchEvents.tokenId),
+          gte(searchEvents.createdAt, since),
+        ),
+      )
+      .groupBy(searchEvents.tokenId);
+    return new Map(rows.map((r) => [r.tokenId as string, r.count]));
   }
 
   /** Retencja (plan §5(b/g), `SEARCH_EVENTS_RETENTION_DAYS`) — piggyback na nocnym jobie, zwraca

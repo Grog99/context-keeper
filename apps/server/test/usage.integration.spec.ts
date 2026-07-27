@@ -7,6 +7,8 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { generateId, ID_PREFIX } from '../src/common/ids';
+import { AppConfigService } from '../src/config/config.service';
+import { envSchema } from '../src/config/env';
 import type { Database } from '../src/db/db.tokens';
 import * as schema from '../src/db/schema';
 import { proposals, searchEvents, type NewProposalRow } from '../src/db/schema';
@@ -75,7 +77,8 @@ describe('UsageService (integration, testcontainers) — ekran "Pomiary", roadma
     db = drizzle(pool, { schema });
     await migrate(db, { migrationsFolder: resolve(process.cwd(), 'src/db/migrations') });
 
-    projects = new ProjectsService(db);
+    const config = new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' }));
+    projects = new ProjectsService(db, config);
     usage = new UsageService(db);
 
     const createdA = await projects.createProject('usage-test-a');
