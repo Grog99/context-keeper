@@ -78,6 +78,13 @@
       "when": 1785144695573,
       "tag": "0010_overjoyed_chameleon",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785148447911,
+      "tag": "0011_recompute_content_hash_with_kind",
+      "breakpoints": true
     }
   ]
 }

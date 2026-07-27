@@ -139,7 +139,7 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 - **FR-M5** Agent w v1 tylko **tworzy** (`create`). Korekta faktu = nowy `create` + human-mediated supersession.
 - **FR-M6** Auth: statyczny bearer token per projekt w `Authorization`; serwer mapuje token → `project_id`. **Zweryfikowany dla Claude Code**; OAuth → roadmapa.
 - **FR-M7** **Taksonomia błędów:** błędy wykonania narzędzia → `isError` + koperta `{code, message}` (`validation_error`/`secret_blocked`/`not_found`); transport/auth → HTTP (`401`, `429`+`Retry-After`). `code` stabilne.
-- **FR-M8** **Idempotencja:** exact `hash(header+body+scope+project)` → `duplicate_pending` (pending) / `already_exists` (approved). Bez client idempotency key w v1.
+- **FR-M8** **Idempotencja:** exact `hash(header+body+scope+project+kind)` → `duplicate_pending` (pending) / `already_exists` (approved). Bez client idempotency key w v1.
 - **FR-M9** **Kontrakt z agentem:** opisy narzędzi niosą pełny kontrakt (co/czego nie zapisywać, human-gate, jeden fakt/zapis, semantyka zwrotki); load-bearing polityka (w tym „nie zapisuj sekretów") jedzie z serwerem, nie z pluginem/wklejką. Snippet proaktywności → `CLAUDE.md`/`AGENTS.md`.
 
 ### 6.2 Kolejka akceptacji (write path)

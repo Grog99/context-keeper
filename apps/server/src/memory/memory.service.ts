@@ -108,15 +108,11 @@ export class MemoryService {
     }
 
     const scope = 'project' as const; // FR-M4: zapisy agenta tylko project-scoped
-    const contentHash = computeContentHash({ header, body, scope, projectId: ctx.projectId });
+    const contentHash = computeContentHash({ header, body, scope, projectId: ctx.projectId, kind });
 
     // Idempotencja (FR-M8): exact match do pending proposala w tym samym projekcie → duplicate_pending.
-    // ZNANA LUKA (świadomie odłożona jako follow-up, patrz plan "Agent tworzy kind=document" §1/§5):
-    // hash i poniższe zapytania dedup IGNORUJĄ `kind` — identyczny header+body zapisany raz jako
-    // `fact`, potem bajt-w-bajt to samo jako `document`, koliduje: drugi zapis dostaje
-    // `duplicate_pending`/`already_exists` wskazujący na pamięć INNEGO kind, a właściwy dokument nigdy
-    // nie powstaje. Rzadkie (wymaga identycznego tekstu w dwóch kind), ale zły failure mode — fix
-    // (dołożenie `kind` do `computeContentHash` i zapytań niżej) to osobne zadanie roadmapy.
+    // Hash niesie też `kind` (roadmap v1.3 "Dedup kind-aware") — identyczny header+body zapisany pod
+    // innym `kind` niż istniejąca pamięć/proposal to ODRĘBNA pamięć, nie duplikat.
     const [pendingDup] = await this.db
       .select({ id: proposals.id })
       .from(proposals)
@@ -131,7 +127,7 @@ export class MemoryService {
 
     // Exact match do zatwierdzonej pamięci → already_exists. Bez osobnej kolumny hash na `memories`
     // (Faza 1 jej nie definiuje) — porównanie polowe jest semantycznie równoważne
-    // hash(header+body+scope+project), więc nie modyfikujemy schematu Fazy 1 dla tego.
+    // hash(header+body+scope+project+kind), więc nie modyfikujemy schematu Fazy 1 dla tego.
     // Pomijamy to zapytanie, jeśli pending już wygrał (klasyfikacja i tak go zignoruje).
     let existingMemory: { id: string } | undefined;
     if (!pendingDup) {
@@ -145,6 +141,7 @@ export class MemoryService {
             eq(memories.projectId, ctx.projectId),
             eq(memories.header, header),
             eq(memories.body, body),
+            eq(memories.kind, kind),
           ),
         )
         .limit(1);
@@ -275,7 +272,10 @@ export class MemoryService {
     }
 
     const scope = 'project' as const;
-    const contentHash = computeContentHash({ header, body, scope, projectId: ctx.projectId });
+    // `kind` tu zawsze == `row.kind` (gate wyżej), więc dołożenie go do hasha jest mechaniczną
+    // propagacją współdzielonej definicji, nie nową zachowaniem — utrzymuje niezmiennik "każdy
+    // zapisany content_hash = computeContentHash(payload)" bez wyjątków (na nim opiera się migracja).
+    const contentHash = computeContentHash({ header, body, scope, projectId: ctx.projectId, kind });
 
     // Target-aware idempotencja (odrębna od create-path dedup wyżej): retry IDENTYCZNEJ korekty
     // (ten sam target + ta sama poprawiona treść) -> duplicate_pending wskazujący na istniejący

@@ -3,10 +3,11 @@ import { resolve } from 'node:path';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AuditService } from '../src/audit/audit.service';
+import { computeContentHash } from '../src/common/content-hash';
 import { ToolError } from '../src/common/errors';
 import { AppConfigService } from '../src/config/config.service';
 import { envSchema } from '../src/config/env';
@@ -183,6 +184,85 @@ describe('MemoryService (integration, testcontainers)', () => {
       expect(a.status).toBe('pending');
       expect(b.status).toBe('pending');
       expect(a.id).not.toBe(b.id);
+    });
+
+    it('dedup jest kind-aware (roadmap v1.3 "Dedup kind-aware"): identyczny header+body zapisany jako fact, potem jako document -> DRUGI zapis to nowy pending proposal, nie duplicate_pending', async () => {
+      const header = 'Kind-aware dedup regresja';
+      const body = 'Bajt-w-bajt identyczna tresc, rozne kind.';
+
+      const asFact = await memory.save({ header, body }, projectA);
+      expect(asFact.status).toBe('pending');
+
+      const asDocument = await memory.save({ header, body, kind: 'document' }, projectA);
+      expect(asDocument.status).toBe('pending'); // NIE duplicate_pending mimo identycznego header+body
+      expect(asDocument.id).not.toBe(asFact.id);
+
+      const rows = await db.select().from(proposals).where(eq(proposals.projectId, projectA.projectId));
+      const matching = rows.filter((p) => (p.payload as { header: string }).header === header);
+      expect(matching.length).toBe(2);
+      const kinds = matching.map((p) => (p.payload as { kind: string }).kind).sort();
+      expect(kinds).toEqual(['document', 'fact']);
+    });
+
+    it('already_exists jest kind-aware: zatwierdzony fact tej samej treści NIE blokuje document, ale nadal blokuje kolejny fact', async () => {
+      const header = 'Already-exists kind-aware';
+      const body = 'Tresc zatwierdzona jako fact.';
+      const seeded = await memory.devSeedApproved({
+        header,
+        body,
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectA.projectId,
+      });
+
+      const asDocument = await memory.save({ header, body, kind: 'document' }, projectA);
+      expect(asDocument.status).toBe('pending'); // NIE already_exists — inny kind niż zatwierdzony fact
+
+      const asFact = await memory.save({ header, body }, projectA);
+      expect(asFact.status).toBe('already_exists');
+      expect(asFact.id).toBe(seeded.id);
+    });
+
+    it('ten sam kind wciąż dedupuje: identyczny document zapisany dwa razy -> drugi duplicate_pending', async () => {
+      const header = 'Document same-kind dedup';
+      const body = 'Identyczna tresc dokumentu.';
+
+      const first = await memory.save({ header, body, kind: 'document' }, projectA);
+      expect(first.status).toBe('pending');
+
+      const second = await memory.save({ header, body, kind: 'document' }, projectA);
+      expect(second.status).toBe('duplicate_pending');
+      // `first.id` to zmintowany id PAMIĘCI (create-path zwraca go nawet dla `pending`), `second.id`
+      // to id ISTNIEJĄCEGO proposala (jak w teście "duplicate_pending" wyżej) — inny namespace,
+      // więc NIE porównujemy ich równości, tylko kształt.
+      expect(second.id).not.toBe(first.id);
+      expect(second.id).toMatch(/^prop_/);
+    });
+
+    it('parytet SQL<->TS: wyrażenie hash z migracji 0011 daje identyczny hex digest co computeContentHash, w tym dla projectId=null', async () => {
+      const input = {
+        header: 'Parytet SQL i TS',
+        body: 'Tresc do porownania hashy.',
+        scope: 'project' as const,
+        projectId: null as string | null,
+        kind: 'fact' as const,
+      };
+      const tsHash = computeContentHash(input);
+
+      const result = await db.execute<{ hash: string }>(sql`
+        SELECT encode(
+          sha256(convert_to(
+            ${input.header} || chr(31) ||
+            ${input.body}   || chr(31) ||
+            ${input.scope}  || chr(31) ||
+            coalesce(${input.projectId}, '') || chr(31) ||
+            ${input.kind},
+            'UTF8'
+          )),
+          'hex'
+        ) AS hash
+      `);
+      expect(result.rows[0].hash).toBe(tsHash);
     });
 
     it('secret_blocked: sekret w body blokuje zapis, audit log dostaje wpis BEZ materiału sekretu', async () => {

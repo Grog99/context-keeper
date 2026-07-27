@@ -70,13 +70,13 @@ rodzaj wpisu — wraz z fixem deduplikacji, który ten trzeci rodzaj czyni pilny
   `kind: "event"` wraz z `event_time`. Te same guardy co dla `fact`/`document` (human-gate, skaner
   sekretów, limity rozmiaru). Do rozstrzygnięcia w projektowaniu: czy `event_time` jest wymagane, czy
   domyślnie „teraz", i jak szeroki backdate wolno zaproponować agentowi.
-- **Dedup kind-aware** ⬜ — **fix znanego buga, nie feature.** `computeContentHash`/`already_exists`
-  w `MemoryService.save()` dziś ignorują `kind`: identyczny `header`+`body` zapisany jako różne `kind`
-  (np. `fact` i `document`) koliduje jako duplikat i **drugi zapis ginie po cichu**
-  (`duplicate_pending`/`already_exists` wskazuje na pamięć niewłaściwego rodzaju). Cicha utrata zapisu
-  jest sprzeczna z obietnicą produktu. Zakres: `kind` wchodzi do hasha + migracja przeliczająca istniejące
-  hashe. Świadomie odłożone przy „Agent tworzy `kind=document`" (v1.2), domykane tutaj — tym pilniej,
-  że `kind=event` przez agenta dokłada trzeci rodzaj do tej samej kolizji.
+- **Dedup kind-aware** ✅ — **fix znanego buga, nie feature.** `computeContentHash` i zapytania
+  `already_exists`/`duplicate_pending` w `MemoryService.save()` niosą teraz `kind` jako piąte pole
+  hasha (`header ␟ body ␟ scope ␟ project ␟ kind`) — identyczny `header`+`body` zapisany jako różne
+  `kind` (np. `fact` i `document`) to od teraz ODRĘBNA pamięć, nie duplikat. Migracja przeliczyła
+  istniejące `proposals.content_hash` na nową formułę. Nocny job (`dedup-cluster.ts`) dostał defense-
+  in-depth: ANN-partycja i `pickCanonicalMerge` też są ścisłe po `kind` (nieosiągalne dziś — oba końce
+  ANN są już `kind='fact'` — ale zabezpiecza przed przyszłym rozszerzeniem skanu).
 
 ### UI
 
