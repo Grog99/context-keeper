@@ -88,6 +88,10 @@ export interface EditMemoryInput {
   header?: string;
   body?: string;
   tags?: string[];
+  /** Korekta backdate po fakcie (roadmap v1.2, "Edycja `event_time` po utworzeniu") — ISO,
+   * sens tylko dla `kind='event'`; `editMemory` odrzuca ją twardo dla fact/document zamiast
+   * cicho ignorować (maskowałoby bug klienta). */
+  eventTime?: string;
 }
 
 export interface WithWarnings {
@@ -116,7 +120,7 @@ export interface CreateRelationInput {
 }
 
 function snapshotOf(row: MemoryRow): Record<string, unknown> {
-  return { header: row.header, body: row.body, tags: row.tags, kind: row.kind, version: row.version };
+  return { header: row.header, body: row.body, tags: row.tags, kind: row.kind, version: row.version, eventTime: row.eventTime };
 }
 
 function toListItem(row: {
@@ -478,10 +482,20 @@ export class MemoryAdminService {
     if (current.status !== 'approved') {
       throw new ToolError('validation_error', `Pamięć ${id} nie jest w stanie approved (jest: ${current.status})`);
     }
+    // `event_time` (roadmap v1.2, "Edycja event_time po utworzeniu") ma sens WYŁĄCZNIE dla
+    // kind=event — twardy reject zamiast cichego ignorowania, żeby nie maskować buga klienta.
+    if (edits.eventTime !== undefined && current.kind !== 'event') {
+      throw new ToolError('validation_error', `event_time można edytować wyłącznie dla kind=event (jest: ${current.kind})`);
+    }
 
     const header = edits.header !== undefined ? normalizeHeader(edits.header) : current.header;
     const body = edits.body !== undefined ? validateBody(edits.body, current.kind, this.config) : current.body;
     const tags = edits.tags !== undefined ? normalizeTags(edits.tags, this.config) : current.tags;
+    // Fallback na obecną wartość gdy `eventTime` nie podano — analogicznie do header/body/tags.
+    const eventTime = validateEventTime(
+      edits.eventTime !== undefined ? edits.eventTime : current.eventTime?.toISOString(),
+      current.kind,
+    );
     const warnings = this.scanWarn(header, body);
 
     // Embedding POZA transakcją (sieć) — jak `ProposalsService.approve` (§1.5 planu Fazy 4).
@@ -490,7 +504,7 @@ export class MemoryAdminService {
     await this.db.transaction(async (tx) => {
       await tx
         .update(memories)
-        .set({ header, body, tags, version: sql`${memories.version} + 1`, updatedAt: new Date() })
+        .set({ header, body, tags, eventTime, version: sql`${memories.version} + 1`, updatedAt: new Date() })
         .where(eq(memories.id, id));
       await this.writeRevision(tx, id, 'edited', snapshotOf(current));
       await tx.delete(embeddings).where(eq(embeddings.memoryId, id));

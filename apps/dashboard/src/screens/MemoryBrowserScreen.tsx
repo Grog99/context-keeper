@@ -31,7 +31,7 @@ import { StatusChip } from '../components/StatusChip';
 import { api } from '../lib/api';
 import { contextQueryParams, useActiveContext } from '../lib/context';
 import { describeApiError } from '../lib/errors';
-import { formatAbsoluteTime, formatRelativeTime } from '../lib/format';
+import { formatAbsoluteTime, formatRelativeTime, toDatetimeLocalValue } from '../lib/format';
 import { queryKeys } from '../lib/query';
 import { toQueryString } from '../lib/query-string';
 import { cn } from '../lib/utils';
@@ -152,8 +152,13 @@ export function MemoryBrowserScreen() {
   }
 
   const editMutation = useMutation({
-    mutationFn: (vars: { id: string; header: string; body: string; tags: string[] }) =>
-      api.patch<WithWarnings>(`/memories/${vars.id}`, { header: vars.header, body: vars.body, tags: vars.tags }),
+    mutationFn: (vars: { id: string; header: string; body: string; tags: string[]; eventTime?: string }) =>
+      api.patch<WithWarnings>(`/memories/${vars.id}`, {
+        header: vars.header,
+        body: vars.body,
+        tags: vars.tags,
+        ...(vars.eventTime !== undefined ? { eventTime: vars.eventTime } : {}),
+      }),
     onSuccess: (result, vars) => {
       setEditingForId(null);
       if (result.warnings.length > 0) {
@@ -318,9 +323,11 @@ export function MemoryBrowserScreen() {
                 <TabsContent value="body" className="pt-4">
                   {editing ? (
                     <MemoryEditForm
+                      kind={detail.kind}
                       initialHeader={detail.header}
                       initialBody={detail.body}
                       initialTags={detail.tags}
+                      initialEventTime={detail.eventTime}
                       saving={editMutation.isPending}
                       onCancel={() => setEditingForId(null)}
                       onSave={(vars) => editMutation.mutate({ id: detail.id, ...vars })}
@@ -512,23 +519,33 @@ function MemoryRow({
 }
 
 function MemoryEditForm({
+  kind,
   initialHeader,
   initialBody,
   initialTags,
+  initialEventTime,
   onCancel,
   onSave,
   saving,
 }: {
+  kind: MemoryKind;
   initialHeader: string;
   initialBody: string;
   initialTags: string[];
+  initialEventTime: string | null;
   onCancel: () => void;
-  onSave: (vars: { header: string; body: string; tags: string[] }) => void;
+  onSave: (vars: { header: string; body: string; tags: string[]; eventTime?: string }) => void;
   saving: boolean;
 }) {
   const [header, setHeader] = useState(initialHeader);
   const [body, setBody] = useState(initialBody);
   const [tagsInput, setTagsInput] = useState(initialTags.join(', '));
+  // `initialEventTime` jest `null` dla fact/document — fallback na "teraz" nie ma tu znaczenia
+  // (pole renderuje się tylko gdy kind==='event', gdzie eventTime zawsze jest ustawiony).
+  const [eventTime, setEventTime] = useState(() =>
+    toDatetimeLocalValue(initialEventTime ? new Date(initialEventTime) : new Date()),
+  );
+  const eventTimeInvalid = kind === 'event' && Number.isNaN(new Date(eventTime).getTime());
 
   return (
     <div className="flex flex-col gap-3">
@@ -536,6 +553,20 @@ function MemoryEditForm({
         Nagłówek
         <Input value={header} onChange={(e) => setHeader(e.target.value)} maxLength={200} />
       </label>
+      {kind === 'event' && (
+        <label className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground">Kiedy się wydarzyło</span>
+          <Input
+            type="datetime-local"
+            value={eventTime}
+            onChange={(e) => setEventTime(e.target.value)}
+            className={eventTimeInvalid ? 'border-danger' : undefined}
+          />
+          <span className="text-2xs text-faint">
+            Backdatable — możesz cofnąć na dowolną wcześniejszą datę. Przyszłe daty też są dozwolone.
+          </span>
+        </label>
+      )}
       <label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
         Treść
         <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={14} />
@@ -551,7 +582,7 @@ function MemoryEditForm({
         <Button
           variant="primary"
           size="sm"
-          disabled={saving}
+          disabled={saving || eventTimeInvalid}
           onClick={() =>
             onSave({
               header,
@@ -560,6 +591,7 @@ function MemoryEditForm({
                 .split(',')
                 .map((t) => t.trim())
                 .filter(Boolean),
+              eventTime: kind === 'event' ? new Date(eventTime).toISOString() : undefined,
             })
           }
         >

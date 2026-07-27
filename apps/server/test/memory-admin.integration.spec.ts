@@ -351,6 +351,64 @@ describe('MemoryAdminService (integration, testcontainers) — przeglądarka pam
         code: 'not_found',
       });
     });
+
+    describe('eventTime (roadmap v1.2, "Edycja event_time po utworzeniu")', () => {
+      it('edycja event_time na kind=event aktualizuje row.eventTime, bumpuje version, snapshot rewizji ma STARĄ wartość', async () => {
+        const oldEventTime = new Date('2026-01-01T00:00:00Z');
+        const seeded = await seedApprovedMemory({
+          kind: 'event',
+          header: 'Zdarzenie do korekty czasu',
+          body: 'Tresc zdarzenia.',
+          projectId: projectA.projectId,
+          eventTime: oldEventTime,
+        });
+
+        const { admin } = buildAdmin(new StubEmbeddingProvider('edit-event-time-model'));
+        const newEventTime = '2026-02-15T12:00:00Z';
+        const result = await admin.editMemory(seeded.id, { eventTime: newEventTime });
+        expect(result.warnings).toEqual([]);
+
+        const [row] = await db.select().from(memories).where(eq(memories.id, seeded.id));
+        expect(row.eventTime?.toISOString()).toBe('2026-02-15T12:00:00.000Z');
+        expect(row.version).toBe(1);
+
+        const revRows = await db.select().from(revisions).where(eq(revisions.memoryId, seeded.id));
+        const editedRev = revRows.find((r) => r.action === 'edited');
+        expect(editedRev).toBeDefined();
+        expect((editedRev!.snapshot as { eventTime: string }).eventTime).toBe(oldEventTime.toISOString());
+      });
+
+      it('editMemory({ eventTime }) na kind=fact -> validation_error', async () => {
+        const seeded = await seedApprovedMemory({
+          header: 'Fakt bez event_time',
+          body: 'To jest fakt.',
+          projectId: projectA.projectId,
+        });
+        const { admin } = buildAdmin(new StubEmbeddingProvider('edit-event-time-fact-model'));
+        await expect(
+          admin.editMemory(seeded.id, { eventTime: '2026-02-15T12:00:00Z' }),
+        ).rejects.toMatchObject({ code: 'validation_error' });
+      });
+
+      it('editMemory({ header }) na kind=event BEZ eventTime -> sukces, event_time niezmieniony (fallback)', async () => {
+        const originalEventTime = new Date('2026-03-01T09:00:00Z');
+        const seeded = await seedApprovedMemory({
+          kind: 'event',
+          header: 'Zdarzenie edytowane bez zmiany czasu',
+          body: 'Tresc zdarzenia.',
+          projectId: projectA.projectId,
+          eventTime: originalEventTime,
+        });
+
+        const { admin } = buildAdmin(new StubEmbeddingProvider('edit-event-time-fallback-model'));
+        const result = await admin.editMemory(seeded.id, { header: 'Nowy naglowek bez zmiany czasu' });
+        expect(result.warnings).toEqual([]);
+
+        const [row] = await db.select().from(memories).where(eq(memories.id, seeded.id));
+        expect(row.header).toBe('Nowy naglowek bez zmiany czasu');
+        expect(row.eventTime?.toISOString()).toBe(originalEventTime.toISOString());
+      });
+    });
   });
 
   describe('archiveMemory', () => {
