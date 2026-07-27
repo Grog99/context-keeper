@@ -28,6 +28,46 @@ const STATUSES: StatusChipStatus[] = [
 const FIXTURE_NOW = Date.now();
 const minutesAgo = (n: number) => new Date(FIXTURE_NOW - n * 60_000).toISOString();
 
+// Fixture'y `DiffView — update` (S4 planu diff view) — cztery scenariusze ćwiczące osobne ścieżki
+// `computeInlineWordDiff` (`lib/text-diff.ts`): drobna edycja w zdaniu, zmiana samego nagłówka,
+// całkowity przepis (fallback `'too-different'` + ręczny toggle, D9) i zmiana wyłącznie formatowania
+// (fallback `'whitespace-only'`).
+const UPDATE_SMALL_EDIT_BEFORE = {
+  header: 'Kontrakt serwera MCP — transport i limity',
+  body: 'Serwer MCP używa transportu bezstanowego (stateless) — każde żądanie tools/call niesie pełny kontekst niezależnie od poprzednich wywołań. Endpoint nasłuchuje na porcie 3000 i wymaga nagłówka Authorization z tokenem Bearer. Skaner sekretów uruchamia się przed zapisem każdej propozycji typu create i update. Limity rozmiaru body zależą od kind: 8192 bajtów dla fact i event, 262144 bajtów dla document. Human-gate wymaga jawnej akceptacji w dashboardzie przed trwałym zapisem do bazy.',
+};
+const UPDATE_SMALL_EDIT_AFTER = {
+  header: UPDATE_SMALL_EDIT_BEFORE.header,
+  body: 'Serwer MCP używa transportu bezstanowego (stateless) — każde żądanie tools/call niesie pełny kontekst niezależnie od poprzednich wywołań. Endpoint nasłuchuje na porcie 3000 i wymaga nagłówka Authorization z tokenem Bearer. Skaner sekretów uruchamia się przed zapisem każdej propozycji, niezależnie od jej typu. Limity rozmiaru body zależą od kind: 8192 bajtów dla fact i event, 262144 bajtów dla document. Human-gate wymaga jawnej akceptacji w dashboardzie przed trwałym zapisem do bazy.',
+};
+
+const UPDATE_HEADER_ONLY_BEFORE = {
+  header: 'Endpoint sesji to POST /api/v2/session, nie /login',
+  body: 'Stary endpoint /login zwracał 410 Gone od czasu migracji. Klienci MCP muszą używać nowej ścieżki z wersją API w URL.',
+};
+const UPDATE_HEADER_ONLY_AFTER = {
+  header: 'Endpoint sesji to POST /api/v3/session, nie /login',
+  body: UPDATE_HEADER_ONLY_BEFORE.body,
+};
+
+const UPDATE_REWRITE_BEFORE = {
+  header: 'Notatka o infrastrukturze',
+  body: 'Baza danych PostgreSQL 16 działa w kontenerze Docker na porcie 5432. Migracje uruchamiane są przez Drizzle Kit, a connection pooling obsługuje pgBouncer. Backup wykonywany jest co noc o 2:00 do bucketu S3, z retencją 30 dni.',
+};
+const UPDATE_REWRITE_AFTER = {
+  header: UPDATE_REWRITE_BEFORE.header,
+  body: 'Frontend dashboardu jest zbudowany w React 19 z Vite jako bundlerem. Stylowanie opiera się na Tailwind CSS z tokenami z globals.css, a komponenty bazowe pochodzą z shadcn/ui. Routing obsługuje react-router-dom w trybie SPA.',
+};
+
+const UPDATE_WHITESPACE_ONLY_BEFORE = {
+  header: 'Kontrakt narzędzia tools/call',
+  body: 'Klient MCP wysyła żądanie tools/call z parametrami name i arguments. Serwer waliduje schemat wejściowy przez Zod przed wykonaniem narzędzia.',
+};
+const UPDATE_WHITESPACE_ONLY_AFTER = {
+  header: UPDATE_WHITESPACE_ONLY_BEFORE.header,
+  body: 'Klient MCP wysyła żądanie tools/call\nz parametrami name i arguments.  Serwer waliduje schemat wejściowy\nprzez Zod przed wykonaniem narzędzia.',
+};
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-3">
@@ -126,14 +166,20 @@ export function DevPreviewScreen() {
         <DiffView type="create" data={{ kind: 'fact', header: 'Nowy fakt', body: 'Treść nowo tworzonej pamięci.' }} />
       </Section>
 
-      <Section title="DiffView — update">
-        <DiffView
-          type="update"
-          data={{
-            before: { header: 'Stary nagłówek', body: 'Stara treść.' },
-            after: { header: 'Nowy nagłówek', body: 'Nowa treść.' },
-          }}
-        />
+      <Section title="DiffView — update (drobna edycja w akapicie)">
+        <DiffView type="update" data={{ before: UPDATE_SMALL_EDIT_BEFORE, after: UPDATE_SMALL_EDIT_AFTER }} />
+      </Section>
+
+      <Section title="DiffView — update (zmiana samego nagłówka)">
+        <DiffView type="update" data={{ before: UPDATE_HEADER_ONLY_BEFORE, after: UPDATE_HEADER_ONLY_AFTER }} />
+      </Section>
+
+      <Section title="DiffView — update (przepisane od zera → fallback 'too-different' + toggle)">
+        <DiffView type="update" data={{ before: UPDATE_REWRITE_BEFORE, after: UPDATE_REWRITE_AFTER }} />
+      </Section>
+
+      <Section title="DiffView — update (zmiana tylko formatowania → fallback 'whitespace-only')">
+        <DiffView type="update" data={{ before: UPDATE_WHITESPACE_ONLY_BEFORE, after: UPDATE_WHITESPACE_ONLY_AFTER }} />
       </Section>
 
       <Section title="DiffView — merge">

@@ -289,9 +289,20 @@ Bazujemy na shadcn (kopiowane do repo → pełna kontrola). Poniżej — bazowe 
 | `type` | Render |
 |---|---|
 | `create` | jeden blok „nowa treść" — cały body na zielonym tint `success-subtle`, lewy pasek success. |
-| `update` | dwie kolumny / inline before→after; usuwane `danger-subtle` (strike), dodawane `success-subtle`. |
+| `update` | word-level inline diff (nagłówek + treść, ten sam renderer dla obu): niezmienione słowa zwykłym tekstem, usunięte pod `<del>` (`bg-danger-subtle`/`text-danger-foreground`, przekreślenie), dodane pod `<ins>` (`bg-success-subtle`/`text-success-foreground`, podkreślenie), legenda `−/+` nad blokiem. Poniżej progu czytelności (patrz akapit „Inline diff (`update`)") fallback do dawnego układu dwóch bloków `del`/`add` obok siebie. |
 | `merge` | trzy karty: **A** + **B** (obie → archiwum, `neutral`/przekreślone nagłówki) **→ C** (nowa, `success`). Ikona `git-merge`. |
 | `delete`/`prune` | tombstone — cały rekord przygaszony, `danger` label „do archiwizacji", powód (np. „stale: last_accessed 94 dni, access_count 0"). |
+
+**Inline diff (`update`)** — word-level diff liczony przez [`diff`](https://www.npmjs.com/package/diff) (jsdiff) `diffWords`, w `apps/dashboard/src/lib/text-diff.ts` (`computeInlineWordDiff`), osobno dla nagłówka i dla treści. Diff ignoruje białe znaki przy porównaniu równości, ale zachowuje je w outpucie — poprawne dla zawijanej prozy PL/EN; białe znaki na granicy zmiany są zawsze renderowane jako zwykły tekst, nigdy pod `<del>`/`<ins>`, żeby tint nie obejmował samej spacji. Cztery nieomijalne/omijalne guardy z typowanym powodem fallbacku:
+
+- **`'too-long'`** — suma długości `before`+`after` > 20 000 znaków. Sprawdzane PRZED wywołaniem jsdiffa (Myers jest O(N·D); `BODY_MAX_DOCUMENT` dopuszcza dokumenty dużo większe niż da się bezpiecznie zdiffować w głównym wątku przeglądarki). **Twardy limit, bez toggle'a.**
+- **`'aborted'`** — jsdiff wywołany z `timeout: 250` ms i tak nie zdążył — druga siatka bezpieczeństwa pod progiem długości. **Twardy limit, bez toggle'a.**
+- **`'too-different'`** — ponad 70% znaków to dodania/usunięcia (mniej niż 30% treści przetrwało diff niezmienione) — ściana kolorów inline byłaby mniej czytelna niż dwa czyste bloki before/after. To wyłącznie heurystyka czytelności, nie ograniczenie wydajności, więc recenzent dostaje link „Pokaż zmiany inline mimo to" pod fallbackiem, żeby próg obejść; segmenty są policzone z góry, toggle nie liczy diffa ponownie.
+- **`'whitespace-only'`** — stringi się różnią, ale diff nie znalazł żadnych zmian słów (czysty reflow/wcięcie) — nic do podświetlenia, fallback z notką wyjaśniającą.
+
+A11y (§10, P2 — kolor nigdy nie jest jedynym sygnałem): usunięcia/dodania niosą trzy redundantne kanały — semantykę (prawdziwe `<del>`/`<ins>`, nie `<span>`), kształt (przekreślenie/podkreślenie) i etykietę (legenda ikona+label nad blokiem, mirror `StatusChip`), plus `role="group"`/`aria-label` na kontenerze. Świadomie bez per-span `sr-only` markerów — na diffie długości akapitu zamieniłoby to output screen readera w szum. Diff działa na surowym źródle markdown (`whitespace-pre-wrap`, bez `react-markdown`) — jak reszta `DiffView` (`MemoryBrowserScreen` to jedyny konsument `react-markdown` w dashboardzie).
+
+Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashboard/package.json` — świadomie **bez** `@types/diff` (ten pakiet typuje starszy kształt v5 i przesłoniłby własne typy v9 dołączone w paczce; `moduleResolution: "Bundler"` poprawnie rozwiązuje jej mapę `exports`).
 
 **`ProposalActions`** — sticky bar u dołu detalu: `Zatwierdź` (primary, skrót **A**), `Odrzuć` (ghost-danger, **R**), `Edytuj` (secondary, **E**), oraz split-button **`Zatwierdź jako zamiennik ▾`** (**S**, wybór X spośród „similar/affected"). Przy `stale` → primary **disabled** + inline alert z powodem i CTA „Przejrzyj różnicę / Zaktualizuj bazę".
 
