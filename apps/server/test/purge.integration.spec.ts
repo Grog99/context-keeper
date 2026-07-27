@@ -142,7 +142,7 @@ describe('PurgeService (integration, testcontainers) — hard-purge FR-S3', () =
     db = drizzle(pool, { schema });
     await migrate(db, { migrationsFolder: resolve(process.cwd(), 'src/db/migrations') });
 
-    projects = new ProjectsService(db);
+    projects = new ProjectsService(db, new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' })));
     audit = new AuditService(db);
     purge = new PurgeService(db, audit);
     const created = await projects.createProject('purge-test');

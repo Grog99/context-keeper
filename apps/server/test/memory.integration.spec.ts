@@ -92,9 +92,9 @@ describe('MemoryService (integration, testcontainers)', () => {
     db = drizzle(pool, { schema });
     await migrate(db, { migrationsFolder: resolve(process.cwd(), 'src/db/migrations') });
 
-    projects = new ProjectsService(db);
     audit = new AuditService(db);
     config = new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' }));
+    projects = new ProjectsService(db, config);
     // Provider "zawsze down" dla WSZYSTKICH istniejących (sprzed Fazy 3) testów poniżej — embedQuery
     // zawsze zwraca null, embedMemoryBestEffort zawsze null -> hybrid degeneruje się dokładnie do
     // starego zachowania FTS-only, więc te testy zostają nietknięte przez dodanie ramienia wektorowego.

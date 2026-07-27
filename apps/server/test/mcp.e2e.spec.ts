@@ -10,11 +10,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { sql } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import type { AppModule as AppModuleType } from '../src/app.module';
 import { DB, type Database } from '../src/db/db.tokens';
 import * as schema from '../src/db/schema';
-import { proposals } from '../src/db/schema';
+import { auditLog, projectTokens, proposals, searchEvents } from '../src/db/schema';
 import { MemoryAdminService } from '../src/memory/memory-admin.service';
 import { MemoryService } from '../src/memory/memory.service';
 import { ProjectsService } from '../src/projects/projects.service';
@@ -157,7 +157,7 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
       body: 'Tresc zdarzenia e2e.',
       kind: 'event',
       scope: 'project',
-      projectId: (await app.get(ProjectsService).resolveProjectByToken(token))!.id,
+      projectId: (await app.get(ProjectsService).resolveByToken(token))!.project.id,
     });
 
     const { client, transport } = newClient(token);
@@ -216,7 +216,7 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
 
   it('save_memory z supersedes na seeded fact -> pending (proposal type=update/origin=agent), NIE isError', async () => {
     const memoryService = app.get(MemoryService);
-    const projectId = (await app.get(ProjectsService).resolveProjectByToken(token))!.id;
+    const projectId = (await app.get(ProjectsService).resolveByToken(token))!.project.id;
     const target = await memoryService.devSeedApproved({
       header: 'Fakt do supersede e2e',
       body: 'Stara tresc e2e przed korekta.',
@@ -247,7 +247,7 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
 
   it('save_memory z relations -> pending, po approve materializuje krawędzie (roadmap v1.2, attach-on-save)', async () => {
     const memoryService = app.get(MemoryService);
-    const projectId = (await app.get(ProjectsService).resolveProjectByToken(token))!.id;
+    const projectId = (await app.get(ProjectsService).resolveByToken(token))!.project.id;
     // Cel MOŻE być kind=event (Stage-2 answer #1, świadome odstępstwo od supersedes) — target A jest
     // eventem, target B faktem, żeby ćwiczyć oba w jednym save_memory.
     const targetEvent = await memoryService.devSeedApproved({
@@ -374,5 +374,221 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
     } finally {
       await transport.close();
     }
+  });
+
+  describe('roadmap v1.3 — wiele tokenów per projekt + graceful rotation', () => {
+    it('dwa żywe tokeny działają jednocześnie (N agentów per projekt)', async () => {
+      const projects = app.get(ProjectsService);
+      const projectId = (await projects.resolveByToken(token))!.project.id;
+      const created = await projects.createToken(projectId, 'agent-two-e2e');
+
+      const { client: clientA, transport: transportA } = newClient(token);
+      const { client: clientB, transport: transportB } = newClient(created.token);
+      await clientA.connect(transportA);
+      await clientB.connect(transportB);
+      try {
+        const resA = await clientA.callTool({ name: 'search_memory', arguments: { query: 'pgvector' } });
+        const resB = await clientB.callTool({ name: 'search_memory', arguments: { query: 'pgvector' } });
+        expect(resA.isError).not.toBe(true);
+        expect(resB.isError).not.toBe(true);
+      } finally {
+        await transportA.close();
+        await transportB.close();
+      }
+    });
+
+    it('graceful rotation przez wire: stary+nowy działają w grace, stary 401 identycznie do garbage po wygaśnięciu, nowy nietknięty', async () => {
+      const projects = app.get(ProjectsService);
+      const projectId = (await projects.resolveByToken(token))!.project.id;
+      const created = await projects.createToken(projectId, 'rotation-e2e');
+      const rotated = await projects.rotateToken(created.tokenRow.id);
+
+      // Oba działają podczas grace.
+      const { client: oldClient, transport: oldTransport } = newClient(created.token);
+      await oldClient.connect(oldTransport);
+      const oldRes = await oldClient.callTool({ name: 'search_memory', arguments: { query: 'pgvector' } });
+      expect(oldRes.isError).not.toBe(true);
+      await oldTransport.close();
+
+      const { client: newClientInst, transport: newTransport } = newClient(rotated.token);
+      await newClientInst.connect(newTransport);
+      const newRes = await newClientInst.callTool({ name: 'search_memory', arguments: { query: 'pgvector' } });
+      expect(newRes.isError).not.toBe(true);
+      await newTransport.close();
+
+      // Wymuszony upływ karencji (bez udziału żadnego nocnego joba — lazy expiry przy lookupie).
+      const db = app.get<Database>(DB);
+      await db
+        .update(projectTokens)
+        .set({ expiresAt: new Date(Date.now() - 1000) })
+        .where(eq(projectTokens.id, created.tokenRow.id));
+
+      // Stary token 401-uje na poziomie transportu (connect), IDENTYCZNIE jak nieznany/garbage token.
+      const { client: expiredClient, transport: expiredTransport } = newClient(created.token);
+      await expect(expiredClient.connect(expiredTransport)).rejects.toThrow();
+
+      // Nowy token wciąż działa, nietknięty wygaśnięciem starego.
+      const { client: stillNewClient, transport: stillNewTransport } = newClient(rotated.token);
+      await stillNewClient.connect(stillNewTransport);
+      try {
+        const res = await stillNewClient.callTool({ name: 'search_memory', arguments: { query: 'pgvector' } });
+        expect(res.isError).not.toBe(true);
+      } finally {
+        await stillNewTransport.close();
+      }
+    });
+
+    it('unieważnienie (revoke) przez wire: natychmiastowy 401', async () => {
+      const projects = app.get(ProjectsService);
+      const projectId = (await projects.resolveByToken(token))!.project.id;
+      const created = await projects.createToken(projectId, 'revoke-e2e');
+
+      const { client: liveClient, transport: liveTransport } = newClient(created.token);
+      await liveClient.connect(liveTransport);
+      const liveRes = await liveClient.callTool({ name: 'search_memory', arguments: { query: 'pgvector' } });
+      expect(liveRes.isError).not.toBe(true);
+      await liveTransport.close();
+
+      await projects.revokeToken(created.tokenRow.id);
+
+      const { client: revokedClient, transport: revokedTransport } = newClient(created.token);
+      await expect(revokedClient.connect(revokedTransport)).rejects.toThrow();
+    });
+
+    it('atrybucja wyszukania: search_events.token_id wskazuje na token wywołujący', async () => {
+      const projects = app.get(ProjectsService);
+      const projectId = (await projects.resolveByToken(token))!.project.id;
+      const created = await projects.createToken(projectId, 'search-attribution-e2e');
+
+      const { client, transport } = newClient(created.token);
+      await client.connect(transport);
+      try {
+        await client.callTool({ name: 'search_memory', arguments: { query: 'pgvector' } });
+      } finally {
+        await transport.close();
+      }
+
+      const db = app.get<Database>(DB);
+      const [row] = await db
+        .select()
+        .from(searchEvents)
+        .where(eq(searchEvents.projectId, projectId))
+        .orderBy(desc(searchEvents.createdAt))
+        .limit(1);
+      expect(row.tokenId).toBe(created.tokenRow.id);
+    });
+
+    it('atrybucja zapisu: audit_log.metadata.{tokenId,tokenLabel}, actor niezmieniony (agent:<projectId>)', async () => {
+      const projects = app.get(ProjectsService);
+      const projectId = (await projects.resolveByToken(token))!.project.id;
+      const created = await projects.createToken(projectId, 'save-attribution-e2e');
+
+      const { client, transport } = newClient(created.token);
+      await client.connect(transport);
+      try {
+        const res = await client.callTool({
+          name: 'save_memory',
+          arguments: { header: 'Fakt atrybucji e2e', body: 'Treść do sprawdzenia atrybucji.', tags: ['e2e'] },
+        });
+        expect(res.isError).not.toBe(true);
+      } finally {
+        await transport.close();
+      }
+
+      const db = app.get<Database>(DB);
+      const [row] = await db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.eventType, 'proposal_created'))
+        .orderBy(desc(auditLog.createdAt))
+        .limit(1);
+      expect(row.actor).toBe(`agent:${projectId}`); // format aktora NIEZMIENIONY (§Approach planu)
+      const metadata = row.metadata as { tokenId?: string; tokenLabel?: string };
+      expect(metadata.tokenId).toBe(created.tokenRow.id);
+      expect(metadata.tokenLabel).toBe('save-attribution-e2e');
+    });
+
+    it('secret_blocked niesie atrybucję tokena, bez materiału sekretu', async () => {
+      const projects = app.get(ProjectsService);
+      const projectId = (await projects.resolveByToken(token))!.project.id;
+      const created = await projects.createToken(projectId, 'secret-attribution-e2e');
+
+      const { client, transport } = newClient(created.token);
+      await client.connect(transport);
+      let secretMaterial: string;
+      try {
+        secretMaterial = 'AKIA' + 'A'.repeat(16); // wzorzec AWS access key (secret-scanner.ts)
+        const res = await client.callTool({
+          name: 'save_memory',
+          arguments: { header: 'Próba zapisu sekretu e2e', body: `klucz: ${secretMaterial}` },
+        });
+        expect(res.isError).toBe(true);
+      } finally {
+        await transport.close();
+      }
+
+      const db = app.get<Database>(DB);
+      const [row] = await db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.eventType, 'secret_blocked'))
+        .orderBy(desc(auditLog.createdAt))
+        .limit(1);
+      const metadata = row.metadata as { secretType?: string; tokenId?: string; tokenLabel?: string };
+      expect(metadata.tokenId).toBe(created.tokenRow.id);
+      expect(metadata.tokenLabel).toBe('secret-attribution-e2e');
+      expect(JSON.stringify(row.metadata)).not.toContain(secretMaterial!); // bez materiału sekretu
+    });
+
+    it('rate limit jest per-token: wyczerpanie budżetu tokena A nie throttluje tokena B', async () => {
+      const projects = app.get(ProjectsService);
+      const projectId = (await projects.resolveByToken(token))!.project.id;
+      const createdA = await projects.createToken(projectId, 'rate-limit-a-e2e');
+      const createdB = await projects.createToken(projectId, 'rate-limit-b-e2e');
+
+      const { client: clientA, transport: transportA } = newClient(createdA.token);
+      await clientA.connect(transportA);
+      try {
+        // RATE_LIMIT_SAVE_PER_MIN domyślnie 20 — bucket startuje PEŁNY (§token-bucket.ts). Wołane
+        // WSPÓŁBIEŻNIE (Promise.allSettled), nie sekwencyjnie — każdy save_memory blokuje ~1.5s na
+        // budżecie embeddingu (provider nieosiągalny w tym środowisku testowym), więc sekwencyjne
+        // wywołania dałyby bucketowi minuty na dopełnienie między kolejnymi próbami i test nigdy nie
+        // trafiłby w limit. Współbieżnie: guard konsumuje bucket przy KAŻDYM request (synchronicznie,
+        // przed jakimkolwiek I/O), więc 25 równoległych wywołań trafia w niego w praktycznie tym samym
+        // oknie czasu — refill w tym oknie jest pomijalny (≪1 tokena).
+        const results = await Promise.allSettled(
+          Array.from({ length: 25 }, (_, i) =>
+            clientA.callTool({
+              name: 'save_memory',
+              arguments: { header: `Rate limit e2e ${i}`, body: `Treść ${i}.` },
+            }),
+          ),
+        );
+        const fulfilled = results.filter((r) => r.status === 'fulfilled');
+        const rejected = results.filter((r) => r.status === 'rejected');
+        // Nie przypinamy się do DOKŁADNIE 20 — realny per-request I/O latency (embedding budżet) +
+        // ograniczona współbieżność klienta HTTP dają trochę czasu na refill między pierwszym a
+        // ostatnim requestem, więc dokładna granica pływa o kilka sztuk. Właściwość, którą tu
+        // sprawdzamy, to: limit REALNIE istnieje (część requestów odrzucona) i nie jest nieskończony
+        // (nie wszystkie 25 przeszło).
+        expect(rejected.length).toBeGreaterThan(0);
+        expect(fulfilled.length).toBeLessThan(25);
+      } finally {
+        await transportA.close();
+      }
+
+      // Token B (świeży bucket, osobny klucz) NIE jest throttlowany przez wyczerpanie A.
+      const { client: clientB, transport: transportB } = newClient(createdB.token);
+      await clientB.connect(transportB);
+      try {
+        const res = await clientB.callTool({
+          name: 'save_memory',
+          arguments: { header: 'Rate limit e2e — token B', body: 'Token B nie powinien być throttlowany.' },
+        });
+        expect(res.isError).not.toBe(true);
+      } finally {
+        await transportB.close();
+      }
+    });
   });
 });

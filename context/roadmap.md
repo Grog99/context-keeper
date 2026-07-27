@@ -56,8 +56,13 @@ rodzaj wpisu — wraz z fixem deduplikacji, który ten trzeci rodzaj czyni pilny
 
 ### Dostęp
 
-- **Wiele tokenów per projekt + graceful rotation** ⬜ — atrybucja per-agent (który token zapisał /
-  wyszukał) i rotacja bez downtime: nowy token wydany obok starego, stary wygasa po okresie karencji.
+- **Wiele tokenów per projekt + graceful rotation** ✅ — `project_tokens` (1 projekt → N tokenów,
+  etykieta WYMAGANA per token) zamiast trzech kolumn tokena na `projects`. Rotacja jest token-scoped
+  i graceful: nowy token wydany obok starego, stary wchodzi w `grace` i wygasa lazily po
+  `TOKEN_GRACE_PERIOD_HOURS` (domyślnie 72h) — bez nocnego sweepu, ta sama reguła auth i UI. Osobna
+  akcja `revoke` (natychmiastowa, nieodwracalna) dla skompromitowanych danych. Atrybucja per-agent:
+  `search_events.token_id` + `audit_log.metadata.{tokenId,tokenLabel}` (actor pozostaje
+  `agent:<projectId>`), rate limiting per-token zamiast per-projekt.
 
 ### Agent / MCP
 

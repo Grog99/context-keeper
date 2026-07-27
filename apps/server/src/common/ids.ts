@@ -27,4 +27,5 @@ export const ID_PREFIX = {
   audit: 'evt',
   searchEvent: 'sev',
   relation: 'rel',
+  token: 'tok',
 } as const;

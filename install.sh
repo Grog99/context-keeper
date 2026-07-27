@@ -552,8 +552,9 @@ print_manual_steps() {
   printf '  docker compose up -d\n'
   printf '  docker compose run --rm app node dist/cli.js list-projects\n'
   printf '  docker compose run --rm app node dist/cli.js create-project %s\n' "$PROJECT_NAME"
-  printf '    (if "%s" is already listed above, use "rotate-token" instead — project names are\n' "$PROJECT_NAME"
-  printf '     not unique, re-running create-project would mint a duplicate project + token)\n'
+  printf '    (if "%s" is already listed above, use "list-tokens <projectId>" + "create-token" or\n' "$PROJECT_NAME"
+  printf '     "rotate-token <tokenId>" instead — project names are not unique, re-running\n'
+  printf '     create-project would mint a duplicate project + token)\n'
   printf '  curl -fsS localhost:%s/health\n\n' "$HEALTH_PORT"
 }
 
@@ -594,7 +595,7 @@ start_stack() {
   printf '[install] checking for an existing project named "%s" ...\n' "$PROJECT_NAME"
   LIST_OUTPUT=$(docker compose run --rm app node dist/cli.js list-projects) || LIST_OUTPUT=''
   if printf '%s\n' "$LIST_OUTPUT" | awk -F'\t' -v want="$PROJECT_NAME" '$3==want{found=1} END{exit !found}'; then
-    printf '[install] project "%s" already exists — skipping create-project (avoids minting a duplicate; project names are not unique). Use "rotate-token %s" for a fresh token.\n' "$PROJECT_NAME" "$PROJECT_NAME"
+    printf '[install] project "%s" already exists — skipping create-project (avoids minting a duplicate; project names are not unique). For a fresh token: "list-tokens <projectId>" (id from list-projects field 1) to find a token id, then "rotate-token <tokenId>" (graceful) or "create-token <projectId> <label>" (new token alongside existing ones).\n' "$PROJECT_NAME"
     PROJECT_MINTED=no
   else
     if ! docker compose run --rm app node dist/cli.js create-project "$PROJECT_NAME"; then

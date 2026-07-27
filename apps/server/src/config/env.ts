@@ -137,6 +137,14 @@ export const envSchema = z
     RCLONE_REMOTE: z.string().optional(),
     BACKUP_OFFSITE_CMD: z.string().optional(),
 
+    // Graceful token rotation (roadmap v1.3, "Wiele tokenów per projekt + graceful rotation") —
+    // stały, env-configured okres karencji (nie per-rotation) w GODZINACH: po `rotateToken` stary
+    // token zostaje usable jeszcze przez tyle godzin (status='grace'), zanim lazily wygaśnie
+    // (§projects/token-status.ts — brak nocnego sweepu, patrz uzasadnienie w planie §1). Domyślnie
+    // 72h (3 dni — wystarczające okno na redeploy wszystkich agentów). Sufit 720h (30 dni) — "grace"
+    // ma być oknem na rotację, nie permanentnym drugim aktywnym tokenem.
+    TOKEN_GRACE_PERIOD_HOURS: z.coerce.number().int().positive().max(720).default(72),
+
     // Rate limiting per token (§10)
     RATE_LIMIT_SAVE_PER_MIN: z.coerce.number().int().positive().default(20),
     RATE_LIMIT_SEARCH_PER_MIN: z.coerce.number().int().positive().default(120),

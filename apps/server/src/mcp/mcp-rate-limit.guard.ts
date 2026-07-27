@@ -21,6 +21,12 @@ type RequestWithContext = Request & { projectContext?: ProjectContext };
  * Rate limiting per token × narzędzie (§10 tech-stack, NFR-3). Musi biec PO `BearerGuard`
  * (potrzebuje `projectContext`). Limituje wyłącznie `tools/call` na jedno z 3 znanych narzędzi —
  * `initialize`/`tools/list` i inne metody JSON-RPC nie są limitowane w v1.
+ *
+ * Klucz = `tokenId` (roadmap v1.3, "Wiele tokenów per projekt + graceful rotation") — każdy token ma
+ * własny budżet, nie dzielony między agentów tego samego projektu (§RateLimiterService). Fallback do
+ * `projectId` jest defensywny (nigdy nie powinien się uruchomić na żywej ścieżce — `BearerGuard`
+ * zawsze wypełnia `tokenId` po udanym auth — ale trzyma limiter działający zamiast rzucać, gdyby
+ * kiedyś powstał kontekst bez tokena).
  */
 @Injectable()
 export class McpRateLimitGuard implements CanActivate {
@@ -34,12 +40,12 @@ export class McpRateLimitGuard implements CanActivate {
       return true; // nie tools/call na znane narzędzie — bez limitu w v1
     }
 
-    const projectId = req.projectContext?.projectId;
-    if (!projectId) {
+    const key = req.projectContext?.tokenId ?? req.projectContext?.projectId;
+    if (!key) {
       return true; // BearerGuard już by odrzucił brak auth — defensywnie przepuszczamy
     }
 
-    const result = this.limiter.tryConsume(projectId, toolName as RateLimitedTool);
+    const result = this.limiter.tryConsume(key, toolName as RateLimitedTool);
     if (!result.allowed) {
       throw new RateLimitedException(result.retryAfterSec);
     }

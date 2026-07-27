@@ -122,9 +122,9 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 
 **UC-6 — Nocny job proponuje porządki.** Job skanuje `fact`, wykrywa duplikaty/staleness → wrzuca propozycje do tej samej kolejki (filtr `origin=nightly`), pomijając duplikaty i sprzątając własne stale. Człowiek zatwierdza jak zwykły zapis.
 
-**UC-7 — Zarządzanie projektami/tokenami.** Człowiek tworzy projekt, generuje/rotuje bearer token `ck_…` (widoczny raz, w bazie hash).
+**UC-7 — Zarządzanie projektami/tokenami.** Człowiek tworzy projekt (z pierwszym, etykietowanym bearer tokenem `ck_…`, widocznym raz, w bazie hash), dodaje kolejne tokeny dla kolejnych agentów (etykieta wymagana), rotuje token pojedynczego agenta (graceful — nowy obok starego, stary wygasa po okresie karencji, reszta agentów nietknięta) albo unieważnia go natychmiast (skompromitowany credential), i zmienia etykietę istniejącego tokena (v1.3).
 
-**UC-8 — Agent próbuje zapisać sekret.** Skaner wykrywa sekret → save zablokowany (`secret_blocked` actionable error), audit `secret_blocked` (metadane) → operator widzi sygnał w dashboardzie i **rotuje wyciekły credential**.
+**UC-8 — Agent próbuje zapisać sekret.** Skaner wykrywa sekret → save zablokowany (`secret_blocked` actionable error), audit `secret_blocked` (metadane: typ sekretu + który token/agent, v1.3) → operator widzi sygnał w dashboardzie i **rotuje albo unieważnia wyciekły credential TEGO agenta**, bez wpływu na pozostałe tokeny projektu.
 
 ---
 
@@ -165,7 +165,7 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 
 - **FR-D1 Kolejka akceptacji:** `pending` proposale, filtr po `origin`/`type`. Diff zależny od typu. Edit-before-approve; **„Zatwierdź jako zamiennik [X]"**; stale = blokada + badge z powodem.
 - **FR-D2 Przeglądarka pamięci:** `approved`/`archived`, filtry: `scope`, `kind`, tagi, status. Detal z metadanymi, `access_count`/`last_accessed_at`, historią `revisions`. Akcje człowieka = commit bezpośredni + `revision`.
-- **FR-D3 Projekty/tokeny:** CRUD projektów, generowanie/rotacja bearer tokena (widoczny raz). Żyje poza przełącznikiem kontekstu (lista wszystkich).
+- **FR-D3 Projekty/tokeny:** CRUD projektów; **wiele bearer tokenów per projekt** (v1.3, etykieta wymagana — atrybucja per-agent), każdy widoczny raz przy tworzeniu. **Rotacja graceful** (token-scoped: nowy obok starego, stary wygasa po okresie karencji konfigurowalnym env-em, pozostałe tokeny projektu nietknięte) + **unieważnienie natychmiastowe** (osobna akcja, dla skompromitowanych danych) + rename etykiety. Żyje poza przełącznikiem kontekstu (lista wszystkich).
 - **FR-D4 Audyt:** odrzucone proposale + przegląd `revisions` + filtrowalne eventy (m.in. **`secret_blocked`**, `purge_tombstone`).
 - **FR-D5 Human-create:** akcja „Nowa pamięć" (`fact`/`document`), pola `header`/`body`/`kind`/`tags`; `scope`/`project_id` wyprowadzane z aktywnego kontekstu. Import: **wklejka + upload `.md`** (bez bulk). Opcjonalnie miękkie „similar existing memories".
 - **FR-D6 Przełącznik aktywnego kontekstu:** `Wszystkie` | `Global` | projekt — cała aplikacja dziedziczy. `Wszystkie` = zunifikowany inbox recenzenta (create wyłączony). Widok projektu **strict** (tylko pamięci projektu; global to osobny kontekst).
@@ -184,7 +184,7 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 
 - **FR-V1 Limity wejścia:** `header` ~200 zn. jednolinijkowy; `body` per `kind` (`fact` ~8 KB / `document` ~256 KB); `tags` max ~10, ≤ ~40 zn., **normalizacja** (trim + lowercase + collapse whitespace). Naruszenie → `validation_error`.
 - **FR-S1 Skaner sekretów przy save:** wąski wysokosygnałowy zestaw (private keys, klucze chmur, JWT/bearer, `password=`, entropia). **Agent → blokada** (`secret_blocked`, bez echa sekretu, sekret nie dotyka bazy); **human → ostrzeżenie** (treść nie mutowana). PII nie skanujemy w v1. Bez redakcji w locie.
-- **FR-S2 `secret_blocked` = sygnał rotacji:** audit event z metadanymi (typ + token + czas, bez materiału) → operator rotuje wyciekły credential (LLM już go przeczytał — blokada nie un-exposuje).
+- **FR-S2 `secret_blocked` = sygnał rotacji/unieważnienia:** audit event z metadanymi (typ sekretu + `tokenId`/`tokenLabel` (v1.3, atrybucja per-agent) + czas, bez materiału) → operator rotuje albo unieważnia wyciekły credential TEGO konkretnego tokena (LLM już go przeczytał — blokada nie un-exposuje).
 - **FR-S3 Hard-purge:** uprzywilejowane CLI `purge <id> --reason` wymazujące treść we wszystkich content-bearing tabelach + `purge_tombstone` w audycie. Nie wystawiony przez MCP; nie łamie zasady soft-delete (archive = domyślna ścieżka). Dashboard → v1.1.
 
 ---
@@ -193,13 +193,13 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 
 - **NFR-1 Kontrola dostępu na odczyt.** Read w MCP filtrowany tokenem; `get_memory` egzekwuje scope (IDOR → `not_found`). Dashboard read = bez ograniczeń (zaufany człowiek).
 - **NFR-2 Audit log.** Append-only, zdarzenia zmieniające stan (z aktorem, czasem, referencją do `revision`), w tym `secret_blocked`, `purge_tombstone`, `nightly_run`. Odczyty nie per-event — liczniki.
-- **NFR-3 Rate limiting.** Per-token, ostrzej na `save_memory`; `429` + `Retry-After`.
+- **NFR-3 Rate limiting.** Per-token (od v1.3 dosłownie per bearer token, nie per projekt — N agentów per projekt dostają N niezależnych budżetów), ostrzej na `save_memory`; `429` + `Retry-After`.
 - **NFR-4 Observability.** Structured logs na stdout, `/health` (embedding-down = degraded, nie unhealthy), minimalne metryki w dashboardzie (§6.4 FR-D7).
 - **NFR-5 Trwałość / backup.** Jedna baza = jedno źródło prawdy (wektory w dumpie). `pg_dump` na cronie + kopia offsite, retencja N dni.
 - **NFR-6 Retencja `archived`.** Soft-delete nigdy nie kasuje wiersza; `archived` żyją bezterminowo, ale embeddingi kasowane (nie wyszukiwalne). Wyjątek = hard-purge (sekrety/PII).
 - **NFR-7 Prywatność danych.** Możliwość pełnego offline (embeddingi lokalne) — treść nie musi opuszczać hosta.
 - **NFR-8 Degradacja.** Fail-open na obu ścieżkach: `save` zawsze tworzy proposal (autorytatywny embedding przy akceptacji), `search` leci FTS-only.
-- **NFR-9 Bezpieczeństwo tokenu.** Token `ck_` + 256-bit; w bazie SHA-256 (indeksowany, bez pepper). Rotacja hard-cutover w v1.
+- **NFR-9 Bezpieczeństwo tokenu.** Token `ck_` + 256-bit; w bazie SHA-256 (indeksowany, bez pepper). **Rotacja graceful od v1.3** (nowy token obok starego, stary wygasa lazily po okresie karencji — zastępuje hard-cutover z v1) + **unieważnienie natychmiastowe** jako osobna akcja dla skompromitowanych danych.
 
 ---
 
@@ -207,11 +207,11 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 
 | Trade-off | Świadoma akceptacja |
 |---|---|
-| **Miękka izolacja** (metadana + filtr, nie twarda multi-tenancy) | Wyciek tokenu = pełny odczyt i zapis projektu. Mitygacja = rotacja tokenu. |
+| **Miękka izolacja** (metadana + filtr, nie twarda multi-tenancy) | Wyciek tokenu = pełny odczyt i zapis projektu. Mitygacja (v1.3) = rotacja (graceful) albo unieważnienie (natychmiastowe) TEGO konkretnego tokena — inne tokeny/agenci projektu nietknięci. |
 | **Cross-agent latency** | Fakt agenta A niewidoczny dla agenta B (ten sam projekt) do akceptacji. Stan sesji ma żyć w kontekście agenta. |
 | **Async ack (fire-and-forget)** | Fakt zapisany w kroku 1 nie będzie znaleziony przez search w kroku 5 tej samej sesji (pending). |
 | **Przepustowość akceptacji** | v1 zakłada, że jeden recenzent nadąża. Powyżej — anti-fatigue (v2). |
-| **Audyt per-token, nie per-agent** | Wspólny token projektu nie rozróżnia agenta. Wiele tokenów per projekt — v2. |
+| **Audyt per-agent od v1.3** | Rozwiązane: wiele tokenów per projekt (`project_tokens`, etykieta wymagana) + atrybucja `audit_log.metadata.{tokenId,tokenLabel}`/`search_events.token_id`. `actor` pozostaje `agent:<project_id>` (nie per-token) — filtr projektu w `AuditService.query` niezmieniony. |
 | **Provider/preset embeddingów zablokowany per deployment** | Wybór presetu (`multilingual`/`english`/`api`) to decyzja deploy-time; zmiana modelu = re-embed wszystkiego (CLI `reembed`), nie tani runtime-swap. Preset `english` (EN-only) szybszy/lżejszy, ale ryzykowny przy treści mieszanej PL/EN → `multilingual` domyślny. |
 | **Dedup advisory** | Podobne zapisy nie są auto-suppressowane (bo embedding nie odróżnia korekty od duplikatu) → nieco więcej duplikatów w kolejce; czyści człowiek/nocny job. |
 | **Statyczny bearer (nie OAuth)** | Zweryfikowany dla klientów header-configurable (Claude Code/Cursor/SDK). Desktop/web-connector (OAuth) → roadmapa. |

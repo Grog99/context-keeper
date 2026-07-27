@@ -92,7 +92,7 @@ describe('MemoryAdminService (integration, testcontainers) — przeglądarka pam
     db = drizzle(pool, { schema });
     await migrate(db, { migrationsFolder: resolve(process.cwd(), 'src/db/migrations') });
 
-    projects = new ProjectsService(db);
+    projects = new ProjectsService(db, new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' })));
     audit = new AuditService(db);
     const createdA = await projects.createProject('memory-admin-test-a');
     projectA = { projectId: createdA.project.id, projectName: createdA.project.name };

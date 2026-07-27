@@ -1,4 +1,5 @@
 import { boolean, index, integer, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import { projectTokens } from './project-tokens';
 import { projects } from './projects';
 
 /**
@@ -22,6 +23,12 @@ export const searchEvents = pgTable(
     projectId: text('project_id')
       .notNull()
       .references(() => projects.id, { onDelete: 'restrict' }),
+    // Atrybucja per-agent (roadmap v1.3, "Wiele tokenów per projekt + graceful rotation") — nullable
+    // (istniejące wiersze sprzed migracji nie mają tokena) i `set null` (historyczne search_events
+    // przeżywają ewentualny przyszły hard-delete tokena — dziś tokeny nigdy nie są hard-deletowane,
+    // ale FK musi mieć jawną politykę). Zasila kolumnę "Wyszukań (30 dni)" w dialogu Tokeny
+    // (`UsageService.countSearchesByToken`).
+    tokenId: text('token_id').references(() => projectTokens.id, { onDelete: 'set null' }),
     resultCount: integer('result_count').notNull(),
     degraded: boolean('degraded').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

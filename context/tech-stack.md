@@ -1,6 +1,6 @@
 # Context Keeper — Tech Stack & Architektura
 
-**Wersja dokumentu:** v1.2 (Faza 1 + ustalenia przedimplementacyjne + domknięcia stacku) · **Data:** 2026-07-22
+**Wersja dokumentu:** v1.3 (dostęp: wiele tokenów per projekt + graceful rotation) · **Data:** 2026-07-27
 **Źródła:** `plan-pamiec-agentow-mcp.md`, `research-prior-art-pamiec-agentow.md`, sesja ustaleń przedimplementacyjnych
 
 > Ten dokument opisuje **jak** budujemy. Uzasadnienia produktowe (co i dla kogo) są w [`prd.md`](prd.md).
@@ -9,6 +9,19 @@
 ---
 
 ## 0. Changelog
+
+### v1.3 — dostęp: wiele tokenów per projekt + graceful rotation
+
+1. **`project_tokens` zamiast trzech kolumn tokena na `projects`** — 1 projekt → N tokenów, etykieta
+   WYMAGANA przy tworzeniu (atrybucja per-agent), unikalna wśród aktywnych tokenów (partial unique
+   index). → §4
+2. **Rotacja graceful, token-scoped** (zastępuje hard-cutover v1) — nowy token wydany obok starego,
+   stary wchodzi w `grace` i wygasa lazily po `TOKEN_GRACE_PERIOD_HOURS` (bez nocnego sweepu, jedna
+   reguła usability dzielona przez auth i dashboard/CLI). `revoke` osobna, natychmiastowa akcja dla
+   skompromitowanych danych. → §4, §10, §12
+3. **Atrybucja per-agent** — `search_events.token_id` + `audit_log.metadata.{tokenId,tokenLabel}`
+   (`actor` pozostaje `agent:<project_id>`, niezmieniony); rate limiting per-`token_id` zamiast
+   per-`project_id`. → §4, §10
 
 ### v1.2 — domknięcia stacku (framework, embeddingi, proxy, instalator)
 
@@ -151,13 +164,39 @@ Wektory policzone przy `save` (dla dedup), zanim proposal zostanie zatwierdzony.
 
 `id`, `event_type`, `actor` (token+`project_id` albo `"human-dashboard"`), `affected_ids`, `revision_id` (opcjonalnie, before/after), `created_at`. Odczyty **nie** logowane per-event — zostają liczniki.
 
-- **event_type:** `proposal_created`/`approved`/`rejected`/`edited`, `human_edit`, `archive`, `promote`, `token_created`/`rotated`, **`secret_blocked`** (metadane: typ sekretu, token, czas — bez materiału sekretu; sygnał rotacji, §10), **`purge_tombstone`** (content wymazany, powód, czas — §10), **`nightly_run`** (status/liczniki, §8), **`project_settings_changed`** (v1.2 — zmiana ustawień projektu z dialogu szczegółów, np. `include_events_in_default_search`; metadane `{field, from, to}`).
+- **event_type:** `proposal_created`/`approved`/`rejected`/`edited`, `human_edit`, `archive`, `promote`, `token_created`/`rotated`/**`revoked`**/**`relabeled`** (v1.3 — `revoked`=unieważnienie natychmiastowe, `relabeled`=rename etykiety, kosmetyczny), **`secret_blocked`** (metadane: typ sekretu + `tokenId`/`tokenLabel` (v1.3, atrybucja per-agent) + czas — bez materiału sekretu; sygnał rotacji/unieważnienia, §10), **`purge_tombstone`** (content wymazany, powód, czas — §10), **`nightly_run`** (status/liczniki, §8), **`project_settings_changed`** (v1.2 — zmiana ustawień projektu z dialogu szczegółów, np. `include_events_in_default_search`; metadane `{field, from, to}`).
 
 ### `projects`
 
-Projekty i tokeny. **Token: `ck_` + 256-bit losowość (base64url); w bazie `token_hash` = SHA-256 (deterministyczny, indeksowany), bez pepper.** Lookup token→`project_id` = jeden trafiony indeks (§10). Dodanie projektu bez redeployu.
+Projekty. Dodanie projektu bez redeployu.
 
 - `include_events_in_default_search` (v1.2) — boolean, default `false`. Per-projektowy toggle: czy `kind=event` dokłada się do domyślnego zestawu `kind` w `search_memory` (agent nadal może zawsze poprosić o `kind=event` jawnie). Edytowany w dialogu szczegółów projektu (§9.3); zmiana audytowana jako `project_settings_changed`.
+
+### `project_tokens` (v1.3 — wiele tokenów per projekt + graceful rotation)
+
+1 projekt → N tokenów (dawniej trzy kolumny tokena bezpośrednio na `projects` — 1:1). **Token: `ck_` +
+256-bit losowość (base64url); w bazie `token_hash` = SHA-256 (deterministyczny, indeksowany), bez
+pepper.** Lookup token→(projekt, token) = jeden trafiony indeks JOIN (§10).
+
+- `label` — **WYMAGANA** przy tworzeniu (atrybucja per-agent — który token zapisał/wyszukał), unikalna
+  per projekt **wśród aktywnych** tokenów (partial unique index `(project_id, label) WHERE
+  status='active'` — jedyna scoping, która przeżywa rotację: kopia w `grace` niesie tę samą etykietę
+  co jej zamiennik). Rename po utworzeniu wystawiony (`PATCH`, kosmetyczny, nie dotyka usability).
+- `status` — `active` / `grace` / `revoked` (enum `project_token_state`). **`expired` NIE jest
+  persystowany** — pochodna `grace` + `expires_at <= now()`, liczona lazily przy KAŻDYM auth lookupie
+  i przy renderze dashboardu/CLI z jednej reguły (`effectiveTokenStatus`, dzielona z SQL-owym
+  predykatem usability) — bez nocnego sweepu, więc bez okna, w którym wygasły token wciąż
+  autentykuje.
+- **Rotacja jest TOKEN-scoped, nie project-scoped:** `rotateToken(tokenId)` przenosi JEDEN token do
+  `grace` (`expires_at = now() + TOKEN_GRACE_PERIOD_HOURS`, domyślnie 72h) i mintuje zamiennik z tą
+  samą etykietą — pozostałe tokeny projektu (inni agenci) nietknięte. `revokeToken(tokenId)` jest
+  osobna, natychmiastowa akcja (dla skompromitowanych danych) — działa na `active` i `grace`,
+  idempotentna.
+- `search_events.token_id` (nullable, `ON DELETE SET NULL`) + `audit_log.metadata.{tokenId,tokenLabel}`
+  niosą atrybucję per-agent — `audit_log.actor` pozostaje `agent:<project_id>` (format aktora
+  niezmieniony, żeby nie złamać filtra `AuditService.query` po projekcie).
+- Rate limiting (§10) kluczowany `token_id`, nie `project_id` — N agentów per projekt dostaje N
+  niezależnych budżetów zamiast dzielenia jednego.
 
 ### Ścieżka human-create (nowe)
 
@@ -348,20 +387,23 @@ Cienki generator nad `.env` + profilami Compose — **nie osobna warstwa configu
 
 - **Format:** `ck_` + 256-bit losowość (base64url, ~43 zn.). Prefix daje rozpoznawalność — nasz własny skaner sekretów i third-party (GitGuardian) łapią wyciekły token; identyfikacja w logach. Opcjonalny checksum na literówki (pominięty w v1).
 - **Hashowanie: SHA-256 (deterministyczny, indeksowana kolumna `token_hash`), NIE bcrypt/argon2.** Token ma pełną entropię → slow-hash nie dodaje bezpieczeństwa; auth leci per-request → potrzebny szybki indeksowany lookup; per-row salt slow-hasha uniemożliwia indeksowanie lookupu token→project. **Bez pepper** (marginalny przy 256-bit). Bez constant-time compare (indeksowany lookup, token wysokoentropijny).
-- **Rotacja: hard-cutover w v1** (stary token umiera od razu, operator aktualizuje config). Graceful (nakładka stary+nowy) → v2 „wiele tokenów per projekt".
+- **Rotacja: graceful od v1.3** (§4 `project_tokens`) — nowy token wydany obok starego, stary wchodzi
+  w `grace` i wygasa lazily po `TOKEN_GRACE_PERIOD_HOURS` (bez downtime, bez hard-cutowego okna).
+  **Unieważnienie natychmiastowe** (`revoke`) zostaje osobną akcją dla skompromitowanych danych —
+  401 nieodróżnialny od nieznanego/wygasłego tokena (anty-probing).
 
 ### Skaner sekretów i hard-purge (nowe)
 
 - **Skaner przy save = prewencja przy drzwiach.** Wąski, wysokosygnałowy zestaw (private keys `-----BEGIN`, klucze chmur AWS/GCP, JWT/bearer-bloby, `password=`, wysoka entropia). **Asymetria wg zaufania:** agent-save → **blokada** na granicy MCP (sekret nigdy nie dotyka bazy) + `secret_blocked` actionable error (bez echa sekretu); human-create → **ostrzeżenie** (treść nie mutowana, tylko flaga). **PII nie skanujemy** w v1 (dev-memory, za dużo false-positive).
   - **Nie redagujemy w locie** — redakcja to słabsza gwarancja (niekompletna = fałszywe bezpieczeństwo) i cicha mutacja treści agenta. Agent (znający sekret) jest lepszym redaktorem → pętla korekcyjna przez actionable error.
-  - **`secret_blocked` = sygnał rotacji.** Blokada nie *un-exposuje* sekretu — LLM już go przeczytał (i potencjalnie API providera). Audit event (typ sekretu + token + czas, bez materiału) mówi operatorowi „ten credential wyciekł — rotuj". Surfacing: filtrowalny w Audycie + wskaźnik „N blokad / 24h" w dashboardzie (§11); push → roadmapa.
+  - **`secret_blocked` = sygnał rotacji/unieważnienia.** Blokada nie *un-exposuje* sekretu — LLM już go przeczytał (i potencjalnie API providera). Audit event (typ sekretu + `tokenId`/`tokenLabel` (v1.3, atrybucja per-agent) + czas, bez materiału) mówi operatorowi KTÓRY token/agent to zapisał — „ten credential wyciekł, rotuj lub unieważnij TEN token". Surfacing: filtrowalny w Audycie + wskaźnik „N blokad / 24h" w dashboardzie (§11); push → roadmapa.
 - **Hard-purge = remediacja** (bo soft-delete + append-only nie umie). Uprzywilejowana, rzadka, **nie wystawiona przez MCP.** Wymazuje treść we **wszystkich** content-bearing tabelach (`memories`, `embeddings`, `staging_embeddings`, `revisions`, `proposals.payload`, referencje w `audit_log`) + zostawia **`purge_tombstone`** (akt audytowalny, treść znika). Forma v1 = **CLI** (`purge <id> --reason`); przycisk w dashboardzie → v1.1. Nie łamie zasady soft-delete — archive zostaje domyślną ścieżką.
 
 ### Pozostałe
 
 - **Audit log** append-only (§4) — każdy zapis, który wszedł do pamięci, ma ślad, kto go wepchnął.
-- **Rate limiting** per-token (token bucket): ostrzej na `save_memory`, luźniej na `search`/`get`; `429` + `Retry-After`. Licznik w pamięci działa dla jednej instancji; przy skalowaniu poziomym → współdzielony store (Redis) — poza v1.
-- **Threat model (świadomy):** miękka izolacja — wyciek tokenu = pełny odczyt i zapis projektu. Mitygacja = rotacja tokenu. Twarda multi-tenancy poza zakresem v1.
+- **Rate limiting** per-token (token bucket), **od v1.3 kluczowany `token_id`** (dawniej `project_id` — token==projekt było 1:1, więc nieodróżnialne; z N tokenów per projekt kluczowanie po projekcie dzieliłoby jeden budżet między agentów): ostrzej na `save_memory`, luźniej na `search`/`get`; `429` + `Retry-After`. Licznik w pamięci działa dla jednej instancji; przy skalowaniu poziomym → współdzielony store (Redis) — poza v1.
+- **Threat model (świadomy):** miękka izolacja — wyciek tokenu = pełny odczyt i zapis projektu. Mitygacja = rotacja (graceful) albo unieważnienie (natychmiastowe) TEGO konkretnego tokena (v1.3 — inne tokeny/agenci tego samego projektu nietknięte). Twarda multi-tenancy poza zakresem v1.
 
 ---
 
@@ -386,7 +428,8 @@ Cienki generator nad `.env` + profilami Compose — **nie osobna warstwa configu
 | `BODY_MAX_FACT` / `BODY_MAX_DOCUMENT` | limity rozmiaru body per `kind` (~8 KB / ~256 KB) |
 | `TAGS_MAX` / `TAG_MAX_LEN` | limity tagów (~10 / ~40) |
 | `NIGHTLY_CRON` / `NIGHTLY_TZ` | harmonogram nocnego jobu (domyślnie ~03:00 lokalnie) |
-| `RATE_LIMIT_*` | limity token-bucket per narzędzie |
+| `TOKEN_GRACE_PERIOD_HOURS` | (v1.3) okres karencji po rotacji tokena, w godzinach (domyślnie 72, max 720) |
+| `RATE_LIMIT_*` | limity token-bucket per narzędzie (od v1.3 per `token_id`, §10) |
 | `DASHBOARD_PASSWORD` | seed hasła dashboardu przy pierwszym starcie (sekret) |
 | `SESSION_SECRET` | podpis cookie sesji (sekret) |
 | `COMPOSE_PROFILES` | aktywne profile Compose (`local-embeddings`, `edge-proxy`) — ustawiane przez instalator |
@@ -408,7 +451,6 @@ Cienki generator nad `.env` + profilami Compose — **nie osobna warstwa configu
 | Anti-fatigue / sedymentacja | miejsce na `confidence`/`auto_eligible` w `proposals` |
 | Hot-swap providera embeddingów | `embedding_model` przy każdym wektorze; filtr aktywnego modelu w search |
 | Per-user auth | dashboard auth wymienny bez zmiany reszty |
-| Graceful rotation tokenu | wiele tokenów per projekt (schema `projects`) |
 | OAuth 2.1 dla MCP | bearer wymienny na granicy transportu; kod się nie marnuje |
 | Skalowanie poziome app | app-tier bezstanowy; rate-limiter do przeniesienia na Redis |
 | Interop wire-format | mapowanie na granicy MCP (`remember↔create`…), bez renamu nazw wewnętrznych |

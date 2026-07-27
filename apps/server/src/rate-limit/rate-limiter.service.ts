@@ -15,6 +15,13 @@ const SWEEP_THRESHOLD = 10_000;
 /**
  * Rate limiting per token × narzędzie (§10 tech-stack, NFR-3). Token-bucket **in-memory**,
  * single-instance — świadomy trade-off v1 (przeniesienie na Redis dopiero przy skalowaniu poziomym).
+ *
+ * Klucz bucketu (roadmap v1.3, "Wiele tokenów per projekt + graceful rotation") to `key` — token ID,
+ * NIE `projectId`. Dawniej token==projekt (1:1), więc kluczowanie po projekcie było nieodróżnialne;
+ * z N tokenami per projekt kluczowanie po projekcie dzieliłoby jeden budżet między wszystkich agentów
+ * (drugi agent = połowa przepustowości pierwszego). Per-token matchuje udokumentowany zamiar
+ * (tech-stack §10 "Rate limiting per-token") i jest drobnym zyskiem bezpieczeństwa — skompromitowany
+ * token dostaje WŁASNY bucket, nie może zagłodzić legalnego agenta tym samym projektem.
  */
 @Injectable()
 export class RateLimiterService {
@@ -22,14 +29,14 @@ export class RateLimiterService {
 
   constructor(private readonly config: AppConfigService) {}
 
-  tryConsume(projectId: string, tool: RateLimitedTool): ConsumeResult {
-    const key = `${projectId}:${tool}`;
-    let bucket = this.buckets.get(key);
+  tryConsume(key: string, tool: RateLimitedTool): ConsumeResult {
+    const bucketKey = `${key}:${tool}`;
+    let bucket = this.buckets.get(bucketKey);
     if (!bucket) {
       if (this.buckets.size >= SWEEP_THRESHOLD) sweepStaleBuckets(this.buckets, BUCKET_TTL_MS);
       const limitPerMin = this.limitFor(tool);
       bucket = new TokenBucket(limitPerMin, limitPerMin / 60_000);
-      this.buckets.set(key, bucket);
+      this.buckets.set(bucketKey, bucket);
     }
     const result = bucket.tryConsume();
     if (result.allowed) return { allowed: true };

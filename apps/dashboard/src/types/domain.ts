@@ -26,6 +26,8 @@ export type AuditEventType =
   | 'promote'
   | 'token_created'
   | 'token_rotated'
+  | 'token_revoked'
+  | 'token_relabeled'
   | 'secret_blocked'
   | 'purge_tombstone'
   | 'nightly_run'
@@ -33,3 +35,12 @@ export type AuditEventType =
   | 'project_settings_changed'
   | 'relation_created'
   | 'relation_removed';
+
+/** Lustro `ProjectTokenState` (`apps/server/src/db/schema/enums.ts`) — stan PERSYSTOWANY na wierszu
+ * `project_tokens`. `expired` NIE jest tu — to pochodna, patrz `EffectiveTokenStatus`. */
+export type ProjectTokenState = 'active' | 'grace' | 'revoked';
+
+/** Lustro `EffectiveTokenStatus` (`apps/server/src/projects/token-status.ts`) — co dashboard
+ * faktycznie renderuje (`TokenStatusBadge`). `expired` liczony server-side (`ProjectTokenDto.effectiveStatus`),
+ * SPA nigdy nie liczy tego sama z `status`+`expiresAt` (jedna authoritative reguła, po stronie serwera). */
+export type EffectiveTokenStatus = 'active' | 'grace' | 'expired' | 'revoked';

@@ -2,18 +2,29 @@ import { Copy, KeyRound, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
+import { formatAbsoluteTime } from '../lib/format';
 
 /** §8.2 — Dialog jednorazowego pokazania `ck_…`. Po zamknięciu nieodwracalnie zamaskowany: rodzic
- * NIE przechowuje `token` po `onOpenChange(false)` (jednorazowy prop, nie stan lokalny appki). */
+ * NIE przechowuje `token` po `onOpenChange(false)` (jednorazowy prop, nie stan lokalny appki).
+ *
+ * Roadmap v1.3 ("Wiele tokenów per projekt + graceful rotation") — hard-cutover copy zastąpiona
+ * komunikatem o oknie karencji: `reason:'rotated'` teraz oznacza GRACEFUL rotation (stary token
+ * dalej działa do `graceUntil`), nie natychmiastowe unieważnienie starego. `label` pokazuje
+ * atrybucję (etykieta jest wymagana przy tworzeniu każdego tokena, §0 pkt 3 planu). */
 export interface TokenRevealProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   token: string;
-  /** "utworzony" (nowy projekt) vs "rotowany" (hard-cutover) — różni się tylko copy ostrzeżenia. */
+  /** Etykieta tokena (atrybucja per-agent) — zawsze obecna (wymagana przy tworzeniu). */
+  label?: string;
+  /** "created" (nowy projekt/token) vs "rotated" (graceful rotation — stary token wchodzi w
+   * karencję) — różni się copy ostrzeżenia. */
   reason?: 'created' | 'rotated';
+  /** Deadline okresu karencji STAREGO tokena — obecny WYŁĄCZNIE przy `reason:'rotated'`. */
+  graceUntil?: string | null;
 }
 
-export function TokenReveal({ open, onOpenChange, token, reason = 'created' }: TokenRevealProps) {
+export function TokenReveal({ open, onOpenChange, token, label, reason = 'created', graceUntil }: TokenRevealProps) {
   async function handleCopy() {
     try {
       await navigator.clipboard.writeText(token);
@@ -33,6 +44,12 @@ export function TokenReveal({ open, onOpenChange, token, reason = 'created' }: T
         <DialogDescription>
           Skopiuj teraz — pokazujemy go tylko raz. W bazie trzymamy wyłącznie <span className="font-mono">SHA-256</span>{' '}
           hash.
+          {label && (
+            <>
+              {' '}
+              Etykieta: <span className="font-mono text-foreground">{label}</span>.
+            </>
+          )}
         </DialogDescription>
         <div className="mb-3 flex items-center gap-2.5 rounded-md border border-border bg-muted px-3.5 py-3">
           <code className="flex-1 break-all font-mono text-[13.5px] text-foreground">{token}</code>
@@ -43,7 +60,9 @@ export function TokenReveal({ open, onOpenChange, token, reason = 'created' }: T
         <div className="mb-4 flex items-start gap-2 rounded-md border border-warning bg-warning-subtle px-2.5 py-2 text-xs text-warning-foreground">
           <ShieldAlert className="mt-0.5 size-[15px] shrink-0 text-warning" />
           {reason === 'rotated'
-            ? 'Rotacja to hard-cutover — stary token przestaje działać natychmiast. Zaktualizuj konfigurację klientów MCP.'
+            ? graceUntil
+              ? `Stary token działa jeszcze do ${formatAbsoluteTime(graceUntil)} (okres karencji) — zaktualizuj konfigurację klientów MCP w tym oknie.`
+              : 'Stary token wszedł w okres karencji i wkrótce wygaśnie — zaktualizuj konfigurację klientów MCP.'
             : 'Zapisz token w bezpiecznym miejscu — nie da się go odzyskać po zamknięciu tego okna.'}
         </div>
         <div className="flex justify-end">
