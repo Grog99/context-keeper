@@ -90,9 +90,12 @@ rodzaj wpisu — wraz z fixem deduplikacji, który ten trzeci rodzaj czyni pilny
   reflow/wcięcie, brak zmian słów) pokazuje notkę zamiast pustego podświetlenia. Wszystkie fallbacki
   renderują dawny układ dwóch bloków `del`/`add`. A11y: `<del>`/`<ins>` (nie kolor sam w sobie),
   `role="group"`/`aria-label` na kontenerze (§10 design-systemu).
-- **Czytelność przeglądarki pamięci** ⬜ — wszystko w odcieniach szarości słabo się skanuje; widok rekordu
-  ma zajmować całą dostępną powierzchnię zamiast połowy, ze scrollem w treści i przyklejonymi na dole
-  akcjami (Edytuj / Archiwizuj / …), żeby zawsze były widoczne.
+- **Czytelność przeglądarki pamięci** ✅ — panel szczegółów zajmuje teraz całą dostępną wysokość
+  (poprawiony bug CSS: `auto`-wiersz grida przeciekał poza `main`, więc to strona scrollowała się
+  w całości zamiast paneli listy/treści); treść scrolluje się wewnętrznie, a pasek akcji
+  (Edytuj/Archiwizuj/Promuj/Hard-purge, w edycji: Zapisz/Anuluj) jest przyklejony na dole i zawsze
+  widoczny. Nagłówek/meta/zakładki/akcje dzielą jedną kolumnę pomiaru (`max-w-4xl`), a szerokość
+  czytania treści zależy od `kind` (`document` 72ch, `fact`/`event` 66ch).
 - **Wydzielić zakładkę Projekty** ⬜ — dotyczy ustawień całego projektu, nie wybranej pamięci, więc
   powinna być wizualnie oddzielona od reszty nawigacji.
 - **Przenieść wybór projektu do sidebara** ⬜ — nad nawigację, pod logo; dziś nie widać wystarczająco
