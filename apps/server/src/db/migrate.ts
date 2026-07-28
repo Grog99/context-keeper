@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
@@ -13,14 +14,43 @@ import { loadEnv } from '../config/env';
 export const MIGRATION_LOCK_KEY = 91_734_204;
 
 /**
+ * Kandydaci na katalog migracji w kolejności prób, liczeni względem katalogu modułu.
+ *
+ * `<baseDir>/migrations` — kopia z kroku build (`scripts/copy-migrations.mjs`). Trafia w produkcji
+ * (`dist/db/migrations` w obrazie) oraz przy CLI przez ts-node (`src/db/migrations`).
+ *
+ * `<baseDir>/../../src/db/migrations` — źródło w repo, widziane z `dist/db`. Potrzebne, bo
+ * `nest start --watch` (czyli `pnpm dev`) NIE woła `copy-migrations.mjs`, a `nest-cli.json` ma
+ * `deleteOutDir: true` — więc watch kasuje `dist` i zjada nawet kopię z wcześniejszego builda.
+ * Bez tego auto-migracja w `main.ts` wywala bootstrap na „Can't find meta/_journal.json".
+ */
+export function migrationsFolderCandidates(baseDir: string): string[] {
+  return [join(baseDir, 'migrations'), join(baseDir, '..', '..', 'src', 'db', 'migrations')];
+}
+
+/**
+ * Pierwszy kandydat, który wygląda na PRAWDZIWY katalog migracji drizzle — samo istnienie katalogu
+ * nie wystarcza, bo `deleteOutDir` potrafi zostawić pusty `dist/db/migrations`; wyznacznikiem jest
+ * `meta/_journal.json`, czyli dokładnie plik, na którego brak skarży się drizzle.
+ *
+ * Gdy nie ma żadnego, zwraca kandydata pierwszego — niech błąd przyjdzie z drizzle'a i wskaże
+ * ścieżkę produkcyjną, zamiast mylić wskazaniem fallbacku, którego w obrazie i tak nie ma.
+ */
+export function resolveMigrationsFolder(baseDir: string = __dirname): string {
+  const candidates = migrationsFolderCandidates(baseDir);
+  return candidates.find((dir) => existsSync(join(dir, 'meta', '_journal.json'))) ?? candidates[0];
+}
+
+/**
  * Rdzeń runnera migracji — wołany zarówno przez CLI (`main` niżej) jak i in-process z `main.ts`
  * (auto-migracja przed nasłuchem, §A). Migracje SQL kopiowane do dist w kroku build
- * (scripts/copy-migrations.mjs).
+ * (scripts/copy-migrations.mjs); w trybie watch bierzemy je wprost ze źródeł — patrz
+ * `resolveMigrationsFolder`.
  */
 export async function runMigrations(databaseUrl: string): Promise<void> {
   const pool = new Pool({ connectionString: databaseUrl });
   const db = drizzle(pool);
-  const migrationsFolder = join(__dirname, 'migrations');
+  const migrationsFolder = resolveMigrationsFolder();
   const lock = await pool.connect();
   try {
     // Blokujący lock: równoległe boot-y (repliki / rolling deploy) serializują się (czekają), nie skipują.

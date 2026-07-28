@@ -239,16 +239,43 @@ export const envSchema = z
 
 export type Env = z.infer<typeof envSchema>;
 
+/**
+ * Kandydaci na `.env` w kolejności prób, gdy `DOTENV_PATH` NIE jest ustawiony jawnie.
+ *
+ * `.env` — cwd procesu. Trafia w produkcji (kontener ma `.env` w WORKDIR) i przy uruchomieniu
+ * z korzenia repo.
+ *
+ * `../../.env` — korzeń monorepo widziany z katalogu pakietu. Potrzebne, bo `pnpm --filter <pkg>`
+ * (czyli rootowy skrypt `pnpm dev`) uruchamia skrypt z cwd = `apps/server`, a `.env` repo leży
+ * w korzeniu — bez tego `pnpm dev` wywala się na „DATABASE_URL: received undefined" mimo
+ * poprawnie wypełnionego pliku.
+ *
+ * Fallback jest świadomie WYŁĄCZONY, gdy `DOTENV_PATH` jest podany: jawna ścieżka, która nie
+ * istnieje, ma nie załadować po cichu innego pliku — to byłoby gorsze niż twardy fail.
+ */
+const DOTENV_FALLBACKS = ['.env', '../../.env'] as const;
+
+/** Wydzielone z `loadDotenvIfPresent` jako czysta funkcja — to tu siedzi cała decyzja, więc to
+ * tu da się ją przetestować bez dotykania cwd ani systemu plików (`test/env.spec.ts`). */
+export function resolveDotenvCandidates(dotenvPath = process.env.DOTENV_PATH): string[] {
+  return dotenvPath ? [dotenvPath] : [...DOTENV_FALLBACKS];
+}
+
 /** Ładuje .env do process.env jeśli plik istnieje (dev). W produkcji env wstrzykuje Compose. */
 function loadDotenvIfPresent(): void {
-  const path = process.env.DOTENV_PATH ?? '.env';
   const loader = (process as unknown as { loadEnvFile?: (p: string) => void }).loadEnvFile;
-  if (existsSync(path) && typeof loader === 'function') {
+  if (typeof loader !== 'function') return;
+
+  for (const path of resolveDotenvCandidates()) {
+    if (!existsSync(path)) continue;
     try {
       loader(path);
     } catch {
       // brak wpływu — env może przyjść z innego źródła
     }
+    // Pierwszy ISTNIEJĄCY plik wygrywa, także gdy loader rzucił: kolejny kandydat to inna
+    // lokalizacja, nie ponowna próba tej samej — nie chcemy mieszać dwóch plików w jeden env.
+    return;
   }
 }
 
