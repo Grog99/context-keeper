@@ -20,16 +20,20 @@
 
 /* ============ Design tokens (§7.1 design-system.md, wklejone 1:1) ============ */
 :root {
-  /* neutrals + surface (warm stone) */
-  --background: #FAFAF9;
+  /* neutrals + surface (warm stone) — rampa rozciągnięta wzgl. §7.1 (rewizja kontrastu):
+     kanwa zeszła z #FAFAF9 do #F2F0ED, `surface` zostaje bielą. Powód: przy 2% różnicy jasności
+     rail / kolumna listy / panel detalu czytały się jako jedna biała płachta. Keyline awansował
+     o poziom (dawny `border-strong` jest nowym `border`), bo przy #E7E5E4 na bieli (~1.24:1)
+     linia nie była w stanie zastąpić kart — a na tym stoi koncepcja „ruled ledger" (§0). */
+  --background: #F2F0ED;
   --foreground: #1C1917;
   --surface: #FFFFFF;
-  --muted: #F5F5F4;
+  --muted: #E8E4DF;
   --muted-foreground: #57534E;
-  --faint: #A8A29E;
-  --border: #E7E5E4;
-  --border-strong: #D6D3D1;
-  --input: #E7E5E4;
+  --faint: #7A736B;
+  --border: #D6D3D1;
+  --border-strong: #C4BFBA;
+  --input: #D6D3D1;
 
   /* brand accent — iris */
   --primary: #5B4BD6;
@@ -43,7 +47,15 @@
   --warning: #B45309;  --warning-subtle: #FEF3C7;  --warning-foreground: #78350F;
   --danger:  #DC2626;  --danger-subtle:  #FEE2E2;  --danger-foreground:  #7F1D1D;
   --info:    #5B4BD6;  --info-subtle:    #EEEBFB;  --info-foreground:    #372F8C;
-  --neutral: #78716C;  --neutral-subtle: #F5F5F4;  --neutral-foreground: #44403C;
+  --neutral: #78716C;  --neutral-subtle: #E8E4DF;  --neutral-foreground: #44403C;
+
+  /* kind — TOŻSAMOŚĆ, nie status (§2.3; konsument: `components/KindMarker.tsx`).
+     Hue dobrane celowo w martwych strefach koła: petrol ~198° i wrzos ~312° nie sąsiadują z
+     żadnym znaczeniem z §2.2 (zieleń 145°, bursztyn 35°, czerwień 5°, iris 250°). Niska chroma
+     jest częścią kontraktu — te kolory mają czytać się jak barwiony papier, nie jak sygnał.
+     `fact` świadomie NIE ma tokenu: to najczęstszy kind, zostaje neutralną bazą. */
+  --kind-document: #4C7788;  --kind-document-subtle: #E3EDF1;  --kind-document-foreground: #2B5464;
+  --kind-event:    #955F8B;  --kind-event-subtle:    #F2E9F0;  --kind-event-foreground:    #63365A;
 
   --shadow-sm: 0 1px 2px rgb(0 0 0 / .06);
   --shadow-md: 0 8px 24px -6px rgb(28 25 23 / .18);
@@ -53,15 +65,15 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #141312;
+    --background: #121110;
     --foreground: #F5F3F0;
-    --surface: #1B1A18;
-    --muted: #232120;
+    --surface: #1E1C1A;
+    --muted: #2A2724;
     --muted-foreground: #A8A29E;
-    --faint: #78716C;
-    --border: #2C2A27;
-    --border-strong: #3A3633;
-    --input: #2C2A27;
+    --faint: #8A837B;
+    --border: #383430;
+    --border-strong: #4C463F;
+    --input: #383430;
 
     --primary: #8B7CF6;
     --primary-hover: #9E90F8;
@@ -73,7 +85,10 @@
     --warning: #FBBF24;  --warning-subtle: #2A2008;  --warning-foreground: #FDE68A;
     --danger:  #F87171;  --danger-subtle:  #2A1414;  --danger-foreground:  #FECACA;
     --info:    #8B7CF6;  --info-subtle:    #221E3A;  --info-foreground:    #DDD6FE;
-    --neutral: #A8A29E;  --neutral-subtle: #232120;  --neutral-foreground: #E7E5E4;
+    --neutral: #A8A29E;  --neutral-subtle: #2A2724;  --neutral-foreground: #E7E5E4;
+
+    --kind-document: #79ADC3;  --kind-document-subtle: #1D2D34;  --kind-document-foreground: #BAD3DE;
+    --kind-event:    #C695BC;  --kind-event-subtle:    #352231;  --kind-event-foreground:    #DEC4D9;
 
     --shadow-md: 0 10px 28px -8px rgb(0 0 0 / .5);
   }
@@ -82,15 +97,15 @@
 /* Toggle użytkownika musi wygrać z media query — w OBIE strony (artifact-design/design-system.md
    §7.1 wymóg). `data-theme` jest stampowany na <html> przez ThemeToggle (§App.tsx). */
 :root[data-theme='light'] {
-  --background: #FAFAF9;
+  --background: #F2F0ED;
   --foreground: #1C1917;
   --surface: #FFFFFF;
-  --muted: #F5F5F4;
+  --muted: #E8E4DF;
   --muted-foreground: #57534E;
-  --faint: #A8A29E;
-  --border: #E7E5E4;
-  --border-strong: #D6D3D1;
-  --input: #E7E5E4;
+  --faint: #7A736B;
+  --border: #D6D3D1;
+  --border-strong: #C4BFBA;
+  --input: #D6D3D1;
   --primary: #5B4BD6;
   --primary-hover: #4E3FC0;
   --primary-foreground: #FFFFFF;
@@ -100,20 +115,22 @@
   --warning: #B45309;  --warning-subtle: #FEF3C7;  --warning-foreground: #78350F;
   --danger:  #DC2626;  --danger-subtle:  #FEE2E2;  --danger-foreground:  #7F1D1D;
   --info:    #5B4BD6;  --info-subtle:    #EEEBFB;  --info-foreground:    #372F8C;
-  --neutral: #78716C;  --neutral-subtle: #F5F5F4;  --neutral-foreground: #44403C;
+  --neutral: #78716C;  --neutral-subtle: #E8E4DF;  --neutral-foreground: #44403C;
+  --kind-document: #4C7788;  --kind-document-subtle: #E3EDF1;  --kind-document-foreground: #2B5464;
+  --kind-event:    #955F8B;  --kind-event-subtle:    #F2E9F0;  --kind-event-foreground:    #63365A;
   --shadow-md: 0 8px 24px -6px rgb(28 25 23 / .18);
 }
 
 :root[data-theme='dark'] {
-  --background: #141312;
+  --background: #121110;
   --foreground: #F5F3F0;
-  --surface: #1B1A18;
-  --muted: #232120;
+  --surface: #1E1C1A;
+  --muted: #2A2724;
   --muted-foreground: #A8A29E;
-  --faint: #78716C;
-  --border: #2C2A27;
-  --border-strong: #3A3633;
-  --input: #2C2A27;
+  --faint: #8A837B;
+  --border: #383430;
+  --border-strong: #4C463F;
+  --input: #383430;
   --primary: #8B7CF6;
   --primary-hover: #9E90F8;
   --primary-foreground: #15131F;
@@ -123,7 +140,9 @@
   --warning: #FBBF24;  --warning-subtle: #2A2008;  --warning-foreground: #FDE68A;
   --danger:  #F87171;  --danger-subtle:  #2A1414;  --danger-foreground:  #FECACA;
   --info:    #8B7CF6;  --info-subtle:    #221E3A;  --info-foreground:    #DDD6FE;
-  --neutral: #A8A29E;  --neutral-subtle: #232120;  --neutral-foreground: #E7E5E4;
+  --neutral: #A8A29E;  --neutral-subtle: #2A2724;  --neutral-foreground: #E7E5E4;
+  --kind-document: #79ADC3;  --kind-document-subtle: #1D2D34;  --kind-document-foreground: #BAD3DE;
+  --kind-event:    #C695BC;  --kind-event-subtle:    #352231;  --kind-event-foreground:    #DEC4D9;
   --shadow-md: 0 10px 28px -8px rgb(0 0 0 / .5);
 }
 

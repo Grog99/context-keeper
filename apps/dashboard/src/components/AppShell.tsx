@@ -104,7 +104,7 @@ export function AppShell() {
 
   return (
     <div className="grid h-screen grid-cols-[240px_1fr] bg-background text-foreground">
-      <aside className="flex flex-col gap-1 border-r border-border bg-surface p-3">
+      <aside className="flex flex-col gap-1 border-r border-border-strong bg-background p-3">
         <div className="flex items-center gap-2 px-2 pb-3.5 pt-1 text-[15px] font-semibold tracking-tight">
           <Diamond className="size-[22px] fill-primary text-primary" />
           Context Keeper
@@ -119,9 +119,12 @@ export function AppShell() {
               to={item.to}
               className={({ isActive }) =>
                 [
-                  'flex h-9 items-center gap-2.5 rounded-md px-2 text-[13.5px] font-medium text-muted-foreground transition-colors',
+                  'relative flex h-9 items-center gap-2.5 rounded-md px-2 text-[13.5px] font-medium text-muted-foreground transition-colors',
                   'hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  isActive && 'bg-accent-subtle text-foreground [&_svg]:text-primary',
+                  // Aktywna pozycja niesie akcent trzema kanałami (nie samym tłem): tint `accent-subtle`,
+                  // ikona w irysie i 2px pasek marki przy krawędzi railu — spójne z `ProposalRow` (§8.2).
+                  isActive &&
+                    "bg-accent-subtle text-foreground [&_svg]:text-primary before:absolute before:inset-y-1 before:left-0 before:w-[2px] before:rounded-full before:bg-primary before:content-['']",
                 ]
                   .filter(Boolean)
                   .join(' ')
@@ -172,7 +175,7 @@ export function AppShell() {
       </aside>
 
       <div className="flex min-w-0 flex-col min-h-0">
-        <header className="flex h-[52px] flex-none items-center gap-3.5 border-b border-border bg-surface px-4">
+        <header className="flex h-[52px] flex-none items-center gap-3.5 border-b border-border-strong bg-surface px-4">
           <ContextSwitcher projects={(projects ?? []).map((p) => ({ id: p.id, name: p.name }))} />
           <button
             type="button"
@@ -183,7 +186,9 @@ export function AppShell() {
             Szukaj pamięci…
             <kbd className="ml-auto rounded border border-border px-1.5 py-px font-mono text-[10.5px] text-faint">⌘K</kbd>
           </button>
-          <div className="ml-auto flex items-stretch">
+          {/* Health strip jako jeden przyrząd: ramka + kanwa na białym top barze, zamiast czterech
+              kafelków wiszących w powietrzu. Dividery niesie sam `MetricStat` (border-l). */}
+          <div className="ml-auto flex items-stretch rounded-md border border-border bg-background py-0.5">
             <MetricStat label="Kolejka" value={metrics?.queueDepth ?? '—'} />
             <MetricStat
               label="Embedding"

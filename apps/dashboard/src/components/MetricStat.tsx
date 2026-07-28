@@ -29,7 +29,7 @@ export interface MetricStatProps {
 
 export function MetricStat({ label, value, status, className }: MetricStatProps) {
   return (
-    <div className={cn('flex flex-col justify-center gap-px border-l border-border px-3.5 first:border-l-0', className)}>
+    <div className={cn('flex flex-col justify-center gap-px border-l border-border px-3 first:border-l-0', className)}>
       <span className="text-[10px] font-semibold uppercase tracking-[0.05em] text-faint">{label}</span>
       <span
         className={cn(

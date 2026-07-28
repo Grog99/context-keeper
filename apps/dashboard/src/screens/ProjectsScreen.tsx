@@ -94,7 +94,7 @@ export function ProjectsScreen() {
           }
         />
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border">
+        <div className="overflow-hidden rounded-lg border border-border bg-surface">
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-border">

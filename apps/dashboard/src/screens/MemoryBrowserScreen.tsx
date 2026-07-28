@@ -15,7 +15,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../components/ui/alert-dialog';
-import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -23,6 +22,7 @@ import { Skeleton } from '../components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Textarea } from '../components/ui/textarea';
 import { EmptyState } from '../components/EmptyState';
+import { KindGutter, KindMarker } from '../components/KindMarker';
 import { MonoId } from '../components/MonoId';
 import { OriginPath } from '../components/OriginPath';
 import { RelationsPanel } from '../components/RelationsPanel';
@@ -214,7 +214,7 @@ export function MemoryBrowserScreen() {
 
   return (
     <div className="grid h-full min-h-0" style={{ gridTemplateColumns: 'minmax(320px, 38%) 1fr' }}>
-      <div className="flex min-w-0 flex-col border-r border-border">
+      <div className="flex min-w-0 flex-col border-r border-border-strong">
         <div className="flex h-auto flex-none flex-wrap items-center gap-2 border-b border-border px-3.5 py-2">
           <Select value={kind} onValueChange={(v) => setKind(v as KindFilter)}>
             <SelectTrigger className="h-7 gap-1.5 px-2 text-[12px]">
@@ -291,7 +291,12 @@ export function MemoryBrowserScreen() {
               <div className="mb-4 flex flex-wrap items-center gap-x-3.5 gap-y-2 border-b border-border pb-4 text-xs">
                 <MonoId value={detail.id} />
                 <Dot />
-                <span className="font-mono text-faint">{detail.kind}</span>
+                {/* Ten sam kolor tożsamości co na wierszu listy (§2.4) — wybranie pamięci nie może
+                    gubić sygnału, który pomógł ją znaleźć. */}
+                <span className="inline-flex items-center gap-1.5">
+                  <KindMarker kind={detail.kind} decorative />
+                  <span className="font-mono text-faint">{detail.kind}</span>
+                </span>
                 {detail.kind === 'event' && detail.eventTime && (
                   <>
                     <Dot />
@@ -466,6 +471,7 @@ function MemoryRow({
 }) {
   const visibleTags = item.tags.slice(0, 2);
   const hidden = item.tags.length - visibleTags.length;
+  const isDocument = item.kind === 'document';
   return (
     <div
       role="button"
@@ -479,17 +485,37 @@ function MemoryRow({
       }}
       aria-selected={selected}
       className={cn(
-        'relative grid min-h-[56px] cursor-pointer grid-cols-[auto_1fr_auto] items-center gap-2.5 border-b border-border px-3.5 py-2.5',
+        // §2.4 — `kind` niesie kształt (gutter), ikonę (KindMarker) i kolor; `document` dostaje
+        // dodatkowo własny rytm (nagłówek zawija się do dwóch linii zamiast się urywać), więc
+        // różni się sylwetką wiersza, nie samym tintem. Stąd `items-start` i zmienna wysokość.
+        'relative grid min-h-[56px] cursor-pointer grid-cols-[auto_1fr_auto] items-start gap-2.5 border-b border-border py-2.5 pl-4 pr-3.5',
         'hover:bg-muted focus-visible:outline-none',
         selected && 'bg-accent-subtle',
         item.status !== 'approved' && 'opacity-60',
       )}
     >
-      {selected && <span className="absolute inset-y-0 left-0 w-[2px] bg-primary" aria-hidden />}
-      <Badge variant="kind">{item.kind}</Badge>
+      {selected ? (
+        <span className="absolute inset-y-0 left-0 w-[2px] bg-primary" aria-hidden />
+      ) : (
+        <KindGutter kind={item.kind} />
+      )}
+      <KindMarker kind={item.kind} className="mt-px shrink-0" />
       <div className="flex min-w-0 flex-col gap-1">
-        <div className="truncate text-[13.5px] font-medium text-foreground">{item.header}</div>
+        <div
+          className={cn(
+            'min-w-0 text-[13.5px] font-medium text-foreground',
+            isDocument ? 'line-clamp-2 leading-snug' : 'truncate',
+          )}
+        >
+          {item.header}
+        </div>
         <div className="flex min-w-0 items-center gap-2.5">
+          {item.kind === 'event' && item.eventTime && (
+            <span className="inline-flex items-center gap-1 whitespace-nowrap font-mono text-xs font-medium text-[var(--kind-event-foreground)]">
+              <Clock className="size-3" />
+              {formatAbsoluteTime(item.eventTime)}
+            </span>
+          )}
           <OriginPath origin={item.source} scope={item.scope} projectName={projectName} />
           {item.tags.length > 0 && (
             <span className="flex min-w-0 gap-1">
@@ -510,7 +536,7 @@ function MemoryRow({
           )}
         </div>
       </div>
-      <div className="flex flex-col items-end gap-1">
+      <div className="flex flex-col items-end gap-1 pt-0.5">
         <span className="whitespace-nowrap font-mono text-[11px] text-faint">acc {item.accessCount}</span>
         {item.status !== 'approved' && <StatusChip status={item.status} />}
       </div>

@@ -271,7 +271,7 @@ export function QueueScreen() {
 
   return (
     <div className="grid h-full min-h-0" style={{ gridTemplateColumns: 'minmax(320px, 38%) 1fr' }}>
-      <div className="flex min-w-0 flex-col border-r border-border">
+      <div className="flex min-w-0 flex-col border-r border-border-strong">
         <div className="flex h-[46px] flex-none items-center gap-2 border-b border-border px-3.5">
           <Select value={origin} onValueChange={(v) => setOrigin(v as OriginFilter)}>
             <SelectTrigger className="h-7 gap-1.5 px-2 text-[12px]">
