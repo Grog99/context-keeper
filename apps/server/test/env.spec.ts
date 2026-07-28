@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { envSchema } from '../src/config/env';
+import { envSchema, resolveDotenvCandidates } from '../src/config/env';
 
 const BASE = { DATABASE_URL: 'postgres://unused' };
 
@@ -62,5 +62,26 @@ describe('envSchema — EMBEDDING_PROVIDER=api @ DIM=1024 (superRefine)', () => 
     expect(env.EMBEDDING_PROVIDER).toBe('local');
     expect(env.EMBEDDING_MODEL).toBe('bge-m3');
     expect(env.EMBEDDING_DIM).toBe(1024);
+  });
+});
+
+describe('resolveDotenvCandidates — fallback na korzeń monorepo', () => {
+  it('bez DOTENV_PATH próbuje cwd, a potem korzenia monorepo — w tej kolejności', () => {
+    // `pnpm --filter <pkg>` (rootowy `pnpm dev`) startuje z cwd=apps/server, gdzie `.env` nie ma;
+    // repo trzyma go w korzeniu, więc bez drugiego kandydata start pada na brak DATABASE_URL.
+    expect(resolveDotenvCandidates(undefined)).toEqual(['.env', '../../.env']);
+  });
+
+  it('cwd ma pierwszeństwo przed korzeniem — produkcja (`.env` w WORKDIR) nie zmienia zachowania', () => {
+    expect(resolveDotenvCandidates(undefined)[0]).toBe('.env');
+  });
+
+  it('jawny DOTENV_PATH wyłącza fallback — zła ścieżka ma dać twardy fail, nie cichy inny plik', () => {
+    expect(resolveDotenvCandidates('/etc/context-keeper/.env')).toEqual(['/etc/context-keeper/.env']);
+  });
+
+  it('zwraca kopię, nie współdzieloną stałą — mutacja wyniku nie truje kolejnych wywołań', () => {
+    resolveDotenvCandidates(undefined).push('/tmp/wstrzyknięte');
+    expect(resolveDotenvCandidates(undefined)).toEqual(['.env', '../../.env']);
   });
 });
