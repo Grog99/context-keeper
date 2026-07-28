@@ -3,6 +3,7 @@ import { Clock } from 'lucide-react';
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
+import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 import {
@@ -370,7 +371,7 @@ export function MemoryBrowserScreen() {
                     </TabsList>
                     <TabsContent value="body" className="pt-4">
                       <div className="rounded-md border border-border bg-muted/40 px-4 py-3 text-md leading-relaxed text-foreground [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-sm [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{detail.body}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{detail.body}</ReactMarkdown>
                       </div>
                     </TabsContent>
                     <TabsContent value="meta" className="pt-4">
