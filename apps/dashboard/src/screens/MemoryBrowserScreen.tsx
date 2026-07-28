@@ -78,6 +78,10 @@ export function MemoryBrowserScreen() {
   const editing = editingForId !== null && editingForId === selectedId;
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [purgeOpen, setPurgeOpen] = useState(false);
+  // Wybranie innej pamięci z listy/rewizji/relacji podczas edycji odmontowuje `MemoryEditForm`
+  // (bo `editing` zależy od `selectedId`) i po cichu gubi niezapisane zmiany — dlatego `select()`
+  // przechodzi przez to potwierdzenie zamiast przełączać `selectedId` od razu.
+  const [pendingSelectId, setPendingSelectId] = useState<string | null>(null);
   // Roadmap v1.2 ("memory-relations + 1-hop graph boost") — id relacji aktualnie usuwanej (disable
   // TYLKO jej przycisku "Usuń", nie całej zakładki, przy wielu relacjach naraz).
   const [removingRelationId, setRemovingRelationId] = useState<string | null>(null);
@@ -134,12 +138,27 @@ export function MemoryBrowserScreen() {
     enabled: Boolean(selectedId),
   });
 
-  function select(id: string): void {
+  function selectNow(id: string): void {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set('id', id);
       return next;
     });
+  }
+
+  function select(id: string): void {
+    if (editing && id !== selectedId) {
+      setPendingSelectId(id);
+      return;
+    }
+    selectNow(id);
+  }
+
+  function confirmDiscardAndSelect(): void {
+    if (!pendingSelectId) return;
+    setEditingForId(null);
+    selectNow(pendingSelectId);
+    setPendingSelectId(null);
   }
 
   function invalidateMemory(id: string): void {
@@ -428,6 +447,21 @@ export function MemoryBrowserScreen() {
           </>
         )}
       </div>
+
+      <AlertDialog open={pendingSelectId !== null} onOpenChange={(open) => !open && setPendingSelectId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Porzucić niezapisane zmiany?</AlertDialogTitle>
+          </AlertDialogHeader>
+          <AlertDialogDescription>
+            Edytujesz tę pamięć i masz niezapisane zmiany. Przełączenie na inną pamięć je odrzuci.
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Anuluj</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDiscardAndSelect}>Porzuć i przełącz</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={archiveOpen} onOpenChange={setArchiveOpen}>
         <AlertDialogContent>
