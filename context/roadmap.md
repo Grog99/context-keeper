@@ -2,7 +2,7 @@
 
 Prosty przegląd: co robimy po kolei i gdzie jesteśmy. Szczegóły → [`prd.md`](prd.md), [`tech-stack.md`](tech-stack.md), [`design-system.md`](design-system.md).
 
-**Aktualizacja:** 2026-07-27 · **Etap:** v1.2 domknięte (możliwości agenta + UI) → wchodzimy w **v1.3** (dostęp i UI).
+**Aktualizacja:** 2026-07-28 · **Etap:** v1.2 domknięte (możliwości agenta + UI) → wchodzimy w **v1.3** (dostęp i UI).
 
 Legenda: ✅ zrobione · 🔨 w toku · ⬜ przed nami
 
@@ -41,7 +41,7 @@ Legenda: ✅ zrobione · 🔨 w toku · ⬜ przed nami
 - **`kind=event` (episodic)** — trzeci rodzaj wpisu z backdatable `event_time`, age-decay w rankingu, ekran „Oś czasu" i per-projektowy toggle widoczności w domyślnym search.
 - **memory-relations + 1-hop graph boost** — typowane krawędzie (`caused_by`/`follows`/`context_for`) tworzone przez agenta i człowieka, z re-rank-only boostem na sąsiadach.
 - **Edycja `event_time` po utworzeniu** — korekta backdate’u z formularza edycji w przeglądarce pamięci.
-- **Agent tworzy `kind=document`** — `save_memory` przyjmuje opcjonalny `kind` (`fact` | `document`) przy tych samych guardach; `event` pozostaje human-only.
+- **Agent tworzy `kind=document`** — `save_memory` przyjmuje opcjonalny `kind` (`fact` | `document`) przy tych samych guardach; `event` pozostaje human-only (zniesione w v1.3).
 - **Edycja pamięci przez agenta** — `save_memory` z `supersedes: id` proponuje in-place korektę własnej pamięci jako proposal `type='update'` zamiast luźnego duplikatu.
 - **Snippet do wklejenia w cudzym projekcie** — ekran „Onboarding" z gotowymi blokami do `AGENTS.md` / `CLAUDE.md` i `.mcp.json`, z URL-em MCP liczonym server-side.
 - **Poprawki UI** — dopieszczenie dashboardu wg design systemu.
@@ -66,10 +66,24 @@ rodzaj wpisu — wraz z fixem deduplikacji, który ten trzeci rodzaj czyni pilny
 
 ### Agent / MCP
 
-- **`kind=event` przez agenta (MCP)** ⬜ — zniesienie ograniczenia human-only: `save_memory` przyjmuje
-  `kind: "event"` wraz z `event_time`. Te same guardy co dla `fact`/`document` (human-gate, skaner
-  sekretów, limity rozmiaru). Do rozstrzygnięcia w projektowaniu: czy `event_time` jest wymagane, czy
-  domyślnie „teraz", i jak szeroki backdate wolno zaproponować agentowi.
+- **`kind=event` przez agenta (MCP)** ✅ — zniesienie ograniczenia human-only: `save_memory`
+  przyjmuje `kind: "event"` wraz z **wymaganym** `event_time` (ISO 8601). Rozstrzygnięcia z
+  projektowania: `event_time` jest wymagany (żadnego domyślnego „teraz"), a backdate jest
+  nieograniczony i daty przyszłe zostają dozwolone — agent przechodzi dokładnie tę samą
+  `validateEventTime` co formularz human-create, bez forka reguły i bez nowego env-knoba
+  (age-decay clampuje ujemny wiek do faktora 1). Wszystkie guardy bez zmian: human-gate (proposal
+  `type='create'`/`origin='agent'` — nic nie ląduje w `memories` przed akceptacją), skaner sekretów
+  (twarda blokada), `BODY_MAX_EVENT`, rate limiting per token × narzędzie, scope zawsze `project`.
+  Nowy transport: `event_time` jedzie jako pole `proposals.payload` i jest przepisywany do
+  `memories.event_time` dopiero przez `ProposalsService.approve()` (`materializeMemory`) — ścieżka
+  human-create commituje bezpośrednio, więc dotąd NIC nie przenosiło `event_time` przez kolejkę.
+  Dedup rozszerzony o `event_time` jako szóste pole hasha, dokładane WYŁĄCZNIE dla `kind='event'`
+  (hashe `fact`/`document` bit-w-bit identyczne z formułą migracji 0011 — zero migracji): to samo
+  zdarzenie odnotowane dla dwóch różnych czasów to od teraz dwie pamięci, nie duplikat. `event_time`
+  przy `kind` innym niż `event` to twardy `validation_error`, nie ciche zignorowanie.
+  `supersedes` na event pozostaje zakazany, teraz z jawnym wczesnym guardem — korekta zdarzenia
+  (w tym `event_time`) dalej jest human-only w przeglądarce pamięci. Kolejka pokazuje recenzentowi
+  `event_time` w etykiecie bloku diffu, żeby nie zatwierdzał daty w ciemno.
 - **Dedup kind-aware** ✅ — **fix znanego buga, nie feature.** `computeContentHash` i zapytania
   `already_exists`/`duplicate_pending` w `MemoryService.save()` niosą teraz `kind` jako piąte pole
   hasha (`header ␟ body ␟ scope ␟ project ␟ kind`) — identyczny `header`+`body` zapisany jako różne

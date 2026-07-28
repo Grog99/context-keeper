@@ -31,13 +31,18 @@ What to save, and as which kind:
   convention, a "why", a deployment specific.
 - \`document\` — a longer, self-contained reference saved whole (a decision record,
   a spec, a convention writeup). Pass \`kind: "document"\`.
+- \`event\` — something that happened at a point in time (a deploy, an incident, a
+  decision made in a meeting). Pass \`kind: "event"\` AND \`event_time\` (ISO 8601,
+  e.g. \`2026-07-28T14:30:00Z\`) — \`event_time\` is required, there is no implicit
+  "now", and it is when the event HAPPENED, not when you save it. Backdating is
+  unrestricted. Correcting an event afterwards (including its \`event_time\`) stays
+  human-only.
 - To fix something already in memory, find it via \`search_memory\` and re-save it
   with \`supersedes: <id>\` — your new header+body replace it in place — rather than
   adding a near-duplicate.
 - To link this memory to one you already found, pass \`relations: [{type, targetId}]\`
   (\`caused_by\` | \`follows\` | \`context_for\`, up to 16) — boosts related results in
   later searches.
-- \`event\` memories are human-only; you can't create them.
 
 Memory hygiene:
 - Save only what you can't derive from the repo — decisions, team conventions,

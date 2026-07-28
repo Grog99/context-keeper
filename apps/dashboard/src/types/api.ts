@@ -23,6 +23,9 @@ export interface ProposalPayloadShape {
   body?: string;
   tags?: string[];
   kind?: MemoryKind;
+  /** Tylko `kind='event'` (roadmap v1.3, "kind=event przez agenta") — lustro
+   * `CreatePayload.eventTime` (`apps/server/src/proposals/proposals.types.ts`), ISO 8601 string. */
+  eventTime?: string;
   /** Attach-on-save (roadmap v1.2, "memory-relations + 1-hop graph boost") — lustro
    * `RelationPayloadEntry`/`CreatePayload.relations`/`UpdatePayload.relations`
    * (`apps/server/src/proposals/proposals.types.ts`); materializowane dopiero w `ProposalsService.approve()`,

@@ -83,17 +83,26 @@ export function createMcpServer(memory: MemoryService, ctx: ProjectContext): Mcp
       description: SAVE_MEMORY_DESCRIPTION,
       inputSchema: {
         header: z.string().min(1).describe('Short one-line title (<=200 chars).'),
-        body: z.string().min(1).describe('Content in markdown (fact <=~8KB, document <=~256KB).'),
+        body: z.string().min(1).describe('Content in markdown (fact/event <=~8KB, document <=~256KB).'),
         tags: z
           .array(z.string())
           .optional()
           .describe('Up to ~10 short lowercase tags ([a-z0-9-_/], no spaces).'),
         kind: z
-          .enum(['fact', 'document'])
+          .enum(['fact', 'document', 'event'])
           .optional()
           .describe(
-            'Optional memory kind. Default "fact". "document" for longer canonical reference material. ' +
-              '"event" is human-only and not accepted here.',
+            'Optional memory kind. Default "fact". "document" for longer canonical reference ' +
+              'material. "event" for something that happened at a point in time — requires event_time.',
+          ),
+        event_time: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'REQUIRED when kind="event", rejected otherwise. ISO 8601 timestamp of WHEN the event ' +
+              'happened (e.g. "2026-07-28T14:30:00Z"), not when you are saving it. Backdating is ' +
+              'unrestricted and future timestamps are accepted.',
           ),
         supersedes: z
           .string()
@@ -102,7 +111,8 @@ export function createMcpServer(memory: MemoryService, ctx: ProjectContext): Mcp
           .describe(
             'Optional. Id of an existing fact/document in YOUR project to correct in place. ' +
               'When set, header+body are the full corrected replacement content (kind must match the ' +
-              'target). Cannot target events, global memories, or other projects.',
+              'target). Cannot target events, global memories, or other projects. Not available for ' +
+              'kind="event" — correcting an event (including its event_time) is human-only.',
           ),
         relations: z
           .array(
@@ -125,9 +135,12 @@ export function createMcpServer(memory: MemoryService, ctx: ProjectContext): Mcp
           ),
       },
     },
-    async ({ header, body, tags, kind, supersedes, relations }) =>
+    async ({ header, body, tags, kind, event_time, supersedes, relations }) =>
       runTool(async () => {
-        const result = await memory.save({ header, body, tags, kind, supersedes, relations }, ctx);
+        const result = await memory.save(
+          { header, body, tags, kind, eventTime: event_time, supersedes, relations },
+          ctx,
+        );
         return jsonResult(result);
       }),
   );

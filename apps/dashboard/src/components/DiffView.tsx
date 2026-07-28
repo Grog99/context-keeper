@@ -1,5 +1,6 @@
 import { Archive, CheckCircle, FileDiff, GitMerge, Minus, Plus, Trash2, type LucideIcon } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
+import { formatAbsoluteTime } from '../lib/format';
 import { computeInlineWordDiff, WORD_DIFF_MAX_CHARS, type InlineDiffResult, type InlineDiffSegment } from '../lib/text-diff';
 import { cn } from '../lib/utils';
 import type { MemoryKind } from '../types/domain';
@@ -58,6 +59,10 @@ export interface CreateDiffData {
   kind: MemoryKind;
   header: string;
   body: string;
+  /** Tylko `kind='event'` (roadmap v1.3, "kind=event przez agenta") — recenzent musi widzieć
+   * `event_time` PRZED zatwierdzeniem, dokładnie tak samo jak `relations` (§ProposalRelations w
+   * QueueScreen.tsx) — human-create nie tworzy proposali, więc to nie jest darmowe. */
+  eventTime?: string | null;
 }
 
 export interface UpdateDiffData {
@@ -298,7 +303,14 @@ export function DiffView(props: DiffViewProps) {
       return (
         <div>
           <DiffLabel>Diff — nowa pamięć (create)</DiffLabel>
-          <DiffBlock variant="add" icon={Plus} label={`+ dodawana treść · ${props.data.kind}`} body={props.data.body} />
+          <DiffBlock
+            variant="add"
+            icon={Plus}
+            label={`+ dodawana treść · ${props.data.kind}${
+              props.data.eventTime ? ` · zdarzenie: ${formatAbsoluteTime(props.data.eventTime)}` : ''
+            }`}
+            body={props.data.body}
+          />
         </div>
       );
 

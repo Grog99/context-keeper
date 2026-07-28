@@ -20,6 +20,7 @@ import { EmbeddingService } from '../src/embeddings/embedding.service';
 import { MemoryService } from '../src/memory/memory.service';
 import type { ProjectContext } from '../src/projects/projects.service';
 import { ProjectsService } from '../src/projects/projects.service';
+import { ProposalsService } from '../src/proposals/proposals.service';
 import { UsageService } from '../src/usage/usage.service';
 
 /**
@@ -435,6 +436,21 @@ describe('MemoryService (integration, testcontainers)', () => {
           projectSuper,
         ),
       ).rejects.toMatchObject({ code: 'validation_error' });
+    });
+
+    it('kind=event + supersedes -> validation_error z wczesnego guarda (roadmap v1.3 "kind=event przez agenta", decyzja #3), PRZED jakimkolwiek lookupem targetu', async () => {
+      await expect(
+        memory.save(
+          {
+            header: 'Proba korekty eventu przez event',
+            body: 'Tresc.',
+            kind: 'event',
+            eventTime: '2026-03-01T09:00:00Z',
+            supersedes: 'mem_nieistniejacy_target',
+          },
+          projectSuper,
+        ),
+      ).rejects.toMatchObject({ code: 'validation_error', message: expect.stringContaining('human-only') });
     });
 
     it('kind mismatch: target document, save kind=fact (domyślny) -> validation_error', async () => {
@@ -1411,6 +1427,194 @@ describe('MemoryService (integration, testcontainers)', () => {
         .from(stagingEmbeddings)
         .where(eq(stagingEmbeddings.proposalId, propId));
       expect(staged.length).toBe(0);
+    });
+  });
+
+  describe('roadmap v1.3 — kind=event przez agenta', () => {
+    let projectEvent: ProjectContext;
+
+    beforeAll(async () => {
+      const created = await projects.createProject('memory-test-event-v13');
+      projectEvent = { projectId: created.project.id, projectName: created.project.name };
+    });
+
+    async function proposalFor(memoryId: string, projectId: string) {
+      const rows = await db.select().from(proposals).where(eq(proposals.projectId, projectId));
+      const match = rows.find((p) => (p.payload as { memoryId: string }).memoryId === memoryId);
+      if (!match) throw new Error(`Brak proposala dla memoryId=${memoryId}`);
+      return match;
+    }
+
+    it('happy: save({kind:"event", eventTime}) -> pending, id ~ ^mem_, proposals.payload niesie eventTime jako ISO string', async () => {
+      const res = await memory.save(
+        {
+          header: 'Deploy na prod v1.3',
+          body: 'Wdrozenie kind=event przez agenta.',
+          kind: 'event',
+          eventTime: '2026-03-01T09:00:00Z',
+        },
+        projectEvent,
+      );
+      expect(res.status).toBe('pending');
+      expect(res.id).toMatch(/^mem_/);
+
+      const proposalRow = await proposalFor(res.id, projectEvent.projectId);
+      expect(proposalRow.type).toBe('create');
+      expect(proposalRow.origin).toBe('agent');
+      const payload = proposalRow.payload as { kind: string; eventTime?: string };
+      expect(payload.kind).toBe('event');
+      expect(payload.eventTime).toBe('2026-03-01T09:00:00.000Z');
+    });
+
+    it('po ProposalsService.approve(...) -> wiersz w memories ma kind=event, source=agent, event_time == podany', async () => {
+      const provider = new StubEmbeddingProvider('event-approve-model');
+      const { memory: eventMemory } = buildMemoryService(provider);
+      const proposalsService = new ProposalsService(db, config, audit, new EmbeddingService(provider, config));
+
+      const res = await eventMemory.save(
+        {
+          header: 'Incydent do zatwierdzenia',
+          body: 'Tresc incydentu do materializacji.',
+          kind: 'event',
+          eventTime: '2026-04-15T12:00:00Z',
+        },
+        projectEvent,
+      );
+      const proposalRow = await proposalFor(res.id, projectEvent.projectId);
+
+      const approveResult = await proposalsService.approve(proposalRow.id, { actor: 'tester' });
+      expect(approveResult.materializedId).toBe(res.id);
+
+      const [memRow] = await db.select().from(schema.memories).where(eq(schema.memories.id, res.id));
+      expect(memRow.kind).toBe('event');
+      expect(memRow.source).toBe('agent');
+      expect(memRow.eventTime?.toISOString()).toBe('2026-04-15T12:00:00.000Z');
+    });
+
+    it('save({kind:"event"}) bez eventTime -> validation_error, zero nowych wierszy w proposals', async () => {
+      const before = await db.select().from(proposals).where(eq(proposals.projectId, projectEvent.projectId));
+
+      await expect(
+        memory.save({ header: 'Event bez daty', body: 'Tresc.', kind: 'event' }, projectEvent),
+      ).rejects.toMatchObject({ code: 'validation_error' });
+
+      const after = await db.select().from(proposals).where(eq(proposals.projectId, projectEvent.projectId));
+      expect(after.length).toBe(before.length);
+    });
+
+    it('save({kind:"event", eventTime:"nie-data"}) -> validation_error', async () => {
+      await expect(
+        memory.save(
+          { header: 'Event ze zla data', body: 'Tresc.', kind: 'event', eventTime: 'nie-data' },
+          projectEvent,
+        ),
+      ).rejects.toMatchObject({ code: 'validation_error' });
+    });
+
+    it('save({kind:"fact", eventTime}) -> validation_error (decyzja #6 — event_time ma sens tylko dla kind=event)', async () => {
+      await expect(
+        memory.save(
+          {
+            header: 'Fakt z niepotrzebnym eventTime',
+            body: 'Tresc.',
+            kind: 'fact',
+            eventTime: '2026-03-01T09:00:00Z',
+          },
+          projectEvent,
+        ),
+      ).rejects.toMatchObject({ code: 'validation_error' });
+    });
+
+    it('ta sama tresc, dwa rozne eventTime -> dwa osobne pending (NIE duplicate_pending)', async () => {
+      const header = 'Dedup event-aware — rozne eventTime';
+      const body = 'Identyczna tresc, rozne czasy zdarzenia.';
+
+      const first = await memory.save(
+        { header, body, kind: 'event', eventTime: '2026-05-01T08:00:00Z' },
+        projectEvent,
+      );
+      expect(first.status).toBe('pending');
+
+      const second = await memory.save(
+        { header, body, kind: 'event', eventTime: '2026-05-02T08:00:00Z' },
+        projectEvent,
+      );
+      expect(second.status).toBe('pending'); // NIE duplicate_pending mimo identycznego header+body+kind
+      expect(second.id).not.toBe(first.id);
+    });
+
+    it('ta sama tresc, ten sam eventTime, drugi raz -> duplicate_pending', async () => {
+      const header = 'Dedup event-aware — ten sam eventTime';
+      const body = 'Identyczna tresc, ten sam czas zdarzenia.';
+      const eventTime = '2026-06-01T08:00:00Z';
+
+      const first = await memory.save({ header, body, kind: 'event', eventTime }, projectEvent);
+      expect(first.status).toBe('pending');
+
+      const second = await memory.save({ header, body, kind: 'event', eventTime }, projectEvent);
+      expect(second.status).toBe('duplicate_pending');
+      expect(second.id).toMatch(/^prop_/);
+    });
+
+    it('save({kind:"event", eventTime, supersedes: <id faktu>}) -> validation_error z komunikatem o human-only', async () => {
+      const targetFact = await memory.devSeedApproved({
+        header: 'Fakt istniejacy do proby supersede eventem',
+        body: 'Tresc.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectEvent.projectId,
+      });
+
+      await expect(
+        memory.save(
+          {
+            header: 'Proba supersede faktu przez event',
+            body: 'Tresc.',
+            kind: 'event',
+            eventTime: '2026-03-01T09:00:00Z',
+            supersedes: targetFact.id,
+          },
+          projectEvent,
+        ),
+      ).rejects.toMatchObject({ code: 'validation_error', message: expect.stringContaining('human-only') });
+    });
+
+    it('sekret w body eventu -> secret_blocked, zero proposali (mirror :268)', async () => {
+      const before = await db.select().from(proposals).where(eq(proposals.projectId, projectEvent.projectId));
+
+      await expect(
+        memory.save(
+          {
+            header: 'Incydent z sekretem',
+            body: 'export AWS_ACCESS_KEY_ID=AKIAABCDEFGHIJKLMNOP',
+            kind: 'event',
+            eventTime: '2026-03-01T09:00:00Z',
+          },
+          projectEvent,
+        ),
+      ).rejects.toMatchObject({ code: 'secret_blocked' });
+
+      const after = await db.select().from(proposals).where(eq(proposals.projectId, projectEvent.projectId));
+      expect(after.length).toBe(before.length);
+    });
+
+    it('body ponad BODY_MAX_EVENT -> validation_error', async () => {
+      const { memory: tightMemory, config: tightConfig } = buildMemoryService(new StubEmbeddingProvider('event-body-limit'), {
+        BODY_MAX_EVENT: 10,
+      });
+      expect(tightConfig.get('BODY_MAX_EVENT')).toBe(10);
+
+      await expect(
+        tightMemory.save(
+          {
+            header: 'Event za duzy',
+            body: 'a'.repeat(11),
+            kind: 'event',
+            eventTime: '2026-03-01T09:00:00Z',
+          },
+          projectEvent,
+        ),
+      ).rejects.toMatchObject({ code: 'validation_error' });
     });
   });
 });
