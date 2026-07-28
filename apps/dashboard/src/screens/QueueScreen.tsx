@@ -13,27 +13,39 @@ import {
   AlertDialogTitle,
 } from '../components/ui/alert-dialog';
 import { Badge } from '../components/ui/badge';
-import { Button } from '../components/ui/button';
+import { Button, buttonVariants } from '../components/ui/button';
+import { Checkbox } from '../components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Skeleton } from '../components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Textarea } from '../components/ui/textarea';
 import { Input } from '../components/ui/input';
+import { BulkFailuresDialog } from '../components/BulkFailuresDialog';
 import { DiffView } from '../components/DiffView';
 import { EmptyState } from '../components/EmptyState';
 import { MonoId } from '../components/MonoId';
 import { OriginPath } from '../components/OriginPath';
 import { ProposalActions, type SupersedeCandidate } from '../components/ProposalActions';
 import { ProposalRow } from '../components/ProposalRow';
+import { QueueBulkBar } from '../components/QueueBulkBar';
 import { StatusChip } from '../components/StatusChip';
 import { useQueueKeyboard } from '../hooks/useKeyboard';
 import { api } from '../lib/api';
 import { useActiveContext, contextQueryParams } from '../lib/context';
-import { describeApiError } from '../lib/errors';
-import { formatAbsoluteTime, formatRelativeTime } from '../lib/format';
+import { describeApiError, describeBulkFailures } from '../lib/errors';
+import { formatAbsoluteTime, formatRelativeTime, pluralProposals } from '../lib/format';
 import { queryKeys } from '../lib/query';
 import { toQueryString } from '../lib/query-string';
-import type { ApproveResult, EditProposalResult, MemoryDetail, ProjectListItem, ProposalView } from '../types/api';
+import { cn } from '../lib/utils';
+import type {
+  ApproveResult,
+  BulkDecisionItemError,
+  BulkDecisionResult,
+  EditProposalResult,
+  MemoryDetail,
+  ProjectListItem,
+  ProposalView,
+} from '../types/api';
 import type { ProposalOrigin, ProposalType, RelationType } from '../types/domain';
 
 type OriginFilter = 'all' | ProposalOrigin;
@@ -116,6 +128,16 @@ export function QueueScreen() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [tabState, setTabState] = useState<{ id: string; tab: string } | null>(null);
+  // Bulk selection (roadmap v1.3, "Bulk approve/reject w kolejce") — `Set` zamiast tablicy (toggle
+  // per-id bez skanowania). `selectedProposals`/`selectedCount`/... niżej liczone jako przecięcie z
+  // AKTUALNĄ `proposalsList` w renderze, TYM SAMYM wzorcem "hint, nie prawda absolutna" co `selectedId`
+  // powyżej — bez efektu synchronizującego stan. Konsekwencja pożądana: propozycja, która zniknęła z
+  // listy (zatwierdzona przez kogoś innego, przefiltrowana, inny projekt) automatycznie wypada z bulku.
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
+  const [bulkApproveOpen, setBulkApproveOpen] = useState(false);
+  const [bulkRejectOpen, setBulkRejectOpen] = useState(false);
+  const [bulkRejectReason, setBulkRejectReason] = useState('');
+  const [bulkFailures, setBulkFailures] = useState<BulkDecisionItemError[] | null>(null);
   const [, setTick] = useState(0);
   const detailRef = useRef<HTMLDivElement>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
@@ -160,9 +182,79 @@ export function QueueScreen() {
   }
   const { beforeMemory, beforeLoading, mergeMemories, mergeLoading, relationHeaders } = useProposalDetailData(selected);
 
+  // Bulk selection — przecięcie z `proposalsList` w renderze (patrz komentarz przy stanie wyżej).
+  // Inwariant bezpieczeństwa: bulk działa WYŁĄCZNIE na tym, co licznik pokazuje — zniknięcie propozycji
+  // z listy automatycznie wyjmuje ją z operacji zbiorczej, bez żadnego efektu korygującego.
+  const selectedProposals = proposalsList.filter((p) => selectedIds.has(p.id));
+  const selectedCount = selectedProposals.length;
+  const selectedStaleCount = selectedProposals.filter((p) => p.stale).length;
+  const allSelected = proposalsList.length > 0 && proposalsList.every((p) => selectedIds.has(p.id));
+  const selectAllState: boolean | 'indeterminate' = allSelected ? true : selectedCount > 0 ? 'indeterminate' : false;
+  const bulkFailuresOpen = bulkFailures !== null;
+
+  function toggleSelected(id: string): void {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll(): void {
+    // Zamiast doklejać do istniejącego zbioru — zastępuje go dokładnie widoczną listą (albo pustym
+    // zbiorem). Sprząta przy okazji orphaned id z poprzedniego filtra (nie wpływają na `allSelected`/
+    // `selectAllState` — te liczą się wyłącznie z przecięcia z `proposalsList` — ale nie ma powodu
+    // ich trzymać po jawnym "zaznacz/odznacz wszystkie").
+    setSelectedIds(allSelected ? new Set() : new Set(proposalsList.map((p) => p.id)));
+  }
+
+  function clearSelection(): void {
+    setSelectedIds(new Set());
+  }
+
   function invalidateAfterMutation(): void {
     queryClient.invalidateQueries({ queryKey: ['proposals'] });
     queryClient.invalidateQueries({ queryKey: queryKeys.metrics() });
+    // Rozszerzenie o roadmap v1.3 (decyzja produktowa #4, "Bulk approve/reject w kolejce") — dotyczy
+    // też pojedynczych mutacji approve/reject/edit powyżej/niżej: `approve()` materializuje/aktualizuje
+    // `memories`, ale przeglądarka pamięci (`MemoriesScreen`) nie wiedziała o tym bez ręcznego refetcha.
+    queryClient.invalidateQueries({ queryKey: ['memories'] });
+  }
+
+  /** Podsumowanie po `bulk-approve`/`bulk-reject` (roadmap v1.3): sukcesy znikają z zaznaczenia
+   * (usuwane z `selectedIds`), porażki ZOSTAJĄ zaznaczone (nietknięte — nie są w `result.succeeded`,
+   * więc `next.delete` ich nie dotyka) — recenzent widzi od razu, co jeszcze wymaga uwagi, bez
+   * ponownego zaznaczania. Toast: success (zero porażek) / warning (częściowy sukces) / error (zero
+   * sukcesów), zawsze z liczebnikiem odmienionym przez `pluralProposals`; przy jakiejkolwiek porażce
+   * `description` = `describeBulkFailures` + akcja „Szczegóły" otwierająca `BulkFailuresDialog`. */
+  function reportBulk(kind: 'approve' | 'reject', result: BulkDecisionResult): void {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of result.succeeded) next.delete(id);
+      return next;
+    });
+    invalidateAfterMutation();
+    if (kind === 'approve') {
+      setBulkApproveOpen(false);
+    } else {
+      setBulkRejectOpen(false);
+      setBulkRejectReason('');
+    }
+
+    const total = result.succeeded.length + result.failed.length;
+    const verb = kind === 'approve' ? 'Zatwierdzono' : 'Odrzucono';
+    if (result.failed.length === 0) {
+      toast.success(`${verb} ${result.succeeded.length} ${pluralProposals(result.succeeded.length)}`);
+      return;
+    }
+    const description = describeBulkFailures(result.failed);
+    const action = { label: 'Szczegóły', onClick: () => setBulkFailures(result.failed) };
+    if (result.succeeded.length === 0) {
+      toast.error(`Nie udało się rozstrzygnąć żadnej z ${total} ${pluralProposals(total)}`, { description, action });
+      return;
+    }
+    toast.warning(`${verb} ${result.succeeded.length} z ${total} ${pluralProposals(total)}`, { description, action });
   }
 
   const approveMutation = useMutation({
@@ -196,8 +288,26 @@ export function QueueScreen() {
       } else {
         toast.success('Zapisano edycję (do zatwierdzenia)');
       }
-      queryClient.invalidateQueries({ queryKey: ['proposals'] });
+      invalidateAfterMutation();
     },
+    onError: (err) => toast.error(describeApiError(err)),
+  });
+
+  // Bulk approve/reject (roadmap v1.3) — `mutationFn` woła serwerowy orkiestrator (`ProposalsService.
+  // bulkApprove`/`bulkReject` przez kontroler), NIE pętlę po stronie SPA (§1.1 planu: agregacja
+  // wyniku i klasyfikacja błędów żyje tam, gdzie jest testowalna — w serwisie, nie w dashboardzie,
+  // który nie ma runnera testów). `onSuccess` zawsze 200 (nawet gdy WSZYSTKO w `failed`) — `reportBulk`
+  // rozróżnia sukces/częściowy/porażkę z treści odpowiedzi, nie ze statusu HTTP.
+  const bulkApproveMutation = useMutation({
+    mutationFn: (ids: string[]) => api.post<BulkDecisionResult>('/proposals/bulk-approve', { ids }),
+    onSuccess: (result) => reportBulk('approve', result),
+    onError: (err) => toast.error(describeApiError(err)),
+  });
+
+  const bulkRejectMutation = useMutation({
+    mutationFn: (vars: { ids: string[]; reason?: string }) =>
+      api.post<BulkDecisionResult>('/proposals/bulk-reject', { ids: vars.ids, reason: vars.reason }),
+    onSuccess: (result) => reportBulk('reject', result),
     onError: (err) => toast.error(describeApiError(err)),
   });
 
@@ -248,8 +358,16 @@ export function QueueScreen() {
     actionsRef.current?.querySelector<HTMLButtonElement>('button[aria-haspopup]')?.click();
   }
 
+  function handleToggleSelectShortcut(): void {
+    // `x` przełącza zaznaczenie BIEŻĄCEJ (podglądanej) propozycji — `A`/`R` świadomie zostają
+    // jednoelementowe (§Approach planu, bezpieczeństwo), więc bulk approve/reject ZAWSZE wymaga
+    // jawnego kliknięcia w `QueueBulkBar`, nawet gdy zaznaczenie jest niepuste.
+    if (!selected) return;
+    toggleSelected(selected.id);
+  }
+
   useQueueKeyboard({
-    enabled: !editing && !rejectOpen,
+    enabled: !editing && !rejectOpen && !bulkApproveOpen && !bulkRejectOpen && !bulkFailuresOpen,
     onNext: () => {
       if (proposalsList.length === 0) return;
       const next = Math.min(selectedIndex + 1, proposalsList.length - 1);
@@ -265,6 +383,7 @@ export function QueueScreen() {
     onReject: handleReject,
     onEdit: handleEdit,
     onSupersede: handleSupersedeShortcut,
+    onToggleSelect: handleToggleSelectShortcut,
   });
 
   const lastUpdatedLabel = dataUpdatedAt ? formatRelativeTime(new Date(dataUpdatedAt).toISOString()) : '—';
@@ -273,6 +392,15 @@ export function QueueScreen() {
     <div className="grid h-full min-h-0" style={{ gridTemplateColumns: 'minmax(320px, 38%) 1fr' }}>
       <div className="flex min-w-0 flex-col border-r border-border-strong">
         <div className="flex h-[46px] flex-none items-center gap-2 border-b border-border px-3.5">
+          {/* "Zaznacz wszystkie" (roadmap v1.3, "Bulk approve/reject w kolejce") — skrajnie z lewej w
+              pasku filtrów (decyzja produktowa #5), nie osobny wiersz. `indeterminate` gdy zaznaczona
+              jest tylko część widocznej (po filtrach) listy. */}
+          <Checkbox
+            checked={selectAllState}
+            onCheckedChange={toggleSelectAll}
+            disabled={proposalsList.length === 0}
+            aria-label="Zaznacz wszystkie widoczne propozycje"
+          />
           <Select value={origin} onValueChange={(v) => setOrigin(v as OriginFilter)}>
             <SelectTrigger className="h-7 gap-1.5 px-2 text-[12px]">
               <SelectValue placeholder="origin" />
@@ -305,6 +433,16 @@ export function QueueScreen() {
             {lastUpdatedLabel}
           </button>
         </div>
+        {selectedCount > 0 && (
+          <QueueBulkBar
+            count={selectedCount}
+            staleCount={selectedStaleCount}
+            onApprove={() => setBulkApproveOpen(true)}
+            onReject={() => setBulkRejectOpen(true)}
+            onClear={clearSelection}
+            busy={bulkApproveMutation.isPending || bulkRejectMutation.isPending}
+          />
+        )}
         <div className="flex-1 overflow-y-auto">
           {isLoading ? (
             <div className="flex flex-col gap-2 p-3.5">
@@ -332,6 +470,9 @@ export function QueueScreen() {
                 stale={p.stale}
                 selected={p.id === selectedId}
                 onClick={() => setSelectedId(p.id)}
+                selectable
+                checked={selectedIds.has(p.id)}
+                onCheckedChange={() => toggleSelected(p.id)}
               />
             ))
           )}
@@ -391,6 +532,88 @@ export function QueueScreen() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Bulk approve (roadmap v1.3) — `AlertDialogAction` domyślnie stylowany jako `destructive`
+          (pasuje do reject powyżej), tu nadpisany na `primary` — to jest akcja pozytywna, nie
+          niszcząca. Ostrzeżenie o `stale` widoczne tylko gdy wśród zaznaczonych faktycznie jest. */}
+      <AlertDialog open={bulkApproveOpen} onOpenChange={setBulkApproveOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Zatwierdzić {selectedCount} {pluralProposals(selectedCount)}?
+            </AlertDialogTitle>
+          </AlertDialogHeader>
+          <AlertDialogDescription>
+            Każda propozycja dostanie własną transakcję i własny wpis audytu — dokładnie tak samo jak
+            przy pojedynczym zatwierdzeniu (bulk to orkiestracja, nie jedna zbiorcza transakcja).
+            {selectedStaleCount > 0 && (
+              <>
+                {' '}
+                <b className="font-semibold text-danger">
+                  {selectedStaleCount} {pluralProposals(selectedStaleCount)} nieaktualnych (stale)
+                </b>{' '}
+                — ich zatwierdzenie się nie powiedzie; zostaną wskazane w podsumowaniu i zostaną zaznaczone.
+              </>
+            )}
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Anuluj</AlertDialogCancel>
+            <AlertDialogAction
+              className={cn(buttonVariants({ variant: 'primary' }), 'hover:opacity-100')}
+              onClick={() => bulkApproveMutation.mutate(selectedProposals.map((p) => p.id))}
+              disabled={bulkApproveMutation.isPending || selectedCount === 0}
+            >
+              Zatwierdź
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk reject (roadmap v1.3) — `bulkRejectReason` OSOBNY stan od pojedynczego `rejectReason`
+          (dwa niezależne dialogi, mogą teoretycznie zostać otwarte w różnych momentach z różną
+          treścią). Jeden wspólny `reason` trafia do audytu KAŻDEJ odrzucanej propozycji. */}
+      <AlertDialog open={bulkRejectOpen} onOpenChange={setBulkRejectOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Odrzucić {selectedCount} {pluralProposals(selectedCount)}?
+            </AlertDialogTitle>
+          </AlertDialogHeader>
+          <AlertDialogDescription>
+            Każda trafi do audytu jako <span className="font-mono">rejected</span>, wszystkie z tym
+            samym powodem. Nic nie wejdzie do pamięci.
+          </AlertDialogDescription>
+          <Textarea
+            value={bulkRejectReason}
+            onChange={(e) => setBulkRejectReason(e.target.value)}
+            placeholder="Powód (opcjonalnie, wspólny dla wszystkich)…"
+            rows={3}
+            className="mb-2"
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel>Anuluj</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() =>
+                bulkRejectMutation.mutate({
+                  ids: selectedProposals.map((p) => p.id),
+                  reason: bulkRejectReason.trim() || undefined,
+                })
+              }
+              disabled={bulkRejectMutation.isPending || selectedCount === 0}
+            >
+              Odrzuć
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <BulkFailuresDialog
+        open={bulkFailuresOpen}
+        onOpenChange={(open) => {
+          if (!open) setBulkFailures(null);
+        }}
+        failures={bulkFailures ?? []}
+      />
     </div>
   );
 }

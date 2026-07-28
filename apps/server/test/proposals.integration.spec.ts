@@ -807,6 +807,250 @@ describe('ProposalsService (integration, testcontainers) — kolejka akceptacji 
     });
   });
 
+  describe('bulkApprove/bulkReject — orkiestracja nad approve()/reject() (roadmap v1.3, "Bulk approve/reject w kolejce")', () => {
+    it('happy path: 3/3 succeeded, kolejność succeeded odpowiada kolejności WEJŚCIA, nie kolejności utworzenia', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('bulk-happy-model'));
+
+      const m1 = await seedApprovedMemory({ header: 'Bulk M1', body: 'B1.', projectId: projectA.projectId });
+      const m2 = await seedApprovedMemory({ header: 'Bulk M2', body: 'B2.', projectId: projectA.projectId });
+      const m3 = await seedApprovedMemory({ header: 'Bulk M3', body: 'B3.', projectId: projectA.projectId });
+
+      const p1 = await seedProposal({
+        type: 'update',
+        payload: { memoryId: m1.id, header: 'M1 v2' },
+        affectedIds: [m1.id],
+        baseVersions: { [m1.id]: 0 },
+        projectId: projectA.projectId,
+      });
+      const p2 = await seedProposal({
+        type: 'update',
+        payload: { memoryId: m2.id, header: 'M2 v2' },
+        affectedIds: [m2.id],
+        baseVersions: { [m2.id]: 0 },
+        projectId: projectA.projectId,
+      });
+      const p3 = await seedProposal({
+        type: 'update',
+        payload: { memoryId: m3.id, header: 'M3 v2' },
+        affectedIds: [m3.id],
+        baseVersions: { [m3.id]: 0 },
+        projectId: projectA.projectId,
+      });
+
+      // Kolejność WEJŚCIA celowo inna niż kolejność utworzenia (p3, p1, p2) — `succeeded` musi
+      // odzwierciedlać porządek `ids`, nie porządek insertów w bazie (bulk jest sekwencyjny, §runBulk).
+      const result = await proposalsService.bulkApprove([p3.id, p1.id, p2.id], { actor: 'tester' });
+      expect(result.succeeded).toEqual([p3.id, p1.id, p2.id]);
+      expect(result.failed).toEqual([]);
+
+      const [m1After] = await db.select().from(memories).where(eq(memories.id, m1.id));
+      const [m2After] = await db.select().from(memories).where(eq(memories.id, m2.id));
+      const [m3After] = await db.select().from(memories).where(eq(memories.id, m3.id));
+      expect(m1After.header).toBe('M1 v2');
+      expect(m2After.header).toBe('M2 v2');
+      expect(m3After.header).toBe('M3 v2');
+    });
+
+    it('mix stale+ok+already_decided: zdrowy zmaterializowany, stale nietknięty, already_decided pominięty -> częściowy sukces', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('bulk-mix-model'));
+
+      const healthy = await seedApprovedMemory({ header: 'Bulk zdrowy', body: 'B.', projectId: projectA.projectId });
+      const staleTarget = await seedApprovedMemory({ header: 'Bulk stale', body: 'B.', projectId: projectA.projectId });
+      const decidedTarget = await seedApprovedMemory({
+        header: 'Bulk decided',
+        body: 'B.',
+        projectId: projectA.projectId,
+      });
+
+      const healthyProposal = await seedProposal({
+        type: 'update',
+        payload: { memoryId: healthy.id, header: 'Bulk zdrowy v2' },
+        affectedIds: [healthy.id],
+        baseVersions: { [healthy.id]: 0 },
+        projectId: projectA.projectId,
+      });
+      const staleProposal = await seedProposal({
+        type: 'update',
+        payload: { memoryId: staleTarget.id, header: 'Bulk stale v2' },
+        affectedIds: [staleTarget.id],
+        baseVersions: { [staleTarget.id]: 0 },
+        projectId: projectA.projectId,
+      });
+      const decidedProposal = await seedProposal({
+        type: 'update',
+        payload: { memoryId: decidedTarget.id, header: 'Bulk decided v2' },
+        affectedIds: [decidedTarget.id],
+        baseVersions: { [decidedTarget.id]: 0 },
+        projectId: projectA.projectId,
+      });
+
+      // Symuluje inną zatwierdzoną zmianę stale-targetu POZA tym bulkiem.
+      await db.update(memories).set({ version: 1 }).where(eq(memories.id, staleTarget.id));
+      // Proposal już rozpatrzony PRZED wywołaniem bulku (np. w innej karcie/przez innego recenzenta).
+      await proposalsService.reject(decidedProposal.id, { actor: 'tester' });
+
+      const result = await proposalsService.bulkApprove([healthyProposal.id, staleProposal.id, decidedProposal.id], {
+        actor: 'tester',
+      });
+
+      expect(result.succeeded).toEqual([healthyProposal.id]);
+      expect(result.failed).toHaveLength(2);
+      const staleFailure = result.failed.find((f) => f.id === staleProposal.id);
+      expect(staleFailure).toMatchObject({ code: 'stale', staleIds: [staleTarget.id] });
+      const decidedFailure = result.failed.find((f) => f.id === decidedProposal.id);
+      expect(decidedFailure).toMatchObject({ code: 'already_decided' });
+
+      const [healthyAfter] = await db.select().from(memories).where(eq(memories.id, healthy.id));
+      expect(healthyAfter.header).toBe('Bulk zdrowy v2');
+      const [staleAfter] = await db.select().from(memories).where(eq(memories.id, staleTarget.id));
+      expect(staleAfter.header).toBe('Bulk stale'); // approve NIE dotknęło stale-targetu
+      expect(staleAfter.version).toBe(1); // tylko bump z symulacji, nie z approve
+    });
+
+    it('nie-atomowość: porażka środkowego itemu NIE cofa wcześniejszego sukcesu ani nie blokuje przetwarzania kolejnych', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('bulk-nonatomic-model'));
+
+      const first = await seedApprovedMemory({ header: 'Bulk first', body: 'B.', projectId: projectA.projectId });
+      const last = await seedApprovedMemory({ header: 'Bulk last', body: 'B.', projectId: projectA.projectId });
+
+      const firstProposal = await seedProposal({
+        type: 'update',
+        payload: { memoryId: first.id, header: 'Bulk first v2' },
+        affectedIds: [first.id],
+        baseVersions: { [first.id]: 0 },
+        projectId: projectA.projectId,
+      });
+      const lastProposal = await seedProposal({
+        type: 'update',
+        payload: { memoryId: last.id, header: 'Bulk last v2' },
+        affectedIds: [last.id],
+        baseVersions: { [last.id]: 0 },
+        projectId: projectA.projectId,
+      });
+
+      const result = await proposalsService.bulkApprove(
+        [firstProposal.id, 'prop_bulknonexistent0', lastProposal.id],
+        { actor: 'tester' },
+      );
+
+      expect(result.succeeded).toEqual([firstProposal.id, lastProposal.id]);
+      expect(result.failed).toEqual([{ id: 'prop_bulknonexistent0', code: 'not_found', message: expect.any(String) }]);
+
+      const [firstAfter] = await db.select().from(memories).where(eq(memories.id, first.id));
+      const [lastAfter] = await db.select().from(memories).where(eq(memories.id, last.id));
+      expect(firstAfter.header).toBe('Bulk first v2'); // NIE cofnięte mimo późniejszej porażki
+      expect(lastAfter.header).toBe('Bulk last v2'); // pętla poszła dalej mimo porażki środkowego itemu
+    });
+
+    it('kolizja dwóch proposali update na TEJ SAMEJ pamięci w jednym bulku: pierwszy przechodzi, drugi -> stale', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('bulk-collision-model'));
+
+      const target = await seedApprovedMemory({ header: 'Bulk kolizja', body: 'B.', projectId: projectA.projectId });
+      const p1 = await seedProposal({
+        type: 'update',
+        payload: { memoryId: target.id, header: 'Kolizja v1' },
+        affectedIds: [target.id],
+        baseVersions: { [target.id]: 0 },
+        projectId: projectA.projectId,
+      });
+      const p2 = await seedProposal({
+        type: 'update',
+        payload: { memoryId: target.id, header: 'Kolizja v2' },
+        affectedIds: [target.id],
+        baseVersions: { [target.id]: 0 }, // TEN SAM base — liczony przed approve #1 w tym samym bulku
+        projectId: projectA.projectId,
+      });
+
+      const result = await proposalsService.bulkApprove([p1.id, p2.id], { actor: 'tester' });
+
+      expect(result.succeeded).toEqual([p1.id]);
+      expect(result.failed).toEqual([{ id: p2.id, code: 'stale', message: expect.any(String), staleIds: [target.id] }]);
+
+      const [targetAfter] = await db.select().from(memories).where(eq(memories.id, target.id));
+      expect(targetAfter.header).toBe('Kolizja v1'); // drugi item w bulku NIE nadpisał pierwszego
+      expect(targetAfter.version).toBe(1);
+    });
+
+    it('bulkReject: wspólny reason trafia do audytu KAŻDEJ odrzucanej propozycji', async () => {
+      const { memoryService, proposalsService } = buildServices(new StubEmbeddingProvider('bulk-reject-model'));
+
+      const save1 = await memoryService.save({ header: 'Bulk reject 1', body: 'B.' }, projectA);
+      const save2 = await memoryService.save({ header: 'Bulk reject 2', body: 'B.' }, projectA);
+      const proposal1 = await findProposalForMemory(save1.id, projectA.projectId);
+      const proposal2 = await findProposalForMemory(save2.id, projectA.projectId);
+
+      const result = await proposalsService.bulkReject([proposal1.id, proposal2.id], {
+        actor: 'tester',
+        reason: 'powód wspólny dla bulku',
+      });
+
+      expect(result.succeeded).toEqual([proposal1.id, proposal2.id]);
+      expect(result.failed).toEqual([]);
+
+      const [p1After] = await db.select().from(proposals).where(eq(proposals.id, proposal1.id));
+      const [p2After] = await db.select().from(proposals).where(eq(proposals.id, proposal2.id));
+      expect(p1After.status).toBe('rejected');
+      expect(p2After.status).toBe('rejected');
+
+      const auditRows = await db.select().from(auditLog).where(eq(auditLog.eventType, 'proposal_rejected'));
+      const audit1 = auditRows.find((a) => (a.metadata as { proposalId?: string })?.proposalId === proposal1.id);
+      const audit2 = auditRows.find((a) => (a.metadata as { proposalId?: string })?.proposalId === proposal2.id);
+      expect((audit1!.metadata as { reason?: string }).reason).toBe('powód wspólny dla bulku');
+      expect((audit2!.metadata as { reason?: string }).reason).toBe('powód wspólny dla bulku');
+    });
+
+    it('nieistniejące id w środku listy -> not_found tylko dla niego, reszta bulku przechodzi', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('bulk-not-found-model'));
+
+      const seeded = await seedApprovedMemory({ header: 'Bulk not-found', body: 'B.', projectId: projectA.projectId });
+      const proposalRow = await seedProposal({
+        type: 'delete',
+        payload: { memoryId: seeded.id },
+        affectedIds: [seeded.id],
+        baseVersions: { [seeded.id]: 0 },
+        projectId: projectA.projectId,
+      });
+
+      const result = await proposalsService.bulkApprove(['prop_bulkmissinginmid0', proposalRow.id], {
+        actor: 'tester',
+      });
+
+      expect(result.succeeded).toEqual([proposalRow.id]);
+      expect(result.failed).toEqual([{ id: 'prop_bulkmissinginmid0', code: 'not_found', message: expect.any(String) }]);
+
+      const [memRow] = await db.select().from(memories).where(eq(memories.id, seeded.id));
+      expect(memRow.status).toBe('archived');
+    });
+
+    it('pusta lista -> rzuca validation_error PRZED jakąkolwiek mutacją (bulkApprove i bulkReject)', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('bulk-empty-model'));
+
+      // Zseedowana pending propozycja — dowód, że walidacja pustej listy rzuca PRZED pętlą,
+      // a nie tylko że rzuca (test przeszedłby nawet gdyby ktoś przez pomyłkę zamienił kolejność
+      // walidacji i pętli, gdyby nic nie było w bazie do zepsucia).
+      const target = await seedApprovedMemory({ header: 'Bulk pusta lista', body: 'B.', projectId: projectA.projectId });
+      const proposalRow = await seedProposal({
+        type: 'update',
+        payload: { memoryId: target.id, header: 'Bulk pusta lista v2' },
+        affectedIds: [target.id],
+        baseVersions: { [target.id]: 0 },
+        projectId: projectA.projectId,
+      });
+
+      await expect(proposalsService.bulkApprove([], { actor: 'tester' })).rejects.toMatchObject({
+        code: 'validation_error',
+      });
+      const [afterEmptyApprove] = await db.select().from(proposals).where(eq(proposals.id, proposalRow.id));
+      expect(afterEmptyApprove.status).toBe('pending'); // bulkApprove([]) nic nie tknęło
+
+      await expect(proposalsService.bulkReject([], { actor: 'tester' })).rejects.toMatchObject({
+        code: 'validation_error',
+      });
+      const [afterEmptyReject] = await db.select().from(proposals).where(eq(proposals.id, proposalRow.id));
+      expect(afterEmptyReject.status).toBe('pending'); // bulkReject([]) nic nie tknęło
+    });
+  });
+
   describe('edit-before-approve (FR-Q6)', () => {
     it('edit() ustawia edited_payload i kasuje staging; approve() materializuje edytowaną treść z recompute embeddingu; payload trzyma oryginał', async () => {
       const { memoryService } = buildServices(new StubEmbeddingProvider('edit-save-model'));

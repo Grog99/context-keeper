@@ -14,15 +14,19 @@ export interface QueueKeyboardHandlers {
   onReject: () => void;
   onEdit: () => void;
   onSupersede: () => void;
+  /** Bulk selection (roadmap v1.3, "Bulk approve/reject w kolejce") — `x` przełącza zaznaczenie
+   * BIEŻĄCEJ (podglądanej) propozycji. Osobny skrót od `A`/`R`, które świadomie zostają WYŁĄCZNIE
+   * jednoelementowe (bezpieczeństwo — nie mają odpalać bulku, nawet gdy zaznaczenie jest niepuste). */
+  onToggleSelect: () => void;
   /** `false` gasi cały hook (np. tryb edycji inline albo otwarty AlertDialog) — inaczej `e`/`a`
    * wpisywane w polu edycji odpaliłyby akcje (choć `isEditableTarget` już to łapie dla pól
    * formularza, `enabled` daje dodatkową kontrolę z poziomu ekranu, np. gdy fokus jest na przycisku). */
   enabled?: boolean;
 }
 
-/** §10 design-systemu — nawigacja kolejki: `j/k` góra/dół, `Enter` otwiera, `A/R/E/S` akcje.
- * Nieaktywne gdy fokus jest w polu edytowalnym albo z modyfikatorem (Cmd/Ctrl/Alt) — nie kolidować
- * z skrótami przeglądarki/OS ani z wpisywaniem tekstu. */
+/** §10 design-systemu — nawigacja kolejki: `j/k` góra/dół, `Enter` otwiera, `A/R/E/S` akcje, `x`
+ * toggle zaznaczenia (bulk, roadmap v1.3). Nieaktywne gdy fokus jest w polu edytowalnym albo z
+ * modyfikatorem (Cmd/Ctrl/Alt) — nie kolidować z skrótami przeglądarki/OS ani z wpisywaniem tekstu. */
 export function useQueueKeyboard(handlers: QueueKeyboardHandlers): void {
   const ref = useRef(handlers);
   // Aktualizacja "latest ref" MUSI żyć w efekcie, nie w ciele render (react-hooks/refs, React
@@ -64,6 +68,10 @@ export function useQueueKeyboard(handlers: QueueKeyboardHandlers): void {
         case 's':
         case 'S':
           ref.current.onSupersede();
+          return;
+        case 'x':
+        case 'X':
+          ref.current.onToggleSelect();
           return;
         default:
           return;

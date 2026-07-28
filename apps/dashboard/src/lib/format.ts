@@ -42,3 +42,14 @@ export function formatDayHeading(iso: string): string {
 export function formatTimeOfDay(iso: string): string {
   return new Date(iso).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
 }
+
+/** Odmiana rzeczownika "propozycja" wg liczebnika (bulk approve/reject, roadmap v1.3) — 1 „propozycję"
+ * (biernik, jak w „Zatwierdź (1) propozycję"), 2-4 „propozycje" (z wyjątkiem 12-14, które po polsku
+ * idą jak "wiele" — „12 propozycji", nie „12 propozycje"), reszta „propozycji". */
+export function pluralProposals(n: number): string {
+  if (n === 1) return 'propozycję';
+  const lastTwo = n % 100;
+  const lastDigit = n % 10;
+  if (lastDigit >= 2 && lastDigit <= 4 && !(lastTwo >= 12 && lastTwo <= 14)) return 'propozycje';
+  return 'propozycji';
+}

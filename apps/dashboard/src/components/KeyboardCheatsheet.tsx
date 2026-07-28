@@ -21,6 +21,7 @@ const QUEUE_SHORTCUTS: [string, string][] = [
   ['R', 'Odrzuć'],
   ['E', 'Edytuj'],
   ['S', 'Zatwierdź jako zamiennik'],
+  ['x', 'Zaznacz / odznacz propozycję'],
 ];
 
 export interface KeyboardCheatsheetProps {

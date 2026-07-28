@@ -398,23 +398,28 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 
 ```
 ┌ lista (38%) ──────────────┬ detal (62%) ───────────────────────────┐
-│ Filtry: [origin ▾][type ▾]│ Header proposala            [StatusChip] │
-│ ─────────────────────────  │ OriginPath · tagi · czas                │
-│ ● PENDING create  ····· 2m│ ─────────────────────────────────────── │
-│ ◆ nightly merge   ····· 1h│ [DedupHint: podobne do mem_x]           │
-│ 🔒 STALE update   ····· 3h│ ┌ Tabs: Diff | Metadane | Rewizje ────┐ │
-│ ● PENDING create  ····· 5h│ │  DiffView (zależny od type)          │ │
-│                            │ │                                       │ │
+│[☑][origin ▾][type ▾]      │ Header proposala            [StatusChip] │
+│ QueueBulkBar (gdy zazn.>0)│ OriginPath · tagi · czas                │
+│ ─────────────────────────  │ ─────────────────────────────────────── │
+│ ☑ PENDING create  ····· 2m│ [DedupHint: podobne do mem_x]           │
+│ ☐ nightly merge   ····· 1h│ ┌ Tabs: Diff | Metadane | Rewizje ────┐ │
+│ 🔒 STALE update   ····· 3h│ │  DiffView (zależny od type)          │ │
+│ ☐ PENDING create  ····· 5h│ │                                       │ │
 │                            │ └──────────────────────────────────────┘ │
 │                            │ ─ sticky ProposalActions ─────────────── │
 │                            │ [Zatwierdź A][Odrzuć R][Edytuj E][▾ zam.]│
 └───────────────────────────┴──────────────────────────────────────────┘
 ```
 
-- **Lewa:** filtry `origin`/`type`; lista `ProposalRow`. Badge stale widoczny na wierszu.
+- **Lewa:** filtry `origin`/`type`; checkbox „zaznacz wszystkie" skrajnie z lewej w tym samym pasku
+  (roadmap v1.3, "Bulk approve/reject w kolejce" — `indeterminate` gdy zaznaczona tylko część widocznej
+  listy); lista `ProposalRow` z własnym checkboxem per wiersz (klik w checkbox rozłączny od klika w
+  wiersz — pierwszy toggle'uje zaznaczenie, drugi otwiera podgląd); `QueueBulkBar` pod paskiem filtrów,
+  WYŁĄCZNIE gdy zaznaczenie niepuste — licznik + „Zatwierdź (N)"/„Odrzuć (N)"/„Anuluj zaznaczenie".
+  Badge stale widoczny na wierszu.
 - **Prawa:** header + `OriginPath` + tagi; `DedupHint` (jeśli jest); Tabs `Diff`/`Metadane`/`Rewizje`; sticky `ProposalActions`.
-- **Stany specjalne:** `stale` → primary disabled + alert danger z powodem; `edit-before-approve` → header/body stają się edytowalne inline, akcja zmienia się na „Zatwierdź z edycją" (badge „approved with edits").
-- **Klawiatura:** `j/k` nawigacja, `A/R/E`, `S` zamiennik, `Enter` otwiera, `/` search.
+- **Stany specjalne:** `stale` → primary disabled + alert danger z powodem; `edit-before-approve` → header/body stają się edytowalne inline, akcja zmienia się na „Zatwierdź z edycją" (badge „approved with edits"). Bulk (roadmap v1.3): potwierdzenie przez `AlertDialog` (ostrzeżenie o `stale` dla approve, wspólne pole `reason` dla reject); po operacji sukcesy znikają z zaznaczenia, porażki zostają zaznaczone i widoczne przez „Szczegóły" na toaście (`BulkFailuresDialog`, id + kod + komunikat).
+- **Klawiatura:** `j/k` nawigacja, `A/R/E`, `S` zamiennik, `x` zaznacz/odznacz (bulk, roadmap v1.3 — `A`/`R` świadomie zostają jednoelementowe, bulk zawsze wymaga jawnego kliknięcia), `Enter` otwiera, `/` search.
 
 ### 9.2 Przeglądarka pamięci (FR-D2) — list/detail
 
@@ -507,7 +512,7 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 - **Focus:** zawsze widoczny `focus-visible` — ring 2px iris + offset 2px. Nawigacja Tab przez wszystkie interaktywne.
 - **Kontrast:** cel **WCAG AA** (tekst ≥4.5:1, UI/ikony ≥3:1). Palety §2 dobrane pod to w obu motywach; status-fg na status-subtle spełnia AA.
 - **Kolor nie jest jedynym sygnałem** (P2): każdy status = kolor **+ ikona + label**.
-- **Klawiatura (kolejka):** `j/k` góra/dół, `Enter` detal, `A` approve, `R` reject, `E` edit, `S` zamiennik, `/` search, `⌘K` paleta poleceń, `g` potem `k/p/c/t/a/m/o/w` — skok do ekranu (Kolejka/Pamięć/Oś czasu/Projekty/Audyt/Pomiary/Operacje/Onboarding). Skróty widoczne w tooltipach i „?" cheatsheet.
+- **Klawiatura (kolejka):** `j/k` góra/dół, `Enter` detal, `A` approve, `R` reject, `E` edit, `S` zamiennik, `x` zaznacz/odznacz (bulk approve/reject, roadmap v1.3), `/` search, `⌘K` paleta poleceń, `g` potem `k/p/c/t/a/m/o/w` — skok do ekranu (Kolejka/Pamięć/Oś czasu/Projekty/Audyt/Pomiary/Operacje/Onboarding). Skróty widoczne w tooltipach i „?" cheatsheet.
 - **Reduced motion:** `prefers-reduced-motion` → bez translate/shimmer.
 - **Empty / loading / error:** każdy list ma `EmptyState`, `Skeleton`, i inline error (nie modal) z akcją „Ponów".
 - **Live vs polling:** v1 kolejka odświeżana pollingiem — pokaż „ostatnia aktualizacja Xs temu" + ręczny refresh; bez fałszywego „real-time".

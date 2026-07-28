@@ -6,6 +6,7 @@ import type {
   ProposalType,
   RelationType,
 } from '../db/schema/enums';
+import type { ProposalErrorCode } from './proposals.errors';
 
 /** Krawędź attach-on-save, niesiona w `payload.relations` (§memory.types.ts `SaveRelationInput`,
  * §db/schema/memory-relations.ts) — dokładnie ten sam kształt na `CreatePayload` i `UpdatePayload`,
@@ -123,4 +124,32 @@ export interface ProposalView {
    * ma teraz `memories.version` inny niż zapisany w `base_versions`, albo w ogóle zniknął. */
   stale: boolean;
   staleIds: string[];
+}
+
+/** Decyzja zbiorcza (roadmap v1.3, "Bulk approve/reject w kolejce") — CZYSTA ORKIESTRACJA nad
+ * `approve()`/`reject()`: każdy id nadal dostaje własną transakcję, własne row-locki i własny wpis
+ * audytu. `unknown` = błąd spoza kontraktu domenowego (np. padnięta baza) — złapany per item, żeby
+ * jeden wyjątek nie ubił podsumowania dla itemów, które JUŻ się wykonały (bulk nie jest atomowy). */
+export interface BulkDecisionItemError {
+  id: string;
+  code: ProposalErrorCode | 'unknown';
+  message: string;
+  /** Wyłącznie dla `code='stale'` — te same id co w kopercie 409 pojedynczego approve. */
+  staleIds?: string[];
+}
+
+export interface BulkDecisionResult {
+  /** Kolejność zgodna z (odduplikowanym) wejściem — bulk jest sekwencyjny. */
+  succeeded: string[];
+  failed: BulkDecisionItemError[];
+}
+
+export interface BulkApproveOptions {
+  actor: string;
+}
+
+/** `reason` jeden, wspólny — trafia do audytu KAŻDEJ odrzucanej propozycji (decyzja produktowa). */
+export interface BulkRejectOptions {
+  actor: string;
+  reason?: string;
 }

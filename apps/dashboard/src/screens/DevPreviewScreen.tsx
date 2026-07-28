@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { BulkFailuresDialog } from '../components/BulkFailuresDialog';
 import { ContextSwitcher } from '../components/ContextSwitcher';
 import { DedupHint } from '../components/DedupHint';
 import { DiffView } from '../components/DiffView';
@@ -8,6 +9,7 @@ import { MonoId } from '../components/MonoId';
 import { OriginPath } from '../components/OriginPath';
 import { ProposalActions, type SupersedeCandidate } from '../components/ProposalActions';
 import { ProposalRow } from '../components/ProposalRow';
+import { QueueBulkBar } from '../components/QueueBulkBar';
 import { RevisionTimeline } from '../components/RevisionTimeline';
 import { StatusChip, type StatusChipStatus } from '../components/StatusChip';
 import { TokenReveal } from '../components/TokenReveal';
@@ -85,6 +87,20 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 export function DevPreviewScreen() {
   const [selectedRow, setSelectedRow] = useState('a');
   const [tokenOpen, setTokenOpen] = useState(false);
+  // Bulk selection (roadmap v1.3, "Bulk approve/reject w kolejce") — fixture osobna od `selectedRow`
+  // powyżej, dokładnie jak w `QueueScreen`: klik w wiersz (podgląd) i klik w checkbox (zaznaczenie)
+  // to rozłączne osie stanu.
+  const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set(['bulk-a']));
+  const [bulkFailuresOpen, setBulkFailuresOpen] = useState(false);
+
+  function toggleBulkSelected(id: string): void {
+    setBulkSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   async function fakeSearch(query: string): Promise<SupersedeCandidate[]> {
     await new Promise((resolve) => setTimeout(resolve, 150));
@@ -160,6 +176,71 @@ export function DevPreviewScreen() {
             onClick={() => setSelectedRow('c')}
           />
         </div>
+      </Section>
+
+      <Section title="ProposalRow — zaznaczanie zbiorcze + QueueBulkBar (roadmap v1.3, bulk approve/reject)">
+        <div className="overflow-hidden rounded-md border border-border">
+          <ProposalRow
+            type="create"
+            status="pending"
+            title="Klient acme używa PostgreSQL 16 na produkcji (upgrade z 15 w Q2)"
+            origin="agent"
+            scope="project"
+            projectName="acme"
+            tags={['infra', 'database', 'postgres']}
+            createdAt={minutesAgo(2)}
+            selectable
+            checked={bulkSelected.has('bulk-a')}
+            onCheckedChange={() => toggleBulkSelected('bulk-a')}
+          />
+          <ProposalRow
+            type="update"
+            status="pending"
+            title="Endpoint sesji to POST /api/v2/session, nie /login"
+            origin="human"
+            scope="global"
+            tags={['api']}
+            createdAt={minutesAgo(5 * 60)}
+            stale
+            selectable
+            checked={bulkSelected.has('bulk-b')}
+            onCheckedChange={() => toggleBulkSelected('bulk-b')}
+          />
+        </div>
+        <QueueBulkBar
+          count={bulkSelected.size}
+          staleCount={bulkSelected.has('bulk-b') ? 1 : 0}
+          onApprove={() => {}}
+          onReject={() => {}}
+          onClear={() => setBulkSelected(new Set())}
+        />
+      </Section>
+
+      <Section title="BulkFailuresDialog (roadmap v1.3)">
+        <button
+          type="button"
+          className="w-fit rounded-md border border-border-strong px-3 py-1.5 text-xs"
+          onClick={() => setBulkFailuresOpen(true)}
+        >
+          Otwórz BulkFailuresDialog
+        </button>
+        <BulkFailuresDialog
+          open={bulkFailuresOpen}
+          onOpenChange={setBulkFailuresOpen}
+          failures={[
+            {
+              id: 'prop_a1b2c3d4e5',
+              code: 'stale',
+              message: 'Proposal jest nieaktualny względem: mem_x1y2z3 (zmienione/usunięte od czasu utworzenia propozycji)',
+              staleIds: ['mem_x1y2z3'],
+            },
+            {
+              id: 'prop_f6g7h8i9j0',
+              code: 'already_decided',
+              message: 'Proposal prop_f6g7h8i9j0 ma już status approved',
+            },
+          ]}
+        />
       </Section>
 
       <Section title="DiffView — create">

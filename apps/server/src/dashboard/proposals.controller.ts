@@ -1,6 +1,12 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
 import type { ProposalOrigin, ProposalStatus, ProposalType } from '../db/schema/enums';
-import type { ApproveResult, EditInput, EditResult, ProposalView } from '../proposals/proposals.types';
+import type {
+  ApproveResult,
+  BulkDecisionResult,
+  EditInput,
+  EditResult,
+  ProposalView,
+} from '../proposals/proposals.types';
 import { ProposalsService } from '../proposals/proposals.service';
 import { CsrfGuard } from './auth/csrf.guard';
 import { SessionGuard } from './auth/session.guard';
@@ -13,6 +19,15 @@ interface ApproveBody {
 }
 
 interface RejectBody {
+  reason?: string;
+}
+
+interface BulkApproveBody {
+  ids: string[];
+}
+
+interface BulkRejectBody {
+  ids: string[];
   reason?: string;
 }
 
@@ -42,6 +57,19 @@ export class ProposalsController {
     // natywnie przez `listPending`). Bez `projectId` ani `scope` -> "Wszystkie" (brak filtra).
     if (scope === 'global') filtered = filtered.filter((v) => v.scope === 'global');
     return filtered;
+  }
+
+  // Literalne trasy `bulk-*` PRZED `:id` (konwencja repo, patrz `MemoriesController` — segmentowo
+  // różne od `:id` gołego, ale zadeklarowane pierwsze na wszelki wypadek, żeby Express/Nest nigdy
+  // nie musiały rozstrzygać kolejności dopasowania).
+  @Post('bulk-approve')
+  async bulkApprove(@Body() body: BulkApproveBody): Promise<BulkDecisionResult> {
+    return this.proposals.bulkApprove(body?.ids, { actor: DASHBOARD_ACTOR });
+  }
+
+  @Post('bulk-reject')
+  async bulkReject(@Body() body: BulkRejectBody): Promise<BulkDecisionResult> {
+    return this.proposals.bulkReject(body?.ids, { actor: DASHBOARD_ACTOR, reason: body?.reason });
   }
 
   @Get(':id')
