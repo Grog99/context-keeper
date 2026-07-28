@@ -2,7 +2,7 @@ import { Bot, Moon, User } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { MemoryScope, ProposalOrigin } from '../types/domain';
 
-/** §2.3 design-systemu — mono, `text-xs`, `text-muted`; `nightly` dostaje tint `info` (inny profil
+/** §2.4 design-systemu — mono, `text-xs`, `text-muted`; `nightly` dostaje tint `info` (inny profil
  * zaufania). Format: `źródło · scope[:projekt]`. */
 export interface OriginPathProps {
   origin: ProposalOrigin;

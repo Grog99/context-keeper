@@ -72,7 +72,43 @@ Pięć znaczeń. Każde ma: `solid` (ikona/kropka/akcja), `subtle` (tło chipa),
 
 > **Uwaga o `stale` vs `secret_blocked`:** oba to „stop, potrzebny człowiek, zablokowane" → **wspólna rodzina danger**, różnicowane **ikoną + labelem** (`lock` „stale — bazowa rewizja się zmieniła" vs `shield-alert` „secret_blocked — rotuj credential"), nie odcieniem. Minimalizm zamiast dwóch czerwieni.
 
-### 2.3 Provenance (origin) — nie status, więc dyskretnie
+### 2.3 Kolor tożsamości (`kind`) — nie status, więc z innej rodziny
+
+> Dopisane po rewizji kontrastu (2026-07-27). Zastępuje wcześniejszą regułę „`kind` zawsze neutralny".
+
+`kind` (`fact`/`document`/`event`) dostaje **własny kolor**, ale należący do rozłącznej rodziny
+znaczeniowej niż §2.2. Reguła P3 nie mówi „kolor tylko dla statusu" — mówi, że **każdy kolor coś
+znaczy**. Tożsamość rekordu to prawomocne znaczenie; nielegalne jest dopiero mieszanie jej z sygnałem.
+
+Trzy zasady, które trzymają te rodziny osobno:
+
+1. **Hue z martwych stref koła.** Statusy zajmują 145° (zieleń), 35° (bursztyn), 5° (czerwień),
+   250° (iris). `kind` bierze **petrol ~198°** i **wrzos ~312°** — pasma, w których nie ma żadnego
+   znaczenia z §2.2, więc pomyłka „to chyba ostrzeżenie" jest strukturalnie niemożliwa.
+2. **Niska chroma jako część kontraktu** (~22–30% nasycenia). Nasycony kolor czyta się jako sygnał;
+   przygaszony czyta się jako barwiony papier. Podbicie nasycenia tych tokenów łamie regułę,
+   nawet jeśli hue zostaje.
+3. **`fact` nie ma koloru.** Najczęstszy kind zostaje neutralną bazą — kolorowanie wszystkich trzech
+   zwróciłoby ścianę koloru, przed którą broni cała ta sekcja.
+
+| Rola | Light | Dark | Użycie |
+|---|---|---|---|
+| `kind-document` | `#4C7788` | `#79ADC3` | gutter wiersza, obrys markera |
+| `kind-document-subtle` | `#E3EDF1` | `#1D2D34` | tło markera |
+| `kind-document-foreground` | `#2B5464` | `#BAD3DE` | ikona na `subtle` |
+| `kind-event` | `#955F8B` | `#C695BC` | gutter (kropkowany), obrys markera |
+| `kind-event-subtle` | `#F2E9F0` | `#352231` | tło markera |
+| `kind-event-foreground` | `#63365A` | `#DEC4D9` | ikona na `subtle`, stempel `event_time` |
+
+**Kolor jest tu kanałem trzecim, nie jedynym** (P2). `kind` niesie równolegle: **kształt** (gutter
+przy lewej krawędzi — `fact` żaden, `document` pełny, `event` kropkowany), **ikonę**
+(`notebook`/`file-text`/`clock` w `KindMarker`) i dopiero **kolor**. Wyłączenie koloru zostawia
+działające rozróżnienie — to jest test, który każda zmiana w tej sekcji musi przejść.
+
+Implementacja: [`components/KindMarker.tsx`](../apps/dashboard/src/components/KindMarker.tsx)
+(`KindMarker` + `KindGutter`) — jedno miejsce definicji, konsumowane przez wiersz i detal §9.2.
+
+### 2.4 Provenance (origin) — nie status, więc dyskretnie
 
 Origin (`agent` / `human` / `nightly`) renderujemy jako **mono „origin path"** z drobną ikoną, w kolorze `text-muted` — z jednym wyjątkiem: `nightly` dostaje tint `info` (bo jego propozycje mają inny profil zaufania i recenzent chce je odróżniać na liście).
 
@@ -373,13 +409,29 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 
 - **Filtry:** `scope` (toggle group: wg kontekstu), `kind` (`fact`/`document`/`event`, v1.2), status (`approved`/`archived`), tagi (multi), search.
 - **Lista:** wiersze jak kolejka, ale zamiast StatusChip pending → `kind` + `scope` + `access_count`/`last_accessed` (mono, tabular). `archived` przygaszone.
+  - **Rozróżnienie `kind` (§2.3)** trzema kanałami: `KindGutter` przy lewej krawędzi (kształt +
+    kolor), `KindMarker` zamiast dawnego neutralnego `Badge variant="kind"` (ikona + kolor) oraz
+    **rytm wiersza** — `document` zawija nagłówek do dwóch linii (`line-clamp-2`) zamiast go
+    urywać, więc różni się sylwetką, nie samym tintem. Wysokość wiersza przestaje być stała
+    (min. 56px); to świadome odstępstwo od P5 na rzecz skanowalności listy.
+  - `event` dokłada `event_time` jako mono stempel w pasku metadanych, w kolorze
+    `kind-event-foreground`.
+  - Gutter ustępuje miejsca pasKowi zaznaczenia: wiersz wybrany pokazuje 2px iris (jak w kolejce),
+    nie gutter kind — zaznaczenie ma pierwszeństwo przed tożsamością.
+  - **Znane ograniczenie:** `MemoryListItem` nie niesie `body`, więc `document` nie ma dwuliniowego
+    excerptu (byłby mocniejszym nośnikiem rytmu niż zawinięty nagłówek). Wymaga pola `excerpt`
+    w DTO listy po stronie serwera — nierobione.
 - **Detal:** `header`, `body` (proza `text-md`, ~65 zn.), metadane (id, scope, kind, source, created/updated/approved, `access_count`, `last_accessed`), `RevisionTimeline`. Akcje człowieka = **commit bezpośredni** + revision: `Edytuj`, `Archiwizuj`, `Promuj do global`, `Zmień scope/kind`. Wszystkie destrukcyjne → AlertDialog.
 - **document vs fact:** `document` dostaje szerszy obszar czytania i (v1.1) lepszy edytor; `fact` kompaktowo.
-- **`kind=event` (v1.2):** badge **neutralny mono** (`variant="kind"`, jak fact/document — P3: kolor
-  zarezerwowany dla statusu, nie typu). `event_time` wyróżnia wpis samodzielnie — renderowany z ikoną
-  zegara (`Clock`, `lucide-react`) w pasku metadanych detalu i w tabie „Metadane". `event_time` **nie**
-  jest edytowalny z formularza edycji (ustawiany raz przy tworzeniu, v1) — `Edytuj` zmienia tylko
-  header/body/tagi jak dla fact/document.
+- **`kind=event` (v1.2):** `KindMarker` we wrzosie (§2.3) — **zastąpiło** dawny neutralny badge
+  `variant="kind"` i jego uzasadnienie („kolor zarezerwowany dla statusu, nie typu"); reguła zmieniła
+  się 2026-07-27 na „kolor tożsamości z rozłącznej rodziny hue". `event_time` wyróżnia wpis dodatkowo
+  — renderowany z ikoną zegara (`Clock`, `lucide-react`) w wierszu listy, w pasku metadanych detalu
+  i w tabie „Metadane". `event_time` **nie** jest edytowalny z formularza edycji (ustawiany raz przy
+  tworzeniu, v1) — `Edytuj` zmienia tylko header/body/tagi jak dla fact/document.
+- **Gdzie `Badge variant="kind"` zostaje:** w kontekstach, gdzie `kind` jest etykietą obcego rekordu,
+  nie tożsamością wiersza — `RelationsPanel` i `ProposalRelations` (targety relacji). Tam neutralność
+  jest celowa: kolor tożsamości ma wyróżniać rekord na liście, a nie każde wystąpienie słowa.
 
 ### 9.3 Projekty / tokeny (FR-D3) — poza context switcherem (lista wszystkich)
 

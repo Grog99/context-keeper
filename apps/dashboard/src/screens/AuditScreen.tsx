@@ -187,11 +187,11 @@ export function AuditScreen() {
       ) : allRows.length === 0 ? (
         <EmptyState title="Brak zdarzeń" description="Zmień filtry — nic tu nie pasuje." />
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border">
+        <div className="overflow-hidden rounded-lg border border-border bg-surface">
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-sm">
               <thead>
-                <tr className="border-b border-border">
+                <tr className="border-b border-border bg-muted/40">
                   <Th>Czas</Th>
                   <Th>Zdarzenie</Th>
                   <Th>Aktor</Th>

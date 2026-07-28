@@ -83,7 +83,7 @@ export function OsCzasuScreen() {
               <h2 className="mb-2 border-b border-border pb-1.5 text-xs font-semibold uppercase tracking-[0.05em] text-faint">
                 {group.heading}
               </h2>
-              <div className="overflow-hidden rounded-lg border border-border">
+              <div className="overflow-hidden rounded-lg border border-border bg-surface">
                 {group.items.map((item, i) => (
                   <button
                     key={item.id}
