@@ -104,11 +104,17 @@ rodzaj wpisu — wraz z fixem deduplikacji, który ten trzeci rodzaj czyni pilny
 - **Przenieść wybór projektu do sidebara** ✅ — `ContextSwitcher` przeniesiony z top bara do railu
   (pod marką, nad „Nawigacja"); trigger rozciągnięty na pełną szerokość (`h-9 w-full`, label
   `flex-1 truncate`). Top bar zostaje z samym search (poszerzony `w-[280px]`) i health strip.
-- **Bulk approve/reject w kolejce** ⬜ — zaznaczanie wielu propozycji i jedna decyzja na cały zaznaczony
-  zestaw, zamiast klikania pozycja po pozycji. Czysto UI: każda decyzja nadal przechodzi tę samą
-  transakcję i ten sam audit trail, human-gate zostaje nietknięty. Wydzielone z „anti-fatigue kolejki"
-  w backlogu — druga połowa tamtego punktu (auto-allow po N spójnych decyzjach) tam zostaje, bo
-  rozmiękcza human-gate.
+- **Bulk approve/reject w kolejce** ✅ — zaznaczanie wielu propozycji (checkbox per-wiersz + „zaznacz
+  wszystkie" w pasku filtrów, skrót `x`) i jedna decyzja na cały zaznaczony zestaw, zamiast klikania
+  pozycja po pozycji. NIE jest „czysto UI" (korekta wcześniejszego zapisu) — dwa nowe endpointy-
+  orkiestratory (`POST /proposals/bulk-approve`/`bulk-reject`, `ProposalsService.bulkApprove`/
+  `bulkReject`) wołają sekwencyjnie NIETKNIĘTE `approve()`/`reject()` per id. Inwariant, który się
+  liczy, zostaje: każda pojedyncza decyzja nadal przechodzi dokładnie tę samą transakcję i ten sam
+  audit trail co dotychczas, human-gate nietknięty. Bulk NIE jest atomowy (częściowy sukces to
+  decyzja produktowa — porażka jednego itemu nie cofa wcześniejszych sukcesów), cap `BULK_MAX_IDS=100`;
+  po operacji sukcesy znikają z zaznaczenia, porażki zostają zaznaczone (dialog ze szczegółami per id).
+  Wydzielone z „anti-fatigue kolejki" w backlogu — druga połowa tamtego punktu (auto-allow po N
+  spójnych decyzjach) tam zostaje, bo rozmiękcza human-gate.
 
 ## Backlog ⬜
 

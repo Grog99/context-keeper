@@ -6,6 +6,7 @@ import type {
   MemorySource,
   MemoryStatus,
   ProjectTokenState,
+  ProposalErrorCode,
   ProposalOrigin,
   ProposalStatus,
   ProposalType,
@@ -57,6 +58,25 @@ export interface ApproveResult {
 
 export interface EditProposalResult {
   warnings: string[];
+}
+
+/** Lustro `BulkDecisionItemError`/`BulkDecisionResult` (`apps/server/src/proposals/proposals.types.ts`,
+ * roadmap v1.3 "Bulk approve/reject w kolejce") — `unknown` dołożone obok `ProposalErrorCode`, bo
+ * `runBulk` po stronie serwera łapie też błędy spoza kontraktu domenowego (§`toBulkItemError`). */
+export type BulkFailureCode = ProposalErrorCode | 'unknown';
+
+export interface BulkDecisionItemError {
+  id: string;
+  code: BulkFailureCode;
+  message: string;
+  /** Wyłącznie dla `code='stale'` — te same id co w kopercie 409 pojedynczego approve. */
+  staleIds?: string[];
+}
+
+export interface BulkDecisionResult {
+  /** Kolejność zgodna z (odduplikowanym) wejściem — bulk jest sekwencyjny. */
+  succeeded: string[];
+  failed: BulkDecisionItemError[];
 }
 
 /** `WithWarnings` serwera (`memory-admin.service.ts`) — zwracane przez human-create/edit pamięci. */

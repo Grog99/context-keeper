@@ -10,6 +10,11 @@ export type ProposalType = 'create' | 'update' | 'merge' | 'delete';
 export type ProposalOrigin = 'agent' | 'human' | 'nightly';
 export type ProposalStatus = 'pending' | 'approved' | 'rejected';
 
+/** Lustro `ProposalErrorCode` (`apps/server/src/proposals/proposals.errors.ts`) — kody błędów
+ * domenowych kolejki, m.in. per-item w `BulkDecisionResult.failed` (roadmap v1.3, "Bulk
+ * approve/reject w kolejce"). */
+export type ProposalErrorCode = 'not_found' | 'already_decided' | 'stale' | 'validation_error';
+
 export type RevisionAction = 'created' | 'edited' | 'promote' | 'archive' | 'superseded_by';
 
 /** Słownik typów relacji (roadmap v1.2, "memory-relations + 1-hop graph boost") — dokładnie 3

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { and, asc, eq, inArray, or, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { ToolError } from '../common/errors';
@@ -21,6 +21,10 @@ import { ProposalError } from './proposals.errors';
 import type {
   ApproveOptions,
   ApproveResult,
+  BulkApproveOptions,
+  BulkDecisionItemError,
+  BulkDecisionResult,
+  BulkRejectOptions,
   CreatePayload,
   DeletePayload,
   EditInput,
@@ -94,6 +98,61 @@ export function computeStaleIds(
   return staleIds;
 }
 
+/** Górny limit jednego bulku (roadmap v1.3, "Bulk approve/reject w kolejce"). Twardy cap zamiast
+ * paginacji: bulk jest sekwencyjny (patrz `runBulk`), a każdy item może zrobić sieciowy embedding —
+ * bez capu jeden klik mógłby trzymać request minutami. */
+export const BULK_MAX_IDS = 100;
+
+/** Walidacja + deduplikacja koperty bulku. Bierze `unknown`, bo body z kontrolera to czysta asercja
+ * typu TS (brak globalnego `ValidationPipe` w `main.ts`). Duplikaty kolapsują cicho (drugie wystąpienie
+ * tego samego id dałoby fałszywy `already_decided`); kolejność pierwszego wystąpienia zachowana.
+ * Pure — bez I/O, testowalne jednostkowo (§4.1 planu). */
+export function normalizeBulkIds(ids: unknown, max: number = BULK_MAX_IDS): string[] {
+  if (!Array.isArray(ids)) {
+    throw new ProposalError('validation_error', '`ids` musi być tablicą stringów');
+  }
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const raw of ids) {
+    if (typeof raw !== 'string') {
+      throw new ProposalError('validation_error', 'Każdy element `ids` musi być stringiem');
+    }
+    const id = raw.trim();
+    if (id.length === 0) {
+      throw new ProposalError('validation_error', 'Element `ids` nie może być pustym stringiem');
+    }
+    if (!seen.has(id)) {
+      seen.add(id);
+      normalized.push(id);
+    }
+  }
+  if (normalized.length === 0) {
+    throw new ProposalError('validation_error', '`ids` nie może być puste');
+  }
+  if (normalized.length > max) {
+    throw new ProposalError(
+      'validation_error',
+      `Maksymalnie ${max} propozycji w jednej operacji zbiorczej (otrzymano ${normalized.length})`,
+    );
+  }
+  return normalized;
+}
+
+/** `ProposalError` -> wiersz podsumowania `failed[]`; wszystko inne -> `code:'unknown'` (bez wycieku
+ * oryginalnej wiadomości/stack trace'u do klienta — oryginał i tak logowany przez `runBulk` przed
+ * wywołaniem tej funkcji). Pure — bez I/O, testowalne jednostkowo (§4.1 planu). */
+export function toBulkItemError(id: string, err: unknown): BulkDecisionItemError {
+  if (err instanceof ProposalError) {
+    return {
+      id,
+      code: err.code,
+      message: err.message,
+      ...(err.staleIds ? { staleIds: err.staleIds } : {}),
+    };
+  }
+  return { id, code: 'unknown', message: 'Nieoczekiwany błąd serwera' };
+}
+
 function snapshotOf(row: MemoryRow): Record<string, unknown> {
   return { header: row.header, body: row.body, tags: row.tags, kind: row.kind, version: row.version };
 }
@@ -107,9 +166,14 @@ function snapshotOf(row: MemoryRow): Record<string, unknown> {
  * COMMITTED (domyślny poziom) wystarcza, bo poprawność bierze się z locków, nie z izolacji
  * snapshotu. Sieciowe wywołania embeddingu ZAWSZE poza transakcją (nigdy pod lockiem, §1.5 planu) —
  * `approve` nigdy nie blokuje się na providerze (NFR-8, fail-open do `embedding: 'vectorless'`).
+ *
+ * `bulkApprove`/`bulkReject` (roadmap v1.3, "Bulk approve/reject w kolejce") to CZYSTA ORKIESTRACJA
+ * nad `approve()`/`reject()` (§`runBulk` niżej) — ani jedna linia tych dwóch metod nie jest zmieniona.
  */
 @Injectable()
 export class ProposalsService {
+  private readonly logger = new Logger(ProposalsService.name);
+
   constructor(
     @Inject(DB) private readonly db: Database,
     private readonly config: AppConfigService,
@@ -521,6 +585,52 @@ export class ProposalsService {
     });
 
     return { warnings };
+  }
+
+  /** Bulk approve (roadmap v1.3) — patrz doc-komentarz `runBulk` niżej dla semantyki non-atomowości. */
+  async bulkApprove(ids: unknown, opts: BulkApproveOptions): Promise<BulkDecisionResult> {
+    return this.runBulk(ids, (id) => this.approve(id, { actor: opts.actor }));
+  }
+
+  /** Bulk reject (roadmap v1.3) — `opts.reason` jeden, wspólny dla WSZYSTKICH itemów (decyzja
+   * produktowa: bulk reject nie ma per-item uzasadnienia, tylko jeden powód dla całego zestawu). */
+  async bulkReject(ids: unknown, opts: BulkRejectOptions): Promise<BulkDecisionResult> {
+    return this.runBulk(ids, (id) => this.reject(id, { actor: opts.actor, reason: opts.reason }));
+  }
+
+  /**
+   * Rdzeń bulku (roadmap v1.3, "Bulk approve/reject w kolejce") — pętla SEKWENCYJNA, NIE
+   * `Promise.all`: (1) `approve()` bierze `FOR UPDATE` na `memories` posortowane po id — równoległe
+   * itemy z nakładającymi się `affectedIds` byłyby gwarantowaną kontencją locków w obrębie jednego
+   * requestu; (2) każdy item może zrobić sieciowy embedding — równoległość byłaby spike'iem na
+   * sidecarze; (3) sekwencyjność czyni `succeeded[]` deterministyczne i testowalne.
+   *
+   * NIE jest atomowy (świadomie, §1 planu — sprzeczne z częściowym sukcesem jako decyzją produktową):
+   * itemy zatwierdzone/odrzucone PRZED pierwszym błędem zostają zatwierdzone/odrzucone, błąd kolejnego
+   * itemu nie cofa nic z tego, co już się wykonało. Każdy item nadal ma własną transakcję i własny
+   * wpis audytu (`approve`/`reject` nietknięte) — to dosłownie ten sam kontrakt co N pojedynczych
+   * decyzji z rzędu, tylko wywołanych z jednego requestu.
+   */
+  private async runBulk(
+    ids: unknown,
+    run: (id: string) => Promise<unknown>,
+  ): Promise<BulkDecisionResult> {
+    const normalized = normalizeBulkIds(ids); // rzuca validation_error -> 400, PRZED jakąkolwiek mutacją
+    const succeeded: string[] = [];
+    const failed: BulkDecisionItemError[] = [];
+    for (const id of normalized) {
+      // SEKWENCYJNIE — patrz doc-komentarz metody.
+      try {
+        await run(id);
+        succeeded.push(id);
+      } catch (err) {
+        if (!(err instanceof ProposalError)) {
+          this.logger.error(`bulk: nieoczekiwany błąd dla ${id}`, err as Error);
+        }
+        failed.push(toBulkItemError(id, err));
+      }
+    }
+    return { succeeded, failed };
   }
 
   // ---- private helpers ------------------------------------------------
