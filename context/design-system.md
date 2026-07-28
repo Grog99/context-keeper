@@ -352,7 +352,7 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 
 **`TokenStatusBadge`** (v1.3) — badge `effectiveStatus` tokena, ikona+kolor+label (P2): `active`→success „aktywny", `grace`→pending „karencja", `expired`→neutral „wygasły", `revoked`→danger „unieważniony". `effectiveStatus` liczony WYŁĄCZNIE server-side (`effectiveTokenStatus`, jedna reguła dzielona z auth) — SPA nigdy nie wyprowadza tego sama z `status`+`expiresAt`.
 
-**`ContextSwitcher`** — w top barze: `Wszystkie` / `Global` / `‹projekty…›` (Command-search po nazwie). Aktywny kontekst dziedziczy cała aplikacja (FR-D6). `Wszystkie` → tryb read/inbox (human-create **wyłączony**, widoczna adnotacja dlaczego).
+**`ContextSwitcher`** — w railu (pod marką, nad nawigacją): `Wszystkie` / `Global` / `‹projekty…›` (Command-search po nazwie). Aktywny kontekst dziedziczy cała aplikacja (FR-D6). `Wszystkie` → tryb read/inbox (human-create **wyłączony**, widoczna adnotacja dlaczego).
 
 **`EmptyState`** — np. kolejka pusta: spokojny „Inbox zero — brak propozycji do przeglądu", ikona line, bez clip-artu.
 
@@ -364,23 +364,34 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 
 ```
 ┌──────────┬──────────────────────────────────────────────────────────────┐
-│  RAIL     │  TOP BAR: [ContextSwitcher ▾]  [🔍 search]      [health strip] [◐]│
+│  RAIL     │  TOP BAR: [🔍 search]                             [health strip]│
 │ (240px)   ├──────────────────────────────────────────────────────────────┤
 │ ◆ Keeper  │                                                                │
-│           │                     GŁÓWNY OBSZAR EKRANU                        │
+│ [Kontekst▾]│                    GŁÓWNY OBSZAR EKRANU                       │
+│ NAWIGACJA │                                                                │
 │ ▸ Kolejka⁷│                                                                │
 │   Pamięć  │                                                                │
-│   Projekty│                                                                │
+│   Oś czasu│                                                                │
 │   Audyt   │                                                                │
+│   Pomiary │                                                                │
+│   Operacje│                                                                │
+│  Onboard. │                                                                │
 │  ────────  │                                                               │
 │ ＋ Nowa    │                                                               │
 │           │                                                                │
-│ mini-metry│                                                                │
+│  ────────  │                                                               │
+│   Projekty│                                                                │
+│ ◐ Motyw   │                                                                │
+│   Wyloguj │                                                                │
 └──────────┴──────────────────────────────────────────────────────────────┘
 ```
 
-- **Rail (240px):** marka („◆ Context Keeper"), nawigacja 4 ekranów (Kolejka z badge liczby pending), przycisk `＋ Nowa pamięć` (aktywny tylko gdy kontekst = konkretny/Global), na dole mini-metryki (queue depth, health-dot).
-- **Top bar (52px):** `ContextSwitcher` (lewo) · search (`⌘K`) · **health strip** (MetricStat ×4) · toggle motywu.
+- **Rail (240px):** marka („◆ Context Keeper"), pod nią `ContextSwitcher` (pełna szerokość railu),
+  nawigacja 7 ekranów kontekstowych (Kolejka z badge liczby pending), separator, przycisk
+  `＋ Nowa pamięć` (aktywny tylko gdy kontekst = konkretny/Global), a na samym dole — wizualnie
+  odcięta `border-t` — sekcja konta/ustawień: wejście do **Projekty** (ustawienia całego projektu,
+  poza kontekstem — §9.3), toggle motywu, Wyloguj.
+- **Top bar (52px):** search (`⌘K`) (lewo) · **health strip** (MetricStat ×4, `ml-auto`).
 - **Health strip** jest wszechobecny (P1) — recenzent zawsze widzi głębokość kolejki, zdrowie embeddingu, wynik nocnego jobu, `secret_blocked`/24h.
 
 ### 9.1 Kolejka akceptacji (FR-D1) — ekran-bohater, layout list/detail
@@ -452,6 +463,9 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
   (`include_events_in_default_search`). Zmiana audytowana jako `project_settings_changed`, widoczna
   na ekranie „Audyt" bez dodatkowej pracy UI.
 - Ten ekran **ignoruje** ContextSwitcher (zarządza kontekstami, nie żyje w jednym).
+- **Wejście do ekranu** stoi w dolnej sekcji railu (§9.0), przy toggle motywu i „Wyloguj" — wizualnie
+  odcięte `border-t` od nawigacji kontekstowej (7 ekranów), bo dotyczy ustawień całego projektu, nie
+  wybranej pamięci.
 
 ### 9.4 Audyt (FR-D4) — tabela zdarzeń + rewizje
 
@@ -473,7 +487,7 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 
 ### 9.6 Context switcher (FR-D6)
 
-- W top barze, `Command`-search. `Wszystkie` = zunifikowany inbox recenzenta (create off). Widok projektu **strict** (tylko pamięci projektu; `global` osobno). Zmiana kontekstu przeładowuje listy, ale zachowuje aktywny ekran.
+- W railu (pod marką, nad nawigacją), `Command`-search. `Wszystkie` = zunifikowany inbox recenzenta (create off). Widok projektu **strict** (tylko pamięci projektu; `global` osobno). Zmiana kontekstu przeładowuje listy, ale zachowuje aktywny ekran.
 
 ### 9.7 Oś czasu (v1.2, `kind=event`) — chronologiczna lista, grupowana wg dnia
 
@@ -519,7 +533,7 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 4. **Ekran-bohater** — Kolejka (§9.1) end-to-end na realnym API, potem Pamięć/Projekty/Audyt.
 5. **A11y pass** — focus, kontrast, klawiatura (§10) jako część „definition of done", nie po fakcie.
 
-**Poza v1 (spójne z roadmapą PRD §10):** bulk approve/reject (anti-fatigue) — layout kolejki już to udźwignie (checkbox na wierszu + bulk bar); ręczny trigger nocnego jobu i hard-purge w dashboardzie (v1.1) — miejsce w Audycie/Projektach; per-user auth (v2) — rail dostanie sekcję konta.
+**Poza v1 (spójne z roadmapą PRD §10):** bulk approve/reject (anti-fatigue) — layout kolejki już to udźwignie (checkbox na wierszu + bulk bar); ręczny trigger nocnego jobu i hard-purge w dashboardzie (v1.1) — miejsce w Audycie/Projektach; per-user auth (v2) — dolna sekcja railu (dziś: Projekty, toggle motywu, Wyloguj — §9.0) już istnieje i ją rozszerzy.
 
 ---
 

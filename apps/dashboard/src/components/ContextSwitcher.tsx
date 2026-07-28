@@ -9,9 +9,9 @@ export interface ContextSwitcherProjectOption {
   name: string;
 }
 
-/** §8.2/§9.6 — top bar: `Wszystkie` / `Global` / `‹projekty…›` (Command-search). Aktywny kontekst
- * dziedziczy cała aplikacja przez `useActiveContext` (FR-D6). Lista projektów przychodzi z zewnątrz
- * (dane, nie ten komponent, robią fetch — §M4 wpina realny `GET /api/projects`). */
+/** §8.2/§9.6 — rail (pod marką, nad nawigacją): `Wszystkie` / `Global` / `‹projekty…›` (Command-search).
+ * Aktywny kontekst dziedziczy cała aplikacja przez `useActiveContext` (FR-D6). Lista projektów
+ * przychodzi z zewnątrz (dane, nie ten komponent, robią fetch — §M4 wpina realny `GET /api/projects`). */
 export interface ContextSwitcherProps {
   projects: ContextSwitcherProjectOption[];
 }
@@ -27,10 +27,10 @@ export function ContextSwitcher({ projects }: ContextSwitcherProps) {
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="flex h-8 items-center gap-2 rounded-md border border-border-strong bg-background px-2.5 text-[13px] font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex h-9 w-full items-center gap-2 rounded-md border border-border-strong bg-background px-2.5 text-[13px] font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <span className="size-[7px] shrink-0 rounded-full bg-primary" />
-          <span className="max-w-[160px] truncate">{label}</span>
+          <span className="min-w-0 flex-1 truncate text-left">{label}</span>
           <ChevronDown className="size-[15px] shrink-0 text-faint" />
         </button>
       </PopoverTrigger>
