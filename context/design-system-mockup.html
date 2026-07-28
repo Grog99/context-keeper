@@ -46,7 +46,8 @@
 
   /* ============ RAIL ============ */
   .rail{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:16px 12px;gap:4px}
-  .brand{display:flex;align-items:center;gap:9px;padding:4px 8px 14px;font-weight:600;font-size:15px;letter-spacing:-.01em}
+  .brand{display:flex;align-items:center;gap:9px;padding:4px 8px 10px;font-weight:600;font-size:15px;letter-spacing:-.01em}
+  .rail-bottom{margin-top:auto;display:flex;flex-direction:column;gap:4px}
   .brand .mark{width:22px;height:22px;color:var(--primary);display:grid;place-items:center}
   .brand .mark svg{width:22px;height:22px;fill:currentColor;stroke:none}
   .nav-label{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);padding:10px 8px 4px}
@@ -66,11 +67,12 @@
   /* ============ MAIN + TOPBAR ============ */
   .main{display:flex;flex-direction:column;min-width:0}
   .topbar{height:52px;flex:none;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px;padding:0 16px;background:var(--surface)}
-  .ctx{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--background);cursor:pointer;font-size:13px;font-weight:500}
+  .ctx{display:flex;align-items:center;gap:8px;width:100%;height:36px;padding:0 10px;margin-bottom:6px;border:1px solid var(--border-strong);border-radius:var(--radius);background:var(--background);cursor:pointer;font-size:13px;font-weight:500}
   .ctx .dot{width:7px;height:7px;border-radius:50%;background:var(--primary)}
   .ctx svg.i{font-size:15px;color:var(--faint)}
+  .ctx .label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
   .ctx .scope{font-family:var(--mono);font-size:12px;color:var(--muted-fg)}
-  .search{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--background);color:var(--faint);font-size:13px;min-width:210px}
+  .search{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--background);color:var(--faint);font-size:13px;width:280px}
   .search svg.i{font-size:15px}
   .search kbd{margin-left:auto;font-family:var(--mono);font-size:10.5px;border:1px solid var(--border);border-radius:4px;padding:1px 5px;color:var(--faint)}
   .health{margin-left:auto;display:flex;align-items:stretch;gap:0}
@@ -271,13 +273,19 @@
   <!-- ============ RAIL ============ -->
   <aside class="rail">
     <div class="brand"><span class="mark"><svg viewBox="0 0 24 24"><use href="#i-diamond"/></svg></span>Context Keeper</div>
+    <button class="ctx" onclick="toast('neutral','Context switcher: Wszystkie / Global / projekt (FR-D6)')">
+      <span class="dot"></span><span class="label">project<span class="scope">:acme</span></span><svg class="i"><use href="#i-chevron"/></svg>
+    </button>
     <div class="nav-label">Nawigacja</div>
     <button class="nav-item" data-nav="kolejka" aria-current="true"><svg class="i"><use href="#i-inbox"/></svg>Kolejka<span class="count">7</span></button>
     <button class="nav-item" data-nav="pamiec"><svg class="i"><use href="#i-layers"/></svg>Pamięć</button>
-    <button class="nav-item" data-nav="projekty"><svg class="i"><use href="#i-folder"/></svg>Projekty</button>
     <button class="nav-item" data-nav="audyt"><svg class="i"><use href="#i-scroll"/></svg>Audyt</button>
     <div class="rail-sep"></div>
     <button class="btn-create" onclick="toast('neutral','Human-create — Dialog „Nowa pamięć” (FR-D5)')"><svg class="i"><use href="#i-plus"/></svg>Nowa pamięć</button>
+    <div class="rail-bottom">
+      <div class="rail-sep"></div>
+      <button class="nav-item" data-nav="projekty"><svg class="i"><use href="#i-folder"/></svg>Projekty</button>
+    </div>
     <div class="rail-metrics">
       <div class="rmini"><span>Kolejka</span><b>7</b></div>
       <div class="rmini"><span>Embedding</span><b style="color:var(--success)">up</b></div>
@@ -288,9 +296,6 @@
   <div class="main">
     <!-- ============ TOPBAR ============ -->
     <header class="topbar">
-      <button class="ctx" onclick="toast('neutral','Context switcher: Wszystkie / Global / projekt (FR-D6)')">
-        <span class="dot"></span>project<span class="scope">:acme</span><svg class="i"><use href="#i-chevron"/></svg>
-      </button>
       <div class="search"><svg class="i"><use href="#i-search"/></svg>Szukaj pamięci…<kbd>⌘K</kbd></div>
       <div class="health">
         <div class="stat"><span class="lbl">Kolejka</span><span class="val">7</span></div>

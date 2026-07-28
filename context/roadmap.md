@@ -96,10 +96,14 @@ rodzaj wpisu — wraz z fixem deduplikacji, który ten trzeci rodzaj czyni pilny
   (Edytuj/Archiwizuj/Promuj/Hard-purge, w edycji: Zapisz/Anuluj) jest przyklejony na dole i zawsze
   widoczny. Nagłówek/meta/zakładki/akcje dzielą jedną kolumnę pomiaru (`max-w-4xl`), a szerokość
   czytania treści zależy od `kind` (`document` 72ch, `fact`/`event` 66ch).
-- **Wydzielić zakładkę Projekty** ⬜ — dotyczy ustawień całego projektu, nie wybranej pamięci, więc
-  powinna być wizualnie oddzielona od reszty nawigacji.
-- **Przenieść wybór projektu do sidebara** ⬜ — nad nawigację, pod logo; dziś nie widać wystarczająco
-  wyraźnie, w którym projekcie się jest.
+- **Wydzielić zakładkę Projekty** ✅ — `NAV_ITEMS` (`apps/dashboard/src/components/AppShell.tsx`)
+  rozbite na 7 ekranów kontekstowych + osobny `PROJECTS_NAV_ITEM`, renderowany w dolnej sekcji railu
+  (przy toggle motywu i „Wyloguj", odcięty `border-t`) zamiast wśród reszty nawigacji — bo dotyczy
+  ustawień całego projektu, nie wybranej pamięci. Wspólny `railNavLinkClass`/`RailNavLink` trzyma
+  identyczne active-state styling w obu miejscach renderowania.
+- **Przenieść wybór projektu do sidebara** ✅ — `ContextSwitcher` przeniesiony z top bara do railu
+  (pod marką, nad „Nawigacja"); trigger rozciągnięty na pełną szerokość (`h-9 w-full`, label
+  `flex-1 truncate`). Top bar zostaje z samym search (poszerzony `w-[280px]`) i health strip.
 - **Bulk approve/reject w kolejce** ⬜ — zaznaczanie wielu propozycji i jedna decyzja na cały zaznaczony
   zestaw, zamiast klikania pozycja po pozycji. Czysto UI: każda decyzja nadal przechodzi tę samą
   transakcję i ten sam audit trail, human-gate zostaje nietknięty. Wydzielone z „anti-fatigue kolejki"
