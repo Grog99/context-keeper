@@ -103,8 +103,11 @@ export function AppShell() {
   const createProjectName = active.kind === 'project' ? active.projectName : undefined;
 
   return (
-    <div className="grid h-screen grid-cols-[240px_1fr] bg-background text-foreground">
-      <aside className="flex flex-col gap-1 border-r border-border-strong bg-background p-3">
+    <div
+      className="grid h-screen grid-cols-[240px_1fr] bg-background text-foreground"
+      style={{ gridTemplateRows: 'minmax(0, 1fr)' }}
+    >
+      <aside className="flex min-h-0 flex-col gap-1 overflow-y-auto border-r border-border-strong bg-background p-3">
         <div className="flex items-center gap-2 px-2 pb-3.5 pt-1 text-[15px] font-semibold tracking-tight">
           <Diamond className="size-[22px] fill-primary text-primary" />
           Context Keeper
