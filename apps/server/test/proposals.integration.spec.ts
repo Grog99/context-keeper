@@ -200,6 +200,40 @@ describe('ProposalsService (integration, testcontainers) — kolejka akceptacji 
       const got = await memoryService.get(saveRes.id, projectA);
       expect(got.body).toBe('Tresc do promocji embeddingu.');
     });
+
+    it('kind=event (roadmap v1.3 "kind=event przez agenta"): approve() zapisuje memories.event_time == payload.eventTime, revisions=created, embedding jak dla fact', async () => {
+      const provider = new StubEmbeddingProvider('create-event-model');
+      const { memoryService, proposalsService } = buildServices(provider);
+
+      const saveRes = await memoryService.save(
+        {
+          header: 'Deploy na prod (proposals integration)',
+          body: 'Tresc eventu do materializacji.',
+          kind: 'event',
+          eventTime: '2026-03-01T09:00:00Z',
+        },
+        projectA,
+      );
+      expect(saveRes.status).toBe('pending');
+
+      const proposalRow = await findProposalForMemory(saveRes.id, projectA.projectId);
+      expect((proposalRow.payload as { kind: string; eventTime?: string }).kind).toBe('event');
+      expect((proposalRow.payload as { kind: string; eventTime?: string }).eventTime).toBe(
+        '2026-03-01T09:00:00.000Z',
+      );
+
+      const result = await proposalsService.approve(proposalRow.id, { actor: 'tester' });
+      expect(result.materializedId).toBe(saveRes.id);
+      expect(result.embedding).toBe('promoted'); // staging obecny jak dla fact — event nie zmienia dyspozycji
+
+      const [memRow] = await db.select().from(memories).where(eq(memories.id, saveRes.id));
+      expect(memRow.status).toBe('approved');
+      expect(memRow.kind).toBe('event');
+      expect(memRow.eventTime?.toISOString()).toBe('2026-03-01T09:00:00.000Z');
+
+      const revRows = await db.select().from(revisions).where(eq(revisions.memoryId, saveRes.id));
+      expect(revRows.some((r) => r.action === 'created')).toBe(true);
+    });
   });
 
   describe('approve — type=create, provider down przy save (fail-open, NFR-8)', () => {

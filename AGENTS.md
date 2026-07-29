@@ -30,11 +30,16 @@ Narzędzia: `mcp__context-keeper__search_memory`, `get_memory`, `save_memory`.
   specyfika deploymentu.
 - `document` — dłuższy, samodzielny tekst referencyjny zapisywany w całości (decyzja, spec,
   opis konwencji). Przekaż `kind: "document"`.
+- `event` — zdarzenie epizodyczne: co się wydarzyło i kiedy (deploy, incydent, decyzja podjęta
+  na spotkaniu). Przekaż `kind: "event"` **oraz** `event_time` (ISO 8601, np.
+  `2026-07-28T14:30:00Z`) — `event_time` jest **wymagany**, nie ma domyślnego „teraz"; to czas
+  ZDARZENIA, nie zapisu. Backdate bez ograniczeń, daty przyszłe dozwolone. Poprawienie już
+  zapisanego zdarzenia (w tym jego `event_time`) zostaje po stronie człowieka — `supersedes`
+  nie działa na eventy.
 - Żeby poprawić coś, co już jest w pamięci, znajdź to przez `search_memory` i zapisz ponownie z
   `supersedes: <id>` — zamiast dokładać luźny duplikat.
 - Żeby powiązać zapisywaną pamięć z inną już istniejącą, dołóż `relations: [{type, targetId}]`
   (`caused_by` | `follows` | `context_for`, max 16) — trafia do tego samego proposala.
-- `event` jest human-only — agent go nie tworzy.
 
 ## Zasady pracy
 

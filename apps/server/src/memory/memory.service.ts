@@ -27,7 +27,7 @@ import type {
   SearchResultItem,
   SeedApprovedInput,
 } from './memory.types';
-import { normalizeHeader, normalizeTags, validateBody } from './validation';
+import { normalizeHeader, normalizeTags, validateBody, validateEventTime } from './validation';
 import { rrfFuse } from './rrf';
 
 const DEFAULT_SEARCH_KINDS: MemoryKindFilter[] = ['fact', 'document'];
@@ -63,9 +63,8 @@ export class MemoryService {
 
   /**
    * save_memory (FR-M3-M5, FR-S1, FR-V1). Agent może zaproponować `kind='fact'` (default, gdy
-   * `input.kind` pominięty) lub `kind='document'`; `scope` zawsze `project` (`global` to human-only).
-   * `event` pozostaje poza zasięgiem agenta — wykluczone na poziomie typu (`SaveMemoryKind`) i zod
-   * enum w `mcp-server.factory.ts`, więc nie da się go tu przekazać.
+   * `input.kind` pominięty), `kind='document'`, albo — od roadmap v1.3 "kind=event przez agenta" —
+   * `kind='event'` z wymaganym `event_time`; `scope` zawsze `project` (`global` to human-only).
    *
    * Gdy `input.supersedes` jest ustawione (roadmap v1.2 "Edycja pamięci przez agenta"), zapis nie
    * mintuje nowej pamięci — deleguje do `saveAsSupersede()`, która produkuje proposal
@@ -77,6 +76,26 @@ export class MemoryService {
     const body = validateBody(input.body, kind, this.config);
     const tags = normalizeTags(input.tags, this.config);
     const actor = `agent:${ctx.projectId}`;
+
+    // Decyzja #6 (roadmap v1.3): event_time ma sens wyłącznie dla kind=event — cicha utrata daty
+    // podanej pod złym kind byłaby footgunem. Mirror precedensu `MemoryAdminService.editMemory:487`.
+    if (input.eventTime !== undefined && kind !== 'event') {
+      throw new ToolError(
+        'validation_error',
+        `event_time ma sens wyłącznie dla kind=event (jest: ${kind})`,
+      );
+    }
+    // Korekta eventu (w tym event_time) pozostaje human-only (dashboard) — guard PRZED
+    // validateEventTime, żeby komunikat nazywał prawdziwy problem (supersedes na event), a nie
+    // brakujący event_time.
+    if (kind === 'event' && input.supersedes) {
+      throw new ToolError(
+        'validation_error',
+        'Nie można poprawić pamięci kind=event przez narzędzie — korekta zdarzenia (w tym ' +
+          'event_time) jest human-only, w dashboardzie.',
+      );
+    }
+    const eventTime = validateEventTime(input.eventTime, kind); // null dla fact/document
 
     // Skaner sekretów (§10, FR-S1): agent-save → blokada, materiał nigdy nie dotyka bazy.
     const hit = scanForSecrets(`${header}\n${body}`);
@@ -108,11 +127,13 @@ export class MemoryService {
     }
 
     const scope = 'project' as const; // FR-M4: zapisy agenta tylko project-scoped
-    const contentHash = computeContentHash({ header, body, scope, projectId: ctx.projectId, kind });
+    const contentHash = computeContentHash({ header, body, scope, projectId: ctx.projectId, kind, eventTime });
 
     // Idempotencja (FR-M8): exact match do pending proposala w tym samym projekcie → duplicate_pending.
     // Hash niesie też `kind` (roadmap v1.3 "Dedup kind-aware") — identyczny header+body zapisany pod
-    // innym `kind` niż istniejąca pamięć/proposal to ODRĘBNA pamięć, nie duplikat.
+    // innym `kind` niż istniejąca pamięć/proposal to ODRĘBNA pamięć, nie duplikat. Dla `kind='event'`
+    // niesie też `event_time` (roadmap v1.3 "kind=event przez agenta") — to samo zdarzenie odnotowane
+    // dla dwóch różnych czasów to dwie ODRĘBNE pamięci, nie duplikat.
     const [pendingDup] = await this.db
       .select({ id: proposals.id })
       .from(proposals)
@@ -127,23 +148,26 @@ export class MemoryService {
 
     // Exact match do zatwierdzonej pamięci → already_exists. Bez osobnej kolumny hash na `memories`
     // (Faza 1 jej nie definiuje) — porównanie polowe jest semantycznie równoważne
-    // hash(header+body+scope+project+kind), więc nie modyfikujemy schematu Fazy 1 dla tego.
+    // hash(header+body+scope+project+kind[+event_time]), więc nie modyfikujemy schematu Fazy 1 dla tego.
     // Pomijamy to zapytanie, jeśli pending już wygrał (klasyfikacja i tak go zignoruje).
     let existingMemory: { id: string } | undefined;
     if (!pendingDup) {
+      const matchConditions = [
+        eq(memories.status, 'approved'),
+        eq(memories.scope, scope),
+        eq(memories.projectId, ctx.projectId),
+        eq(memories.header, header),
+        eq(memories.body, body),
+        eq(memories.kind, kind),
+      ];
+      // Field-compare musi zostać semantycznie równoważny hashowi (inwariant §parytet SQL<->TS
+      // niżej w testach) — `event_time` dołączony do porównania TYLKO dla `kind='event'`, mirror
+      // warunkowości szóstego pola hasha w `computeContentHash`.
+      if (kind === 'event' && eventTime) matchConditions.push(eq(memories.eventTime, eventTime));
       [existingMemory] = await this.db
         .select({ id: memories.id })
         .from(memories)
-        .where(
-          and(
-            eq(memories.status, 'approved'),
-            eq(memories.scope, scope),
-            eq(memories.projectId, ctx.projectId),
-            eq(memories.header, header),
-            eq(memories.body, body),
-            eq(memories.kind, kind),
-          ),
-        )
+        .where(and(...matchConditions))
         .limit(1);
     }
 
@@ -168,6 +192,9 @@ export class MemoryService {
       body,
       tags,
       kind,
+      // Tylko `kind='event'` (roadmap v1.3, "kind=event przez agenta") — ISO string, `payload` jest
+      // `jsonb`, więc typ musi mówić prawdę o tym, co siedzi w bazie (nigdy `Date`).
+      ...(eventTime ? { eventTime: eventTime.toISOString() } : {}),
       ...(relations.length > 0 ? { relations } : {}),
     };
 
@@ -255,9 +282,12 @@ export class MemoryService {
       );
     }
 
-    // Kind gates: `event` jest human-only (defense-in-depth — zod enum w mcp-server.factory.ts już
-    // wyklucza `input.kind='event'`, ale TARGET może i tak być eventem niezależnie od kind żądania).
-    // Kind korekty musi zgadzać się z kind celu — bez cichej zmiany fact<->document przy supersede.
+    // Kind gates: `event` jest human-only. Od roadmap v1.3 ("kind=event przez agenta") zod enum w
+    // `mcp-server.factory.ts` JUŻ NIE wyklucza `kind='event'` na wejściu, a `save()` ma jawny wczesny
+    // guard dla `kind==='event' && input.supersedes` (wyżej) — więc ten wiersz jest teraz PIERWSZĄ
+    // linią obrony dla przypadku "target jest eventem, ale żądanie ma inny kind" (np. `kind:'fact'`),
+    // nie tylko defense-in-depth. Kind korekty musi zgadzać się z kind celu — bez cichej zmiany
+    // fact<->document przy supersede.
     if (row.kind === 'event') {
       throw new ToolError(
         'validation_error',
@@ -275,7 +305,17 @@ export class MemoryService {
     // `kind` tu zawsze == `row.kind` (gate wyżej), więc dołożenie go do hasha jest mechaniczną
     // propagacją współdzielonej definicji, nie nową zachowaniem — utrzymuje niezmiennik "każdy
     // zapisany content_hash = computeContentHash(payload)" bez wyjątków (na nim opiera się migracja).
-    const contentHash = computeContentHash({ header, body, scope, projectId: ctx.projectId, kind });
+    // `eventTime: null` jawnie — `kind` tu nigdy nie jest `'event'` (gate `row.kind==='event'` wyżej
+    // odrzuca supersede na event PRZED dotarciem tutaj, roadmap v1.3 guard w `save()`), więc szóste
+    // pole hasha i tak by się nie dołożyło (`computeContentHash` warunkuje po `kind==='event'`).
+    const contentHash = computeContentHash({
+      header,
+      body,
+      scope,
+      projectId: ctx.projectId,
+      kind,
+      eventTime: null,
+    });
 
     // Target-aware idempotencja (odrębna od create-path dedup wyżej): retry IDENTYCZNEJ korekty
     // (ten sam target + ta sama poprawiona treść) -> duplicate_pending wskazujący na istniejący

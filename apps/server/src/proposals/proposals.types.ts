@@ -24,6 +24,9 @@ export interface CreatePayload {
   body: string;
   tags: string[];
   kind: MemoryKind;
+  /** Tylko `kind='event'` (roadmap v1.3, "kind=event przez agenta") — ISO 8601 string (payload to
+   * jsonb, więc nigdy `Date`); przepisywane do `memories.event_time` w `materializeMemory`. */
+  eventTime?: string;
   /** Attach-on-save (roadmap v1.2) — materializowane W `ProposalsService.approve()`, NIE tutaj;
    * `undefined`/`[]` = bez krawędzi (backward-compat, pole czysto addytywne). */
   relations?: RelationPayloadEntry[];

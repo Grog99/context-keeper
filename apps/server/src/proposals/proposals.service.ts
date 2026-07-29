@@ -526,9 +526,13 @@ export class ProposalsService {
 
     const base = pickEffectivePayload(preRow) as CreatePayload | UpdatePayload | MergePayload;
     // `kind` jest opcjonalny WYŁĄCZNIE na UpdatePayload (patch); brak = "bez zmian" i domyślnie
-    // liczymy limit body jak dla `fact` — jedyny kind, jaki v1 w ogóle produkuje przez agenta
-    // (MemoryService.save() dokumentuje to wprost). Uproszczenie świadome, nie próbujemy tu
-    // odgadywać kind aktualnego wiersza (wymagałoby dodatkowego odczytu poza scope edit()).
+    // liczymy limit body jak dla `fact`. Uproszczenie świadome, nie próbujemy tu odgadywać kind
+    // aktualnego wiersza (wymagałoby dodatkowego odczytu poza scope edit()). `base.kind` jest
+    // WYMAGANE na `CreatePayload` (więc obecne dla proposali `event` od roadmap v1.3 "kind=event
+    // przez agenta" tak samo jak dla `fact`/`document`) — recenzent edytujący body eventu przed
+    // approve dostaje poprawny `BODY_MAX_EVENT`, nie `BODY_MAX_FACT`. `EditInput` NIE niesie
+    // `eventTime` — recenzent chcący zmienić datę odrzuca propozycję albo zatwierdza i poprawia w
+    // przeglądarce pamięci (`MemoryAdminService.editMemory` to umie).
     const kind: MemoryKind = 'kind' in base && base.kind ? base.kind : 'fact';
 
     let header = base.header;
@@ -704,6 +708,10 @@ export class ProposalsService {
         source: ORIGIN_TO_SOURCE[ctx.origin],
         version: 0,
         approvedAt: new Date(),
+        // Tylko `kind='event'` (roadmap v1.3, "kind=event przez agenta") — `CreatePayload.eventTime`
+        // niesie ISO string (jsonb), `MergePayload` nigdy nie ma tego pola (nocny job produkuje
+        // wyłącznie `kind='fact'`, `nightly.service.ts`), stąd `in` zamiast optional chaining.
+        eventTime: 'eventTime' in payload && payload.eventTime ? new Date(payload.eventTime) : null,
       })
       .returning();
     return row;

@@ -52,7 +52,7 @@ Errors: {code: "not_found", message} when the id is unknown or out of scope for 
 ## `save_memory` (load-bearing — pełny kontrakt)
 
 ```
-Propose a new memory (a fact or a document) to add to the shared project memory.
+Propose a new memory (a fact, a document, or an event) to add to the shared project memory.
 
 IMPORTANT — human-gated write: this does NOT write to memory immediately. It creates a pending
 proposal that a human reviewer must approve before it becomes visible to search_memory/get_memory
@@ -60,34 +60,43 @@ proposal that a human reviewer must approve before it becomes visible to search_
 is a fire-and-forget write, not a synchronous commit.
 
 Choose the kind with the optional `kind` parameter: "fact" (the default — omit `kind` to save a
-fact) or "document". `event` memories exist but are human-only and cannot be created here.
+fact), "document", or "event". An `event` is something that happened at a point in time — a
+deploy, an incident, a decision made in a meeting — and REQUIRES the `event_time` parameter: there
+is no implicit "now", and a missing or unparseable `event_time` returns `validation_error`.
+Backdating is unrestricted and future timestamps are accepted.
 
 One atomic fact per call for facts: do not bundle multiple unrelated facts into a single
 header/body — call save_memory once per fact. A document is instead a single self-contained
 reference text (a decision record, spec, or convention writeup), saved whole.
 
 - header: a short one-line title (<=200 chars; newlines are collapsed to spaces).
-- body: the content in markdown (size limit ~8KB for a fact, ~256KB for a document).
+- body: the content in markdown (size limit ~8KB for a fact, ~8KB for an event, ~256KB for a
+  document).
+- event_time: REQUIRED when `kind` is "event", rejected for fact/document. ISO 8601 timestamp of
+  WHEN the event happened (e.g. "2026-07-28T14:30:00Z") — not when you are saving it. Any point in
+  the past or the future is accepted.
 - tags: up to ~10 short lowercase tags ([a-z0-9-_/], no spaces) for filtering later.
 - supersedes: (optional) id of an existing fact/document in your project to correct; omit to save
-  a brand-new memory.
+  a brand-new memory. Not available for events.
 - relations: (optional) up to 16 typed, directed edges FROM this memory TO existing memories in
   your project; see "Relating memories" below.
 
 Scope: always saved to YOUR project — never global. Promotion to global is a human action in the
-dashboard.
+dashboard. A note on finding events again: `event` memories are excluded from the DEFAULT kind
+filter of search_memory unless an operator enabled them for your project, so pass `kind: "event"`
+explicitly when you look for one.
 
 Correcting an existing memory (`supersedes`): set the optional `supersedes` parameter to the id of
 a memory you found via search_memory/get_memory to propose a CORRECTION of it, instead of adding a
 loose near-duplicate. The `header` and `body` you provide are the full corrected content (required,
 exactly like a normal save) and replace the target in place if approved — there is no content-free
-"retire" option. The target must be one of YOUR project's `fact` or `document` memories, and its
-kind must match the `kind` you pass (you cannot change a fact into a document or vice versa). You
-still cannot delete memories, correct `event` memories, or correct `global` memories — those are
-human-only. An unknown id, or an id outside your project's scope, returns the same `not_found`
-error as get_memory (no cross-project leak). A supersede is still a human-gated proposal, and is
-deliberately exempt from duplicate detection — the whole point is that a correction may closely
-resemble what it replaces.
+"retire" option. The target must be one of YOUR project's `fact` or `document` memories — never an
+`event`, even though you can now create events — and its kind must match the `kind` you pass (you
+cannot change a fact into a document or vice versa). You still cannot delete memories, correct
+`event` memories, or correct `global` memories — those are human-only. An unknown id, or an id
+outside your project's scope, returns the same `not_found` error as get_memory (no cross-project
+leak). A supersede is still a human-gated proposal, and is deliberately exempt from duplicate
+detection — the whole point is that a correction may closely resemble what it replaces.
 
 Relating memories (`relations`): set the optional `relations` parameter to an array of `{type,
 targetId}` (up to 16) to attach typed, directed edges FROM this memory (the one being saved, or the
@@ -120,9 +129,9 @@ Return value: {id, status}.
   existing proposal, not a new one. With `supersedes`, this means an identical correction (same
   target + same corrected content) is already pending.
 - status "already_exists": an identical memory is already approved — `id` refers to that memory.
-  Duplicate detection keys on header+body+kind, so the same text saved under a different kind is
-  a separate memory, not a duplicate. Not applicable to `supersedes` — corrections are exempt from
-  duplicate detection (see above).
+  Duplicate detection keys on header+body+kind — plus `event_time` for events, so the same event
+  text recorded at two different times is two memories, not a duplicate. Not applicable to
+  `supersedes` — corrections are exempt from duplicate detection (see above).
 
 None of these statuses are errors. This is fire-and-forget — do not poll or wait for approval.
 
@@ -143,6 +152,9 @@ after the indicated delay — do not retry in a tight loop.
 | | `save_memory` z `supersedes` — target `kind=event`, `kind` korekty ≠ `kind` targetu, lub target `scope=global` | `validation_error` |
 | | `save_memory` z `relations` — target nieznany lub poza scope (IDOR-safe, jak `get_memory`; `kind=event` jako target JEST dozwolony, świadome odstępstwo od `supersedes`) | `not_found` |
 | | `save_memory` z `relations` — target `scope=global`, self-loop, albo ponad limit (max 16) | `validation_error` |
+| | `save_memory` z `kind="event"` bez `event_time` albo z niepoprawnym ISO | `validation_error` |
+| | `save_memory` z `event_time` przy `kind` innym niż `event` | `validation_error` |
+| | `save_memory` z `kind="event"` + `supersedes` (korekta zdarzenia human-only) | `validation_error` |
 | Transport (HTTP) | zły/brak bearer | `401` |
 | | rate limit (per token × narzędzie) | `429` + `Retry-After` |
 | Nie-błąd (status w wyniku `save_memory`) | — | `pending` / `duplicate_pending` / `already_exists` |

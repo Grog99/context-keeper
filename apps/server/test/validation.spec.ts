@@ -127,4 +127,10 @@ describe('validateEventTime (roadmap v1.2, kind=event episodic)', () => {
     const future = new Date(Date.now() + 365 * 86_400_000).toISOString();
     expect(() => validateEventTime(future, 'event')).not.toThrow();
   });
+
+  it('kind=event z backdate sprzed lat -> dozwolone, bez okna ograniczającego (decyzja usera #2: brak dodatkowego ograniczenia zakresu daty)', () => {
+    const longAgo = new Date(Date.now() - 10 * 365 * 86_400_000).toISOString();
+    expect(() => validateEventTime(longAgo, 'event')).not.toThrow();
+    expect(validateEventTime(longAgo, 'event')!.toISOString()).toBe(longAgo);
+  });
 });

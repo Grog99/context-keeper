@@ -1,8 +1,9 @@
 import type { MemoryKind, MemoryScope, RelationType } from '../db/schema/enums';
 
-/** `kind` dopuszczalny w `save_memory` (agent) — `event` jest human-only, więc wykluczony na
- * poziomie typu TS (obok zod enum w `mcp-server.factory.ts`, defense in depth). */
-export type SaveMemoryKind = Extract<MemoryKind, 'fact' | 'document'>;
+/** `kind` dopuszczalny w `save_memory` (agent) — roadmap v1.3 "kind=event przez agenta" znosi
+ * ograniczenie human-only: `event` dołączył do `fact`/`document`. `Extract` zostaje (nie zwykły
+ * alias `MemoryKind`), żeby typ dalej mówił "to podzbiór dopuszczalny dla agenta", nie "cały enum". */
+export type SaveMemoryKind = Extract<MemoryKind, 'fact' | 'document' | 'event'>;
 
 /** Jeden wpis `relations[]` w `save_memory` (roadmap v1.2, "memory-relations + 1-hop graph boost",
  * ATTACH-ON-SAVE — locked decision planu). Krawędź kierunkowa OD zapisywanej/poprawianej pamięci DO
@@ -19,6 +20,10 @@ export interface SaveMemoryInput {
   /** Domyślnie `fact` (`save()` liczy `input.kind ?? 'fact'`) — istniejący wywołujący bez `kind`
    * zachowują się jak przed dodaniem `document`. */
   kind?: SaveMemoryKind;
+  /** Wymagany gdy `kind='event'` (roadmap v1.3, "kind=event przez agenta") — ISO 8601, backdate
+   * bez ograniczeń, daty przyszłe dozwolone. Ta sama reguła co human-create: `validateEventTime`.
+   * Podanie przy `kind` innym niż `event` to twardy `validation_error` (`MemoryService.save`). */
+  eventTime?: string;
   /** Opcjonalne — id istniejącej `fact`/`document` pamięci WŁASNEGO projektu, którą `header`+`body`
    * mają POPRAWIĆ w miejscu (zamiast tworzyć nową, luźną pamięć). Mapowane na proposal
    * `type='update'`, `origin='agent'` (reużywa istniejący update approve-branch), patrz

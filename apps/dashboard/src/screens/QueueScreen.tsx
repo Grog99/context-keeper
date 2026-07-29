@@ -770,7 +770,17 @@ function ProposalDiff({
   const effective = proposal.editedPayload ?? proposal.payload;
 
   if (proposal.type === 'create') {
-    return <DiffView type="create" data={{ kind: effective.kind ?? 'fact', header: effective.header ?? '', body: effective.body ?? '' }} />;
+    return (
+      <DiffView
+        type="create"
+        data={{
+          kind: effective.kind ?? 'fact',
+          header: effective.header ?? '',
+          body: effective.body ?? '',
+          eventTime: effective.eventTime ?? null,
+        }}
+      />
+    );
   }
 
   if (proposal.type === 'update') {

@@ -98,6 +98,7 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
       expect(save.description).toMatch(/secret/i);
       expect(save.description).toMatch(/one atomic fact/i);
       expect(save.description).toMatch(/supersede|correct/i);
+      expect(save.description).toMatch(/event_time/); // roadmap v1.3 "kind=event przez agenta"
     } finally {
       await transport.close();
     }
@@ -179,14 +180,24 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
     }
   });
 
-  it('save_memory eksponuje kind (fact|document) w schemacie — event NIE jest w tools/list enumie', async () => {
+  it('save_memory eksponuje kind (fact|document|event) + event_time w schemacie (roadmap v1.3 "kind=event przez agenta")', async () => {
     const { client, transport } = newClient(token);
     await client.connect(transport);
     try {
       const tools = await client.listTools();
       const save = tools.tools.find((t) => t.name === 'save_memory')!;
       const props = (save.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
-      expect(Object.keys(props).sort()).toEqual(['body', 'header', 'kind', 'relations', 'supersedes', 'tags']);
+      expect(Object.keys(props).sort()).toEqual([
+        'body',
+        'event_time',
+        'header',
+        'kind',
+        'relations',
+        'supersedes',
+        'tags',
+      ]);
+      const kindProp = props.kind as { enum?: string[] };
+      expect(kindProp.enum).toEqual(expect.arrayContaining(['fact', 'document', 'event']));
     } finally {
       await transport.close();
     }
@@ -360,17 +371,89 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
     }
   });
 
-  it('save_memory {kind: "event"} -> odrzucone przez SDK (event pozostaje human-only)', async () => {
+  it('save_memory {kind: "event", event_time} -> pending, po approve materializuje event_time (roadmap v1.3 "kind=event przez agenta")', async () => {
+    const { client, transport } = newClient(token);
+    await client.connect(transport);
+    let saved: { id: string; status: string };
+    try {
+      const res = await client.callTool({
+        name: 'save_memory',
+        arguments: {
+          header: 'Deploy e2e przez agenta',
+          body: 'Wdrozenie kind=event przez agenta, e2e.',
+          kind: 'event',
+          event_time: '2026-03-01T09:00:00Z',
+        },
+      });
+      expect(res.isError).not.toBe(true);
+      saved = JSON.parse(textOf(res as CallToolResult)) as { id: string; status: string };
+      expect(saved.status).toBe('pending');
+      expect(saved.id).toMatch(/^mem_/);
+    } finally {
+      await transport.close();
+    }
+
+    // create-path zwraca ZMINTOWANY id pamięci, nie proposala — odszukanie proposala po
+    // `payload.memoryId` (wzorzec z testu "save_memory z relations" wyżej, :298-302).
+    const db = app.get<Database>(DB);
+    const [propRow] = await db
+      .select({ id: proposals.id })
+      .from(proposals)
+      .where(sql`${proposals.payload} ->> 'memoryId' = ${saved.id}`);
+    expect(propRow).toBeDefined();
+
+    const proposalsService = app.get(ProposalsService);
+    await proposalsService.approve(propRow.id, { actor: 'tester' });
+
+    const memoryAdmin = app.get(MemoryAdminService);
+    const detail = await memoryAdmin.getMemoryDetail(saved.id);
+    expect(detail.kind).toBe('event');
+    expect(detail.eventTime).toBe('2026-03-01T09:00:00.000Z');
+  });
+
+  it('save_memory {kind: "event"} bez event_time -> isError + {code: validation_error}', async () => {
     const { client, transport } = newClient(token);
     await client.connect(transport);
     try {
-      // Zod enum ['fact','document'] w inputSchema (mcp-server.factory.ts) odrzuca 'event' jeszcze
-      // po stronie SDK klienta, PRZED dotarciem do serwera — stąd isError zamiast rzuconego wyjątku.
       const res = await client.callTool({
         name: 'save_memory',
-        arguments: { header: 'Próba zapisu eventu', body: 'To nie powinno przejść.', kind: 'event' },
+        arguments: { header: 'Event bez daty e2e', body: 'To nie powinno przejść.', kind: 'event' },
       });
       expect(res.isError).toBe(true);
+      const envelope = JSON.parse(textOf(res as CallToolResult)) as { code: string };
+      expect(envelope.code).toBe('validation_error');
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('save_memory {kind: "event", event_time, supersedes} -> isError + {code: validation_error} (korekta eventu human-only)', async () => {
+    const memoryService = app.get(MemoryService);
+    const projectId = (await app.get(ProjectsService).resolveByToken(token))!.project.id;
+    const targetFact = await memoryService.devSeedApproved({
+      header: 'Fakt e2e dla proby supersede eventem',
+      body: 'Tresc.',
+      kind: 'fact',
+      scope: 'project',
+      projectId,
+    });
+
+    const { client, transport } = newClient(token);
+    await client.connect(transport);
+    try {
+      const res = await client.callTool({
+        name: 'save_memory',
+        arguments: {
+          header: 'Proba supersede faktu przez event e2e',
+          body: 'To nie powinno przejść.',
+          kind: 'event',
+          event_time: '2026-03-01T09:00:00Z',
+          supersedes: targetFact.id,
+        },
+      });
+      expect(res.isError).toBe(true);
+      const envelope = JSON.parse(textOf(res as CallToolResult)) as { code: string };
+      expect(envelope.code).toBe('validation_error');
     } finally {
       await transport.close();
     }
