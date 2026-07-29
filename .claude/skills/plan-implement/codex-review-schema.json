@@ -1,0 +1,47 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "summary", "defects"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["PASS", "FAIL"],
+      "description": "PASS only if there are no blocker/major defects and the plan was implemented as specified."
+    },
+    "summary": {
+      "type": "string",
+      "description": "Two or three sentences: what was reviewed and the overall judgement."
+    },
+    "defects": {
+      "type": "array",
+      "description": "Concrete, reproducible defects. Empty when verdict is PASS. No vague 'looks risky' notes.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "severity", "file", "symptom", "evidence"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "1-based index, stable within this report."
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["blocker", "major", "minor"]
+          },
+          "file": {
+            "type": "string",
+            "description": "Repo-relative path, with :line when a specific line is implicated."
+          },
+          "symptom": {
+            "type": "string",
+            "description": "One sentence stating what is wrong."
+          },
+          "evidence": {
+            "type": "string",
+            "description": "Why it is wrong: failing input/state, expected-vs-actual, or the plan requirement it violates."
+          }
+        }
+      }
+    }
+  }
+}

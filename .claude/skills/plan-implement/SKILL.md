@@ -3,7 +3,8 @@ name: plan-implement
 description: >-
   Orchestrated end-to-end workflow that takes a non-trivial task from idea to committed code.
   An Opus subagent plans, the user answers the plan's open questions, a Sonnet subagent implements,
-  a Sonnet subagent verifies (tests / lint / typecheck), the fix→verify loop repeats until green,
+  then verification runs `pnpm verify` plus an independent code review by the Codex CLI
+  (`codex exec`), the fix→verify loop repeats until green,
   and it commits only after the user approves. Use this whenever the user wants a feature, refactor,
   or bugfix carried through planning and verification rather than implemented ad hoc — e.g.
   "zaplanuj i zaimplementuj X", "weź to zadanie od planu do commita", "zbuduj funkcję Y z weryfikacją",
@@ -14,10 +15,12 @@ description: >-
 # Plan → Implement → Verify → Commit
 
 This skill orchestrates a task through several stages using **model-specialised subagents**: Opus plans
-(thinking-heavy, read-only), Sonnet implements and verifies (execution-heavy). You stay the
-**orchestrator** — your job is to spawn subagents, carry state between them, talk to the user, and drive
-the fix loop. **Do not implement the task yourself**; that defection is the most common way this workflow
-degrades into a normal ad-hoc edit session.
+(thinking-heavy, read-only), Sonnet implements (execution-heavy). Verification is deliberately **not** a
+Claude subagent — it is `pnpm verify` plus the **Codex CLI** reviewing the diff, so the code is judged by a
+model outside the family that wrote it. You stay the **orchestrator** — your job is to spawn subagents, run
+the verification pass, carry state between stages, talk to the user, and drive the fix loop. **Do not
+implement the task yourself**; that defection is the most common way this workflow degrades into a normal
+ad-hoc edit session.
 
 Communicate with the user in Polish (their preference). Subagent prompts can be in English.
 
@@ -27,7 +30,8 @@ Communicate with the user in Polish (their preference). Subagent prompts can be 
 |-------|-----|-----------------|---------|-----------------|
 | 1. Plan | Opus architect | `Plan` | `opus` | No (read-only) |
 | 3. Implement | Sonnet builder | `general-purpose` | `sonnet` | Yes |
-| 4. Verify | Sonnet reviewer | `general-purpose` | `sonnet` | No — report only |
+| 4a. Checks | You (orchestrator) | — | — | No — run `pnpm verify` |
+| 4b. Review | Codex CLI | — (Bash) | Codex default | No — read-only sandbox |
 
 Set `model` explicitly on every `Agent` call — it overrides the agent definition and is what pins each
 stage to the right tier. Subagents **do not share context with each other or with you**, so every stage's
@@ -137,37 +141,88 @@ stay coherent, rather than splitting one plan across parallel editors that would
 
 ---
 
-## Stage 4 — Verify (Sonnet, read-only)
+## Stage 4 — Verify (checks + Codex review)
 
-Spawn one verification subagent:
+Verification has two halves. The reviewer is the **Codex CLI**, not a Claude subagent — an independent model
+reviewing Claude's diff is a genuinely second opinion, where a Sonnet reviewer shares the blind spots of the
+Sonnet builder. Nothing in this stage may edit files.
 
-- `subagent_type: "general-purpose"`, `model: "sonnet"`, label like `verify:<slug>`.
-- Open the prompt with: **"You are a read-only verifier. Do not modify any files. Run the checks and report
-  findings only."** Keeping fix and verify in separate agents is deliberate — a reviewer who can't edit
-  can't paper over a defect it should be reporting.
-- Give it the plan file path and the builder's change report, and tell it to:
-  1. Run the project's checks and report the **actual** output (not an assumption they pass). For this repo:
-     - Tests: `pnpm -r test`
-     - Lint: `pnpm lint`
-     - Typecheck: this repo has no dedicated script — run `tsc --noEmit` per package (build via `nest build`
-       is the fallback proxy).
-     - First confirm these against `package.json`, since scripts can change.
-  2. Check the diff against the plan's **verification criteria** and against the plan itself — was everything
-     implemented, and correctly?
-  3. Where feasible, exercise the changed path end-to-end, not just unit tests (matches the user's standing
-     preference for real end-to-end verification).
-- Require a structured verdict: **`PASS`**, or **`FAIL`** with a numbered list of concrete, reproducible
-  defects (file, symptom, failing command / expected-vs-actual). Vague "looks risky" notes are not defects.
+### 4a — Deterministic checks (you run them)
+
+Run the repo's single verification entry point and report the **actual** output, never an assumption that it
+passes:
+
+    pnpm verify
+
+That covers lint + typecheck + test for the whole monorepo (see `AGENTS.md`). Confirm the script still exists
+in the root `package.json` before relying on it. Where feasible, also exercise the changed path end-to-end,
+not just unit tests — this matches the user's standing preference for real end-to-end verification.
+
+**If `pnpm verify` fails, skip 4b** and go straight to Stage 5 with the failing output as the defect list.
+Reviewing a red tree wastes a Codex run on problems the compiler already found.
+
+### 4b — Codex review
+
+Write the review instructions to a file first — the prompt is long and multi-line, and passing it through
+stdin avoids PowerShell/Bash quoting problems:
+
+    <scratchpad>/codex-review-prompt-<slug>.md
+
+The instructions should open with *"You are a read-only code reviewer. Do not modify any files."* and tell
+Codex to:
+
+1. Determine the diff itself — the builder's work is **staged, unstaged and untracked**, not yet committed
+   (the commit is Stage 6). Have it start from `git status --porcelain`, `git diff`, `git diff --staged`, and
+   read untracked files directly.
+2. Read the plan at `<scratchpad>/plan-<slug>.md` (give the absolute path) and judge the diff **against that
+   plan**: was everything implemented, and correctly? Check the plan's **verification criteria** specifically.
+3. Report only concrete, reproducible defects — file, symptom, and evidence (failing input/state,
+   expected-vs-actual, or the plan requirement violated). Vague "looks risky" notes are not defects.
+4. Note that `pnpm verify` already passed, so lint/type/test failures are not what it is hunting for.
+5. Return the verdict in the required JSON shape and nothing else.
+
+Then run it, reading the prompt from stdin (`-`):
+
+    codex exec -s read-only \
+      --output-schema .claude/skills/plan-implement/codex-review-schema.json \
+      -o <scratchpad>/codex-review-<slug>.json \
+      - < <scratchpad>/codex-review-prompt-<slug>.md
+
+- `--output-schema` pins the answer to `{verdict, summary, defects[]}` — the same shape Stage 5 consumes, so
+  the fix loop doesn't have to parse prose. The schema lives next to this skill.
+- `-o` writes the final message to a file; read that file for the verdict rather than scraping stdout.
+- `-s read-only` still lets Codex run commands (`git`, `tsc`, …); it only blocks writes. That is exactly the
+  reviewer-can't-edit property this stage needs.
+- Give the Bash call a **long timeout** (`timeout: 600000`) or run it in the background — a review of a
+  sizeable diff takes minutes, well past the 120 s default.
+
+**Why plain `codex exec` and not `codex exec review`:** verified against `codex-cli 0.145.0` — `exec review`
+refuses a custom prompt together with a scope flag (`--uncommitted` errors with *"cannot be used with
+[PROMPT]"*), and it **ignores `--output-schema`**, returning prose. Since this stage needs both plan-aware
+instructions and a machine-readable verdict, `exec review` can't serve it. `codex exec review --uncommitted`
+remains fine for a quick, generic, human-read review — just not for this loop. Re-check these constraints if
+the CLI version moves substantially.
+
+Read the JSON, then relay to the user: the `pnpm verify` result and Codex's `verdict` + `summary`. Treat
+`FAIL`, or any `blocker`/`major` defect, as a failing verdict for Stage 5. `minor` defects alone are a
+judgement call — surface them to the user instead of silently looping.
+
+**If Codex itself fails to run** (not logged in, network error, non-zero exit with no report), don't skip
+verification: say so, and fall back to a Sonnet reviewer (`general-purpose`, `sonnet`, label `verify:<slug>`)
+prompted with *"You are a read-only verifier. Do not modify any files. Report findings only."*, the plan file
+path, and the builder's change report — requiring the same `PASS` / `FAIL` + numbered defects verdict.
 
 ---
 
 ## Stage 5 — Fix loop
 
-If the verdict is `FAIL`:
+If the verdict is `FAIL` — from `pnpm verify`, from Codex, or both:
 
 1. Spawn a **fresh** implementation subagent (`general-purpose`, `sonnet`) with the plan file path, the prior
-   change report, and the verifier's numbered defect list. Instruct it to fix exactly those defects.
-2. Re-run Stage 4 verification.
+   change report, and the defect list — the failing `pnpm verify` output and/or the `defects[]` array from
+   Codex's JSON report. Instruct it to fix exactly those defects. Pass the defects inline in the prompt; the
+   builder has no access to your context.
+2. Re-run Stage 4 verification (4a, then 4b if 4a is green).
 3. Repeat until `PASS` or until **3 fix→verify rounds** have passed.
 
 If it still fails after 3 rounds, stop looping and hand the outstanding defects to the user with a short
@@ -199,8 +254,15 @@ After the commit lands:
    territory (push + a public PR), so it gets its own explicit yes, separate from the Stage 6 commit
    approval. Don't fold the two together even if the user tends to say yes to both.
 2. On approval: push the branch (`git push -u origin <type>/<slug>`) and create the PR with `gh pr create`,
-   targeting the repo's default base branch. Write a short title and a body summarising what changed and why
-   — pull this from the plan file and the final verification result rather than re-deriving it.
+   targeting the repo's default base branch. Pull the content from the plan file and the final verification
+   result rather than re-deriving it.
+   - **Title and body follow [`.github/pull_request_template.md`](../../../.github/pull_request_template.md)** —
+     read it and fill its sections. `gh pr create --body` **ignores** the template file (it only auto-fills
+     interactive/web PR creation), so applying it here is on you, not on `gh`.
+   - Keep the section order and headings; drop only the sections the template marks optional when they'd be
+     empty. Strip the HTML guidance comments — they're instructions for the author, not PR content.
+   - Fill the Weryfikacja checkboxes with **real results** (test counts, Codex verdict, what was clicked
+     through E2E). A step that wasn't run stays unchecked with a one-line reason — never check it optimistically.
 3. Report the PR URL back to the user. Do **not** merge it — opening the PR ends this workflow.
 
 ---
@@ -213,7 +275,14 @@ After the commit lands:
 - **Don't skip the human gate (Stage 2).** Silently guessing answers to open questions is how the wrong thing
   gets built well.
 - **Keep the tiers right.** Opus for planning is worth it; downgrading the planner to save tokens is a false
-  economy because a bad plan costs far more downstream. Sonnet is the right tier for implement/verify.
+  economy because a bad plan costs far more downstream. Sonnet is the right tier for the builder.
+- **The Codex review is the point of Stage 4b, not a formality.** Don't replace it with a Claude subagent
+  because it's slower or because the diff "looks fine" — an outside model is the only part of this pipeline
+  that doesn't share the builder's assumptions. Fall back to a Sonnet reviewer only when Codex genuinely
+  can't run, and say so out loud when you do.
+- **Codex prerequisites:** `codex --version` and `codex login status` (expect `Logged in …`). Codex needs a
+  git repo, which Stage 3's branch guarantees. Running `codex` from Bash may hit a permission prompt the
+  first time.
 - **You orchestrate, you don't build.** If you find yourself editing source files directly, you've dropped
   out of the workflow — delegate it to a Stage 3 subagent instead.
 - If a stage's subagent returns `null` (skipped or died), don't fabricate its result — tell the user and
