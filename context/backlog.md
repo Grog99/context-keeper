@@ -3,8 +3,13 @@
 Rzeczy świadomie odłożone poza bieżącą wersję. Nie są porzucone — czekają na decyzję albo na sygnał
 z danych (część jest **warunkowa**). Aktywny plan i to, co robimy teraz → [`roadmap.md`](roadmap.md).
 
-**Aktualizacja:** 2026-07-27 · pełny przegląd przy wejściu w v1.3. Do [`roadmap.md`](roadmap.md) poszły:
-wiele tokenów + rotacja, cała sekcja UI, dedup kind-aware, bulk approve/reject. Memory Worth wycięte
+**Aktualizacja:** 2026-07-29 (wieczór) · przy otwarciu v1.4 do [`roadmap.md`](roadmap.md) poszły:
+lepszy prune w nocnym jobie, `conflicts_report`, „tagi i `kind` w kolejce akceptacji" (dawne
+„Brak tagów przy akceptacji") oraz cztery pozycje długu 🔴 (`Set-Cookie` w logach, walidacja
+query-paramów `/api`, throttle na `/health`, `Intl.RelativeTimeFormat`). Wcześniej tego samego dnia
+doszła sekcja „Dług techniczny / architektura" z pierwszego przeglądu technicznego
+([`tech-review.md`](tech-review.md), 15 pozycji). 2026-07-27 — przegląd przy wejściu w v1.3: wiele
+tokenów + rotacja, cała sekcja UI, dedup kind-aware, bulk approve/reject; Memory Worth wycięte
 (patrz sekcja niżej).
 
 Legenda: ⬜ przed nami · ⏸️ warunkowe (czeka na sygnał / decyzję)
@@ -34,12 +39,9 @@ Legenda: ⬜ przed nami · ⏸️ warunkowe (czeka na sygnał / decyzję)
 
 - **Tuning retrievalu na realnych danych** ⬜ — top-k, próg relevance, próg dedup, `k` RRF, chunking
   (PRD §11). Karmi się instrumentacją z Pomiarów — pomiar najpierw, dostrojenie potem.
-- **`conflicts_report`** ⬜ — wykrywanie sprzeczności same-topic w nocnym jobie (sąd LLM). Priorytet w dół
-  po v1.2: `supersedes` (agent + człowiek) adresuje konflikt **na wejściu**, więc to dopala już tylko
-  przypadek „nikt nie zauważył, że koryguje istniejący fakt".
-- **Lepszy prune w nocnym jobie** ⬜ — mały model przegląda wpisy z ostatniego dnia i proponuje usunięcie
-  lub skrócenie tego, co niepotrzebne. **Nie nowy podsystem** — heurystyka w istniejącym kroku `prune`
-  nocnego jobu, który już jest proposerem i już trafia do kolejki akceptacji.
+
+> `conflicts_report` i „lepszy prune w nocnym jobie" → [`roadmap.md`](roadmap.md), v1.4 (dzielą skan
+> i mały model, więc idą razem).
 
 ## Kolejka akceptacji
 
@@ -62,6 +64,36 @@ Legenda: ⬜ przed nami · ⏸️ warunkowe (czeka na sygnał / decyzję)
 - **Interop wire-format** ⬜ — wspólny format wymiany pamięci.
 - **Bulk-import dokumentów** ⬜.
 - **Chunk-targeted `get`** ⬜ — pobranie konkretnego fragmentu dokumentu zamiast całości.
+
+## Dług techniczny / architektura
+
+Z przeglądu technicznego 2026-07-29 → [`tech-review.md`](tech-review.md) (tam objawy z dowodami
+`plik:linia`, tu jednolinijkowce). Wagi: 🟠 będzie boleć · 🟢 higiena.
+
+> Wszystkie cztery pozycje 🔴 („boli teraz") → [`roadmap.md`](roadmap.md), v1.4.
+
+- **`GET /api/proposals` bez `LIMIT`** ⬜ 🟠 — pełne payloady jsonb, polling co 15 s, `?status=approved`
+  zwraca całą historię. Koszt M.
+- **⌘K: debounce + indeks `memories(updated_at)`** ⬜ 🟠 — request na każdy klawisz, `ILIKE '%q%'` i
+  sort po nieindeksowanej kolumnie. Koszt M.
+- **Audyt per projekt: GIN na `affected_ids`** ⬜ 🟠 — nieograniczony fetch id pamięci + `&&` bez
+  indeksu; koszt rośnie iloczynem rozmiarów. Koszt M.
+- **Jedna implementacja archiwizacji** ⬜ 🟠 — dwie kopie w `ProposalsService` i `MemoryAdminService`,
+  już rozjechane (różne `via`, snapshot bez `eventTime`). Koszt M.
+- **Wspólny zapis embeddingów** ⬜ 🟠 — to samo mapowanie chunków w 7 miejscach, jedno z innym polem.
+  Koszt M.
+- **Parytet enumów SPA ↔ serwer** ⬜ 🟠 — `types/domain.ts` nie zna `'withdrawn'`; potrzebny test
+  wymuszający, nie tylko jednorazowa poprawka. Koszt S.
+- **Vitest w `apps/dashboard`** ⬜ 🟠 — brak skryptu `test` czyni `pnpm verify` server-only; bez
+  pokrycia zostaje `computeInlineWordDiff` z czterema progami. Koszt M.
+- **Test throttlingu logowania** ⬜ 🟠 — jedyna bariera przed brute-force współdzielonego hasła,
+  nietestowana (fallback IP, kolejność throttle vs sprawdzenie hasła). Koszt S.
+- **Test `surface.middleware`** ⬜ 🟠 — granica portów MCP/dashboard bez ani jednego testu; regresja
+  wystawia `/api/*` na publicznym porcie. Koszt S.
+- **`pnpm audit` jako bramka** ⬜ 🟢 — advisory react-router jest u nas niewykorzystywalne (SPA bez
+  RSC), ale blokuje wpięcie audytu do `verify`; wyciszyć z uzasadnieniem. Koszt S.
+- **Porządek w devDeps dashboardu** ⬜ 🟢 — pluginy ESLint zadeklarowane bez `eslint`; usunięcie
+  „nieużywanych" psuje `lint`. Koszt S.
 
 ---
 

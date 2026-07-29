@@ -1,7 +1,8 @@
 # Context Keeper — Tech Stack & Architektura
 
-**Wersja dokumentu:** v1.3 (dostęp: wiele tokenów per projekt + graceful rotation) · **Data:** 2026-07-27
+**Wersja dokumentu:** v1.3 (dostęp: wiele tokenów per projekt + graceful rotation) · **Data:** 2026-07-29
 **Źródła:** `plan-pamiec-agentow-mcp.md`, `research-prior-art-pamiec-agentow.md`, sesja ustaleń przedimplementacyjnych
+**Ostatnia synchronizacja z kodem:** 2026-07-29 (przegląd techniczny — §4, §5, §6, §12, §13; patrz [`tech-review.md`](tech-review.md))
 
 > Ten dokument opisuje **jak** budujemy. Uzasadnienia produktowe (co i dla kogo) są w [`prd.md`](prd.md).
 > Zasada przewodnia: **prosto w v1, schema/architektura gotowa na rozszerzenia.**
@@ -127,15 +128,15 @@ Jeden dyskryminator `kind` na tabeli `memories` (nie osobne tabele — reużycie
 | `tags` | lista stringów. **Normalizacja:** trim + lowercase + collapse whitespace; max ~10, każdy ≤ ~40 zn., charset `[a-z0-9-_/]` |
 | `scope` | `global` \| `project` |
 | `project_id` | z credentialu przy zapisie (agent) lub z aktywnego kontekstu UI (human-create); pusty dla `global` |
-| `status` | `approved` \| `archived` (soft-delete, nigdy hard-delete; wyjątek = hard-purge §10) |
+| `status` | `approved` \| `archived` (soft-delete, nigdy hard-delete) \| `purged` (tombstone po hard-purge §10 — treść wymazana, wiersz zostaje; ustawiane wyłącznie przez CLI/dashboard purge). **Predykat „wszystko poza `approved`" jest niepoprawny** — `purged` to nie archiwum |
 | `source` | `agent` \| `human` \| `nightly` (kto utworzył) |
 | `created_at` / `updated_at` / `approved_at` | znaczniki czasu |
 | `last_accessed_at` / `access_count` | feed dla prune; zbierane od dnia zero, nie do odtworzenia wstecz |
-| `event_time` | (v1.2) **wyłącznie `kind=event`** — nullable, backdatable znacznik KIEDY zdarzenie się wydarzyło (osobny od `created_at` = kiedy wpis powstał w pamięci). Ustawiany raz przy tworzeniu (edycja po fakcie poza zakresem v1). Napędza sortowanie ekranu „Oś czasu" i age-decay w rankingu retrievalu. |
+| `event_time` | (v1.2) **wyłącznie `kind=event`** — nullable, backdatable znacznik KIEDY zdarzenie się wydarzyło (osobny od `created_at` = kiedy wpis powstał w pamięci). Ustawiany przy tworzeniu, **korygowalny po fakcie** (v1.2, formularz edycji w przeglądarce pamięci — human-only). Napędza sortowanie ekranu „Oś czasu" i age-decay w rankingu retrievalu. |
 
 - `fact` = fakty accreted przez agenta (mutowalne, podlegają dedup/supersession/prune).
 - `document` = dokumenty authored przez człowieka (PRD, roadmap) — kanon, permanentne, poza zasięgiem nocnego joba. Od v1.2 agent może *zaproponować* nowy `document` przez `save_memory` (`kind='document'`, human-gated jak każdy proposal); **edycja istniejącego dokumentu przez agenta pozostaje poza zakresem** (agent-update → osobne zadanie roadmapy).
-- `event` = zdarzenia ze stemplem czasu (v1.2) — **tworzone wyłącznie przez człowieka** w dashboardzie (`save_memory` agenta go nie eksponuje). W rankingu retrievalu podlegają age-decay (wykładniczy half-life, `EVENT_DECAY_HALFLIFE_DAYS`, aplikowany post-RRF, zero wpływu na fact/document). Domyślnie **wyłączone** z domyślnego `kind` w `search_memory` — per-projektowy boolean `projects.include_events_in_default_search` (dialog szczegółów projektu, §9.3) je włącza; `kind=event` jawny w zapytaniu działa zawsze niezależnie od togglea.
+- `event` = zdarzenia ze stemplem czasu (v1.2) — tworzone przez człowieka w dashboardzie **oraz przez agenta** (v1.3: `save_memory` przyjmuje `kind='event'` z **wymaganym** `event_time`, backdate nieograniczony, daty przyszłe dozwolone — ta sama `validateEventTime` co formularz human-create; `supersedes` na evencie pozostaje zakazany, korekta jest human-only). W rankingu retrievalu podlegają age-decay (wykładniczy half-life, `EVENT_DECAY_HALFLIFE_DAYS`, aplikowany post-RRF, zero wpływu na fact/document). Domyślnie **wyłączone** z domyślnego `kind` w `search_memory` — per-projektowy boolean `projects.include_events_in_default_search` (dialog szczegółów projektu, §9.3) je włącza; `kind=event` jawny w zapytaniu działa zawsze niezależnie od togglea.
 - Model 2D: `scope` × `kind` (`document` może być `global` = glossary/standard, lub `project` = PRD tego projektu).
 
 ### `embeddings` (jeden-do-wielu — chunking)
@@ -144,17 +145,21 @@ Jeden dyskryminator `kind` na tabeli `memories` (nie osobne tabele — reużycie
 
 ### `proposals` (kolejka akceptacji — każda treściowa mutacja)
 
-`type` (`create`\|`update`\|`merge`\|`delete`), `payload`, `affected_ids`, `origin` (`agent`\|`human`\|`nightly`), `status` (`pending`\|`approved`\|`rejected`).
+`type` (`create`\|`update`\|`merge`\|`delete`), `payload`, `affected_ids`, `origin` (`agent`\|`human`\|`nightly`), `status` (`pending`\|`approved`\|`rejected`\|`withdrawn`). `withdrawn` = samo-wycofanie maszynowe przez nocny job (§8), odróżnione od `rejected` (decyzja człowieka) mimo tego samego skutku — audyt ma pokazywać KTO zdecydował. Metryka „decyzje recenzenta" liczy `approved`+`rejected`, nigdy `withdrawn`.
 
 - Kolejka to **tabela**, nie flaga `status=pending` na dokumencie — bo merge (A+B→C) to operacja „utwórz C, zarchiwizuj A, zarchiwizuj B", której flaga nie wyrazi. Jeden mechanizm i jedna powierzchnia audytu dla zapisów agenta, edycji człowieka i propozycji nocnego joba.
 - **Optimistic concurrency (nowe):** proposal celujący w istniejące pamięci zapisuje przy utworzeniu **`base_versions`** — `revision_id` bazowy każdego `affected_id` (stan, względem którego liczono payload). Przy akceptacji sprawdzany wewnątrz transakcji (§8bis). Drift → proposal jest **stale** (computed guard, bez nowej wartości w enumie `status`).
-- **Idempotencja / dedup (nowe):** twardy `duplicate_pending` tylko przy **exact match** `hash(header+body+scope+project+kind)` wobec pending proposala; exact-match do approved → `already_exists`; podobne → proposal + hint (§5).
+- **Idempotencja / dedup (nowe):** twardy `duplicate_pending` tylko przy **exact match** `hash(header+body+scope+project+kind [+event_time])` wobec pending proposala — szóste pole dokładane WYŁĄCZNIE dla `kind='event'` (hashe `fact`/`document` bit-w-bit jak przed v1.3), więc to samo zdarzenie odnotowane dla dwóch różnych czasów to dwie pamięci, nie duplikat; exact-match do approved → `already_exists`; podobne → proposal + hint (§5).
 
 > **Forward-compat (v2):** miejsce na pole `confidence`/`auto_eligible` (anti-fatigue / sedymentacja).
 
 ### `revisions`
 
 Lekkie snapshoty przy każdej zatwierdzonej zmianie (żeby widzieć „co tu było wcześniej", zwłaszcza po przepisaniu przez nocny job). Strategia: pełny snapshot dla `fact` (małe, tanie); dla dużych `document` rozważyć snapshot różnicowy (diff) — knob. **Supersession** (zamiennik pamięci przez człowieka) linkowany w `revisions` — patrz „Zatwierdź jako zamiennik" (§5).
+
+### `memory_relations` (v1.2 — zaimplementowane)
+
+Typowane krawędzie między pamięciami: `from_id`, `to_id`, `type` (`caused_by` \| `follows` \| `context_for` — enum **świadomie zamknięty**, dokładnie 3 wartości, trzymany w sync z zod-enumem `relations[].type` w `save_memory`). Tworzone przez człowieka (dashboard) i przez agenta (`relations` w `save_memory`, materializowane przy akceptacji proposala). Każde utworzenie/usunięcie ma wpis audytu (`relation_created` / `relation_removed`); archiwizacja i merge kaskadowo kasują krawędzie, audytując każdą z osobna. Napędzają **1-hop graph boost** w rankingu (§6, re-rank only).
 
 ### `staging_embeddings`
 
@@ -205,10 +210,8 @@ pepper.** Lookup token→(projekt, token) = jeden trafiony indeks JOIN (§10).
 ### Forward-compat (v2, miejsce w schemie już teraz)
 
 - Tabela `outcome` (analogicznie do `embeddings`/`revisions`) — dla Memory Worth (`report_outcome`).
-- Tabela relacji (memory-relations + 1-hop graph boost, roadmap) — schema i `revisions`
-  zaprojektowane tak, żeby doszła bez bolesnej migracji; kluczowana `memory_id`, ortogonalna do
-  `event_time` (v1.2, już zaimplementowane — patrz §4 `kind=event`). Graph boost komponowałby się
-  post-fuzją z age-decay, nie konkurował.
+- ~~Tabela relacji~~ — **zaimplementowana w v1.2**, przestała być forward-compat: patrz
+  `memory_relations` wyżej w §4 i krok 6 pipeline'u w §6.
 - Pole `confidence`/`auto_eligible` w `proposals` — anti-fatigue.
 
 ---
@@ -224,13 +227,13 @@ pepper.** Lookup token→(projekt, token) = jeden trafiony indeks JOIN (§10).
 |---|---|---|
 | `search_memory` | `(query, tags?, kind?)` → `[{id, header, tags, score}]` | Scope z tokena. Domyślnie `fact`+`document` (+ `event`, v1.2, TYLKO gdy projekt ma `include_events_in_default_search=true`); opcjonalny filtr `kind` (`fact`\|`document`\|`event`) honorowany zawsze niezależnie od togglea. Dla `document` dokłada excerpt dopasowanego chunku; dla `event` ranking podlega age-decay (§4). Przy embedding-down → **FTS-only** (§6), ciche. |
 | `get_memory` | `(id)` → pełne body | Bumpuje `last_accessed_at`/`access_count`. **Egzekwuje scope** (`id` ∈ projekt tokena albo `global`). Poza scope **lub** nieistniejące → identyczne **`not_found`** (anty-probing IDOR). |
-| `save_memory` | `(header, body, tags)` → `{id, status}` | Liczy embedding + dedup przed odpowiedzią z **twardym budżetem czasu** (po timeoucie → `pending` bez embeddingu, doembed przy akceptacji). `id` mintowany przy proposalu; wiersz `memories` materializowany dopiero przy akceptacji. Statusy: `pending` / `duplicate_pending` / `already_exists`. |
+| `save_memory` | `(header, body, tags?, kind?, event_time?, supersedes?, relations?)` → `{id, status}` | Liczy embedding + dedup przed odpowiedzią z **twardym budżetem czasu** (po timeoucie → `pending` bez embeddingu, doembed przy akceptacji). `id` mintowany przy proposalu; wiersz `memories` materializowany dopiero przy akceptacji. Statusy: `pending` / `duplicate_pending` / `already_exists`. Pełny kontrakt parametrów i guardów → [`mcp-tool-contract.md`](mcp-tool-contract.md) (jedno źródło prawdy, ta tabela go nie duplikuje). |
 
 ### Dedup / idempotencja (advisory, nie hard-block)
 
 Embedding-similarity **nie odróżnia** korekty od duplikatu („PG15"→„PG16", negacja) → auto-suppression po podobieństwie jest niebezpieczne (jego failure mode to korekty). Dlatego:
 
-- exact `hash(header+body+scope+project+kind)` == pending proposal → **`duplicate_pending`** (id proposala; łapie retry sieciowy),
+- exact `hash(header+body+scope+project+kind [+event_time dla `kind='event'`])` == pending proposal → **`duplicate_pending`** (id proposala; łapie retry sieciowy),
 - exact == approved memory → **`already_exists`** (id pamięci),
 - **podobne-ale-nie-exact → proposal ZAWSZE powstaje** + hint „similar to [ids]" dla recenzenta,
 - nowe → create.
@@ -257,7 +260,8 @@ Błędy *wykonania narzędzia* → wynik z **`isError: true`** + koperta `{code,
 
 - **Async ack — fire-and-forget.** Agent nie czeka, nie pollinguje; gate decyduje tylko o widoczności dla przyszłych sesji.
 - **Zapisy agenta: tylko project-scoped.** Promocja do `global` = akcja człowieka.
-- **Agent tylko tworzy (`create`) w v1.** Aktualizacja przez agenta — v2 (ewentualnie `supersedes: id`). Korekta faktu w v1 = nowy `create` + human-mediated supersession („Zatwierdź jako zamiennik [X]" w dashboardzie).
+- **Agent tworzy i koryguje (v1.2+).** `save_memory` z `supersedes: <id>` produkuje proposal `type='update'` — in-place korektę własnej pamięci zamiast luźnego duplikatu; bez `supersedes` to zwykły `create`. Human-mediated supersession („Zatwierdź jako zamiennik [X]" w dashboardzie) zostaje jako ścieżka równoległa. Wyjątek: `supersedes` na `kind='event'` jest zakazane (wczesny guard) — korekta zdarzenia, w tym `event_time`, pozostaje human-only.
+- **Ścieżka `update` ma producenta agentowego** — każdy nowy guard, metryka czy filtr kolejki musi ją uwzględniać, nie tylko `create`.
 
 ---
 
@@ -268,8 +272,9 @@ Błędy *wykonania narzędzia* → wynik z **`isError: true`** + koperta `{code,
 3. **FTS** na całym dokumencie (`tsvector`, konfiguracja **`simple`** — bez stemmingu, żeby nie masakrować mieszanki PL/EN; fleksję/semantykę bierze wektor bge-m3, FTS zostaje przy dokładnym trafieniu tokenu technicznego).
 4. **Fuzja RRF** (Reciprocal Rank Fusion) list *dokumentów* — bez tuningu wag, stała `k` (typowo 60).
 5. **Filtr aktywnego modelu:** `WHERE embedding_model = <aktywny>` (podczas re-embedu modele współistnieją, przestrzenie nieporównywalne).
-6. **Top-k + próg relevance** (odcięcie szumu).
-7. **Dwufazowo:** `search_memory` → nagłówki (+ excerpt dla `document`); `get_memory(id)` → pełne body (v1 = całość). Chunk-targeted `get` → v2.
+6. **Post-fuzja: age-decay × graph boost** (oba re-rank only, mnożniki na score z RRF — nie zmieniają zbioru kandydatów, tylko kolejność). **Age-decay:** wykładniczy half-life `EVENT_DECAY_HALFLIFE_DAYS`, wyłącznie `kind='event'`, ujemny wiek (data przyszła) clampowany do faktora 1. **Graph boost:** jedno dodatkowe zapytanie o krawędzie `memory_relations` w obrębie zbioru wyników, waga `GRAPH_BOOST_WEIGHT` (0 = wyłączony). To jedyne miejsce, gdzie kolejność operacji rankingu jest udokumentowana — debugując „dlaczego ten wynik wyszedł wyżej", zacznij tutaj.
+7. **Top-k + próg relevance** (odcięcie szumu).
+8. **Dwufazowo:** `search_memory` → nagłówki (+ excerpt dla `document`); `get_memory(id)` → pełne body (v1 = całość). Chunk-targeted `get` → v2.
 
 **Tagi:** podwójna rola — filtr strukturalny w search + tekst dopisany do embeddowanego chunku.
 
@@ -437,6 +442,14 @@ Cienki generator nad `.env` + profilami Compose — **nie osobna warstwa configu
 | `PORT_MCP` / `PORT_DASHBOARD` | rozdzielne porty `app` (routing/firewall przez zewnętrzny proxy w trybie B) |
 | `ACME_DOMAIN` / `ACME_EMAIL` | domena + email dla Let's Encrypt (tylko bundled Caddy, tryb A) |
 
+> **Ta tabela nie jest kompletna** — pokazuje zmienne nośne architektonicznie (~24 z 54). Nie
+> traktuj braku wiersza jako „taki knob nie istnieje": pełny, autorytatywny zestaw to
+> [`.env.example`](../.env.example) (kanon, z komentarzami) + `apps/server/src/config/env.ts`
+> (walidacja zod — jedyne miejsce, gdzie wartości domyślne są prawdziwe). Poza tabelą zostają m.in.
+> całe rodziny `RRF_*` / `SEARCH_*` (parametry kroków 4 i 7 z §6), `NIGHTLY_*` poza cronem,
+> `BACKUP_*`, `EMBEDDING_PRESET` (§7), `EVENT_DECAY_HALFLIFE_DAYS` i `GRAPH_BOOST_WEIGHT` (§6),
+> `BODY_MAX_EVENT`, `SESSION_TTL_HOURS`, `DB_AUTO_MIGRATE`, `PUBLIC_MCP_URL`.
+
 *(Konkretne wartości progów/limitów = knoby dostrajane na realnych danych — patrz [`prd.md`](prd.md) §11.)*
 
 ---
@@ -445,7 +458,7 @@ Cienki generator nad `.env` + profilami Compose — **nie osobna warstwa configu
 
 | Rozszerzenie (v2+) | Co już jest gotowe w v1 |
 |---|---|
-| `memory-relations` + 1-hop graph boost | `kind=event` (v1.2, zaimplementowane — §4) + `revisions` i miejsce na tabelę relacji, kluczowaną `memory_id`, ortogonalną do `event_time` |
+| ~~`memory-relations` + 1-hop graph boost~~ | **zaimplementowane w v1.2** — tabela `memory_relations` (§4), boost w kroku 6 pipeline'u (§6). Nie jest już rozszerzeniem v2+ |
 | Memory Worth (prune po outcome) | miejsce na tabelę `outcome`; nocny job czyta abstrakcyjny (pluggable) score |
 | `conflicts_report` (sprzeczności) | nocny job na `kind=fact`; ewentualnie weryfikacja AI |
 | Anti-fatigue / sedymentacja | miejsce na `confidence`/`auto_eligible` w `proposals` |

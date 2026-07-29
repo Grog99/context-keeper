@@ -2,13 +2,14 @@
 
 Prosty przegląd: co robimy po kolei i gdzie jesteśmy. Szczegóły → [`prd.md`](prd.md), [`tech-stack.md`](tech-stack.md), [`design-system.md`](design-system.md).
 
-**Aktualizacja:** 2026-07-28 · **Etap:** v1.2 domknięte (możliwości agenta + UI) → wchodzimy w **v1.3** (dostęp i UI).
+**Aktualizacja:** 2026-07-29 · **Etap:** v1.3 domknięte (dostęp i UI) → wchodzimy w **v1.4** (higiena pamięci + dług techniczny).
 
 Legenda: ✅ zrobione · 🔨 w toku · ⬜ przed nami
 
-> Pełne opisy zakresu faz 0 → v1.2 zarchiwizowane w
-> [`archive/roadmap-2026-07-27-v1.2-complete.md`](archive/roadmap-2026-07-27-v1.2-complete.md).
-> Wcześniejszy snapshot (v1 domknięte): [`archive/roadmap-2026-07-23-v1-complete.md`](archive/roadmap-2026-07-23-v1-complete.md).
+> Pełne opisy zakresu faz 0 → v1.3 zarchiwizowane w
+> [`archive/roadmap-2026-07-29-v1.3-complete.md`](archive/roadmap-2026-07-29-v1.3-complete.md).
+> Wcześniejsze snapshoty: [v1.2](archive/roadmap-2026-07-27-v1.2-complete.md) ·
+> [v1](archive/roadmap-2026-07-23-v1-complete.md).
 
 ---
 
@@ -31,110 +32,77 @@ Legenda: ✅ zrobione · 🔨 w toku · ⬜ przed nami
 
 ### v1.1 — Walidacja dogfoodingu
 
-- **Seed pamięci grounding-dokumentami** — wdrożona instancja zaseedowana stabilnymi dokumentami przez CLI `seed-memory`, żeby `search_memory` miał co zwracać.
-- **Instrumentacja użycia pamięci** — ekran „Pomiary" (`/pomiary`) na tabeli `search_events`: liczba wyszukań, rate zerowych wyników, stosunek accept/reject/edit.
-- **Dashboard: ręczny trigger nocnego jobu + hard-purge** — ekran „Operacje" (`/operacje`) plus purge per-pamięć z podglądem skali i wymaganym powodem.
-- **Review bezpieczeństwa publicznego MCP** — pre-auth throttle per-IP na `/mcp`, `helmet` + CSP, bind portów compose do `127.0.0.1`, czysty audit zależności.
+- **Seed pamięci grounding-dokumentami** — wdrożona instancja zaseedowana stabilnymi dokumentami przez CLI `seed-memory`.
+- **Instrumentacja użycia pamięci** — ekran „Pomiary" (`/pomiary`) na tabeli `search_events`.
+- **Dashboard: ręczny trigger nocnego jobu + hard-purge** — ekran „Operacje" (`/operacje`) plus purge per-pamięć.
+- **Review bezpieczeństwa publicznego MCP** — pre-auth throttle per-IP na `/mcp`, `helmet` + CSP, bind portów compose do `127.0.0.1`.
 
 ### v1.2 — Więcej możliwości agenta + poprawki UI
 
-- **`kind=event` (episodic)** — trzeci rodzaj wpisu z backdatable `event_time`, age-decay w rankingu, ekran „Oś czasu" i per-projektowy toggle widoczności w domyślnym search.
-- **memory-relations + 1-hop graph boost** — typowane krawędzie (`caused_by`/`follows`/`context_for`) tworzone przez agenta i człowieka, z re-rank-only boostem na sąsiadach.
-- **Edycja `event_time` po utworzeniu** — korekta backdate’u z formularza edycji w przeglądarce pamięci.
-- **Agent tworzy `kind=document`** — `save_memory` przyjmuje opcjonalny `kind` (`fact` | `document`) przy tych samych guardach; `event` pozostaje human-only (zniesione w v1.3).
-- **Edycja pamięci przez agenta** — `save_memory` z `supersedes: id` proponuje in-place korektę własnej pamięci jako proposal `type='update'` zamiast luźnego duplikatu.
-- **Snippet do wklejenia w cudzym projekcie** — ekran „Onboarding" z gotowymi blokami do `AGENTS.md` / `CLAUDE.md` i `.mcp.json`, z URL-em MCP liczonym server-side.
+- **`kind=event` (episodic)** — trzeci rodzaj wpisu z backdatable `event_time`, age-decay w rankingu, ekran „Oś czasu".
+- **memory-relations + 1-hop graph boost** — typowane krawędzie (`caused_by`/`follows`/`context_for`) z re-rank-only boostem.
+- **Edycja `event_time` po utworzeniu** — korekta backdate’u z formularza edycji.
+- **Agent tworzy `kind=document`** — opcjonalny `kind` w `save_memory` przy tych samych guardach.
+- **Edycja pamięci przez agenta** — `save_memory` z `supersedes: id` jako proposal `type='update'`.
+- **Snippet do wklejenia w cudzym projekcie** — ekran „Onboarding" z blokami do `AGENTS.md` / `CLAUDE.md` i `.mcp.json`.
 - **Poprawki UI** — dopieszczenie dashboardu wg design systemu.
+
+### v1.3 — Dostęp i UI
+
+- **Wiele tokenów per projekt + graceful rotation** — `project_tokens` (1 projekt → N etykietowanych tokenów), rotacja token-scoped z okresem `grace` (`TOKEN_GRACE_PERIOD_HOURS`, domyślnie 72h) i osobnym natychmiastowym `revoke`; atrybucja i rate limiting per token.
+- **`kind=event` przez agenta (MCP)** — `save_memory` przyjmuje `kind: "event"` z **wymaganym** `event_time` (ta sama `validateEventTime` co human-create, backdate nieograniczony); `event_time` jedzie przez `proposals.payload` i wchodzi do `memories` dopiero przy akceptacji, a dedup dokłada go jako szóste pole hasha wyłącznie dla eventów. `supersedes` na evencie dalej zakazany.
+- **Dedup kind-aware** — fix buga: `kind` jako piąte pole content-hasha (migracja 0011 przeliczyła istniejące), ten sam tekst jako `fact` i `document` to dwie pamięci, nie duplikat.
+- **Widok diff dla `supersedes`** — word-level inline diff (`<del>`/`<ins>`) z czterema typowanymi fallbackami do dawnego układu dwóch bloków.
+- **Czytelność przeglądarki pamięci** — panel szczegółów na pełną wysokość ze scrollem wewnętrznym i przyklejonym paskiem akcji, szerokość czytania zależna od `kind`; plus zachowanie pojedynczych złamań linii, viewport przy niskich oknach i potwierdzenie porzucenia edycji.
+- **Zakładka Projekty + wybór projektu w sidebarze** — `PROJECTS_NAV_ITEM` w dolnej sekcji railu (ustawienia projektu ≠ nawigacja kontekstowa), `ContextSwitcher` przeniesiony z top bara do railu.
+- **Bulk approve/reject w kolejce** — dwa endpointy-orkiestratory wołające NIETKNIĘTE `approve()`/`reject()` per id (human-gate i audit trail bez zmian), nieatomowe, cap `BULK_MAX_IDS=100`.
+- **Poza planem:** rewizja kontrastu + kolor tożsamości dla `kind`, fallback ścieżek `.env`/migracji dla `pnpm dev`, pierwszy przegląd techniczny ([`tech-review.md`](tech-review.md), 15 ustaleń) z synchronizacją `tech-stack.md`.
 
 ---
 
-## v1.3 — Dostęp i UI 🔨
+## v1.4 — Higiena pamięci i dług techniczny 🔨
 
-**Cel fazy:** domknąć zarządzanie dostępem (wiele agentów per projekt bez downtime przy rotacji),
-uczytelnić dashboard tam, gdzie dogfooding pokazał realne tarcie, oraz dołożyć agentowi ostatni brakujący
-rodzaj wpisu — wraz z fixem deduplikacji, który ten trzeci rodzaj czyni pilnym.
+**Cel fazy:** dołożyć nocnemu jobowi drugą połowę roli proposera — dziś umie deduplikować, ale nie umie
+ani sensownie przycinać, ani zauważyć sprzeczności — spłacić dług „boli teraz" z pierwszego przeglądu
+technicznego i domknąć kolejkę akceptacji tam, gdzie recenzent decyduje bez kompletu informacji.
 
-### Dostęp
+### Higiena pamięci (nocny job)
 
-- **Wiele tokenów per projekt + graceful rotation** ✅ — `project_tokens` (1 projekt → N tokenów,
-  etykieta WYMAGANA per token) zamiast trzech kolumn tokena na `projects`. Rotacja jest token-scoped
-  i graceful: nowy token wydany obok starego, stary wchodzi w `grace` i wygasa lazily po
-  `TOKEN_GRACE_PERIOD_HOURS` (domyślnie 72h) — bez nocnego sweepu, ta sama reguła auth i UI. Osobna
-  akcja `revoke` (natychmiastowa, nieodwracalna) dla skompromitowanych danych. Atrybucja per-agent:
-  `search_events.token_id` + `audit_log.metadata.{tokenId,tokenLabel}` (actor pozostaje
-  `agent:<projectId>`), rate limiting per-token zamiast per-projekt.
+- **Lepszy prune w nocnym jobie** ⬜ — mały model przegląda wpisy z ostatniego dnia i proponuje
+  usunięcie albo skrócenie tego, co niepotrzebne. **Nie nowy podsystem** — heurystyka w istniejącym
+  kroku `prune`, który już jest proposerem i już trafia do kolejki akceptacji. (z backlogu)
+- **`conflicts_report`** ⬜ — wykrywanie sprzeczności same-topic w nocnym jobie (sąd LLM). Adresuje
+  przypadek, którego `supersedes` nie łapie: „nikt nie zauważył, że koryguje istniejący fakt".
+  Naturalnie dzieli infrastrukturę z prune wyżej (ten sam skan, ten sam mały model), stąd razem w
+  jednej fazie. (z backlogu)
 
-### Agent / MCP
+### Dług techniczny 🔴
 
-- **`kind=event` przez agenta (MCP)** ✅ — zniesienie ograniczenia human-only: `save_memory`
-  przyjmuje `kind: "event"` wraz z **wymaganym** `event_time` (ISO 8601). Rozstrzygnięcia z
-  projektowania: `event_time` jest wymagany (żadnego domyślnego „teraz"), a backdate jest
-  nieograniczony i daty przyszłe zostają dozwolone — agent przechodzi dokładnie tę samą
-  `validateEventTime` co formularz human-create, bez forka reguły i bez nowego env-knoba
-  (age-decay clampuje ujemny wiek do faktora 1). Wszystkie guardy bez zmian: human-gate (proposal
-  `type='create'`/`origin='agent'` — nic nie ląduje w `memories` przed akceptacją), skaner sekretów
-  (twarda blokada), `BODY_MAX_EVENT`, rate limiting per token × narzędzie, scope zawsze `project`.
-  Nowy transport: `event_time` jedzie jako pole `proposals.payload` i jest przepisywany do
-  `memories.event_time` dopiero przez `ProposalsService.approve()` (`materializeMemory`) — ścieżka
-  human-create commituje bezpośrednio, więc dotąd NIC nie przenosiło `event_time` przez kolejkę.
-  Dedup rozszerzony o `event_time` jako szóste pole hasha, dokładane WYŁĄCZNIE dla `kind='event'`
-  (hashe `fact`/`document` bit-w-bit identyczne z formułą migracji 0011 — zero migracji): to samo
-  zdarzenie odnotowane dla dwóch różnych czasów to od teraz dwie pamięci, nie duplikat. `event_time`
-  przy `kind` innym niż `event` to twardy `validation_error`, nie ciche zignorowanie.
-  `supersedes` na event pozostaje zakazany, teraz z jawnym wczesnym guardem — korekta zdarzenia
-  (w tym `event_time`) dalej jest human-only w przeglądarce pamięci. Kolejka pokazuje recenzentowi
-  `event_time` w etykiecie bloku diffu, żeby nie zatwierdzał daty w ciemno.
-- **Dedup kind-aware** ✅ — **fix znanego buga, nie feature.** `computeContentHash` i zapytania
-  `already_exists`/`duplicate_pending` w `MemoryService.save()` niosą teraz `kind` jako piąte pole
-  hasha (`header ␟ body ␟ scope ␟ project ␟ kind`) — identyczny `header`+`body` zapisany jako różne
-  `kind` (np. `fact` i `document`) to od teraz ODRĘBNA pamięć, nie duplikat. Migracja przeliczyła
-  istniejące `proposals.content_hash` na nową formułę. Nocny job (`dedup-cluster.ts`) dostał defense-
-  in-depth: ANN-partycja i `pickCanonicalMerge` też są ścisłe po `kind` (nieosiągalne dziś — oba końce
-  ANN są już `kind='fact'` — ale zabezpiecza przed przyszłym rozszerzeniem skanu).
+Cztery pozycje „boli teraz" z [`tech-review.md`](tech-review.md); pełne objawy z dowodami `plik:linia`
+tam, tu zakres.
+
+- **`Set-Cookie` sesji w logach produkcyjnych** ⬜ — `redact` w `app.module.ts` obejmuje tylko stronę
+  żądania, więc domyślny serializer pino loguje wszystkie nagłówki odpowiedzi, w tym ciasteczko sesji.
+  Koszt S.
+- **Walidacja runtime query-paramów `/api`** ⬜ — gołe `@Query()` dają 500 zamiast 400 przy złym
+  `kind`/`limit`/`from`; zod jest już zależnością. Koszt M.
+- **`/health` bez limitu na publicznym porcie MCP** ⬜ — `SELECT 1` + fetch do TEI na każdy request,
+  bez cache i bez throttlingu, na porcie wystawionym publicznie. Koszt S.
+- **`Intl.RelativeTimeFormat` zamiast ręcznej drabinki** ⬜ — `format.ts` renderuje „1 dni temu" dla
+  24–35 h i nie ma górnego progu. Koszt S.
 
 ### UI
 
-- **Widok diff dla `supersedes`** ✅ — case `update` w `DiffView` renderuje teraz word-level inline
-  diff (jsdiff `diffWords`, `apps/dashboard/src/lib/text-diff.ts`) zamiast dwóch pełnych bloków
-  tekstu obok siebie: niezmienione słowa zwykłym tekstem, usunięcia pod `<del>`, dodania pod `<ins>`,
-  legenda `−/+` nad blokiem. Ten sam renderer dla nagłówka i treści. Cztery fallbacki z typowanym
-  powodem: `'too-long'` (>20 000 znaków) i `'aborted'` (jsdiff timeout 250 ms) to twarde limity
-  wydajności bez obejścia; `'too-different'` (>70% treści zmienione) to heurystyka czytelności —
-  recenzent może ją obejść linkiem „Pokaż zmiany inline mimo to"; `'whitespace-only'` (czysty
-  reflow/wcięcie, brak zmian słów) pokazuje notkę zamiast pustego podświetlenia. Wszystkie fallbacki
-  renderują dawny układ dwóch bloków `del`/`add`. A11y: `<del>`/`<ins>` (nie kolor sam w sobie),
-  `role="group"`/`aria-label` na kontenerze (§10 design-systemu).
-- **Czytelność przeglądarki pamięci** ✅ — panel szczegółów zajmuje teraz całą dostępną wysokość
-  (poprawiony bug CSS: `auto`-wiersz grida przeciekał poza `main`, więc to strona scrollowała się
-  w całości zamiast paneli listy/treści); treść scrolluje się wewnętrznie, a pasek akcji
-  (Edytuj/Archiwizuj/Promuj/Hard-purge, w edycji: Zapisz/Anuluj) jest przyklejony na dole i zawsze
-  widoczny. Nagłówek/meta/zakładki/akcje dzielą jedną kolumnę pomiaru (`max-w-4xl`), a szerokość
-  czytania treści zależy od `kind` (`document` 72ch, `fact`/`event` 66ch).
-- **Wydzielić zakładkę Projekty** ✅ — `NAV_ITEMS` (`apps/dashboard/src/components/AppShell.tsx`)
-  rozbite na 7 ekranów kontekstowych + osobny `PROJECTS_NAV_ITEM`, renderowany w dolnej sekcji railu
-  (przy toggle motywu i „Wyloguj", odcięty `border-t`) zamiast wśród reszty nawigacji — bo dotyczy
-  ustawień całego projektu, nie wybranej pamięci. Wspólny `railNavLinkClass`/`RailNavLink` trzyma
-  identyczne active-state styling w obu miejscach renderowania.
-- **Przenieść wybór projektu do sidebara** ✅ — `ContextSwitcher` przeniesiony z top bara do railu
-  (pod marką, nad „Nawigacja"); trigger rozciągnięty na pełną szerokość (`h-9 w-full`, label
-  `flex-1 truncate`). Top bar zostaje z samym search (poszerzony `w-[280px]`) i health strip.
-- **Bulk approve/reject w kolejce** ✅ — zaznaczanie wielu propozycji (checkbox per-wiersz + „zaznacz
-  wszystkie" w pasku filtrów, skrót `x`) i jedna decyzja na cały zaznaczony zestaw, zamiast klikania
-  pozycja po pozycji. NIE jest „czysto UI" (korekta wcześniejszego zapisu) — dwa nowe endpointy-
-  orkiestratory (`POST /proposals/bulk-approve`/`bulk-reject`, `ProposalsService.bulkApprove`/
-  `bulkReject`) wołają sekwencyjnie NIETKNIĘTE `approve()`/`reject()` per id. Inwariant, który się
-  liczy, zostaje: każda pojedyncza decyzja nadal przechodzi dokładnie tę samą transakcję i ten sam
-  audit trail co dotychczas, human-gate nietknięty. Bulk NIE jest atomowy (częściowy sukces to
-  decyzja produktowa — porażka jednego itemu nie cofa wcześniejszych sukcesów), cap `BULK_MAX_IDS=100`;
-  po operacji sukcesy znikają z zaznaczenia, porażki zostają zaznaczone (dialog ze szczegółami per id).
-  Wydzielone z „anti-fatigue kolejki" w backlogu — druga połowa tamtego punktu (auto-allow po N
-  spójnych decyzjach) tam zostaje, bo rozmiękcza human-gate.
+- **Tagi i `kind` w kolejce akceptacji** ⬜ — recenzent podejmuje decyzję bez dwóch pól, które
+  propozycja niesie: nie widzi tagów ani rodzaju wpisu. Domyka serię „kolejka pokazuje to, co
+  zatwierdzasz", zaczętą w v1.3 wyświetleniem `event_time`. (z backlogu)
 
 ## Backlog ⬜
 
-Rzeczy świadomie odłożone poza v1.3 → [`backlog.md`](backlog.md): plugin Claude Code (warunkowy), OAuth 2.1
-+ PKCE, migracja na MCP SDK v2, tuning retrievalu, `conflicts_report`, auto-allow w kolejce, per-user auth,
-pamięć usera, rewokacja sesji, lepszy prune w nocnym jobie, skalowanie poziome / interop.
+Rzeczy świadomie odłożone poza v1.4 → [`backlog.md`](backlog.md): plugin Claude Code (warunkowy), OAuth 2.1
++ PKCE, migracja na MCP SDK v2, tuning retrievalu, auto-allow w kolejce, per-user auth, pamięć usera,
+rewokacja sesji, skalowanie poziome / interop, oraz pozostały dług techniczny 🟠/🟢 z przeglądu
+([`tech-review.md`](tech-review.md)).
 
 **Wycięte** (nie „odłożone"): Memory Worth — prune po współwystąpieniu z sukcesem/porażką. Sygnał outcome
 jest z natury zaszumiony (sesja się udała ≠ ta pamięć pomogła), a koszt to nowe narzędzie MCP wymagające
