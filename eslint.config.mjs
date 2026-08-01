@@ -13,6 +13,7 @@ export default tseslint.config(
       '**/*.js',
       '**/*.mjs',
       'apps/server/src/db/migrations/**',
+      '.claude/worktrees/**',
     ],
   },
   js.configs.recommended,

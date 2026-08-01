@@ -48,6 +48,26 @@ produces a fuzzy plan and wastes the whole pipeline.
 Pick a short working slug for the task (e.g. `add-token-revoke`). You'll reuse it for the plan file, the
 task branch name (Stage 3), and subagent labels.
 
+### Starting from a prepare-ticket document
+
+If the task arrives with a ticket produced by the `prepare-ticket` skill, the requirements round has
+already happened — deeper than this stage does it, and against the code rather than from memory.
+
+- **Detect it.** The invocation carries a path like `.tickets/<slug>.md`, or the user points at one. If
+  you only get a task name, glob `.tickets/` before you start asking anything.
+- **Read the whole ticket** and take the slug from its `**Slug:**` field instead of inventing one — that
+  keeps the ticket, the plan file and the branch under a single name.
+- **Skip `### Quick clarify` entirely.** Scope, acceptance criteria and the explicit „Poza zakresem" were
+  already interrogated and written down; re-asking them wastes the user's turns and invites contradictory
+  answers. Tell the user in one sentence that quick-clarify is being skipped because the ticket carries
+  it — otherwise a skipped step just looks like a dropped one.
+- **Pass the ticket's absolute path to the Stage 1 planner** in place of quick-clarify answers, and state
+  that its `## Ustalenia` and `## Poza zakresem` are **binding**: the planner implements those decisions,
+  it does not reopen them. The ticket's `## Otwarte punkty` are the planner's starting material for its
+  own "Open questions".
+- Stage 2 then opens with the ticket's `## Otwarte punkty` plus whatever the planner added after reading
+  the code.
+
 ### Quick clarify — before planning
 
 Before spawning the planner, do a **fast, top-of-mind analysis of the feature yourself**: no deep code
@@ -261,6 +281,8 @@ After the commit lands:
      interactive/web PR creation), so applying it here is on you, not on `gh`.
    - Keep the section order and headings; drop only the sections the template marks optional when they'd be
      empty. Strip the HTML guidance comments — they're instructions for the author, not PR content.
+   - If the task came from a ticket, take „Problem / Kontekst" and the roadmap/backlog item being closed
+     from the ticket's `**Źródło:**` header rather than re-deriving them.
    - Fill the Weryfikacja checkboxes with **real results** (test counts, Codex verdict, what was clicked
      through E2E). A step that wasn't run stays unchecked with a one-line reason — never check it optimistically.
 3. Report the PR URL back to the user. Do **not** merge it — opening the PR ends this workflow.

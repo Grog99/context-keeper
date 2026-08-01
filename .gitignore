@@ -35,3 +35,6 @@ Thumbs.db
 # Test / coverage
 coverage/
 .vitest/
+
+# Tickety z /prepare-ticket — roboczy notatnik ustaleń, kanon żyje w context/
+/.tickets/
