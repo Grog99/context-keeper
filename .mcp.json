@@ -2,7 +2,7 @@
   "mcpServers": {
     "context-keeper": {
       "type": "http",
-      "url": "https://ck-mcp.dgolczewski.pl/mcp",
+      "url": "${CONTEXT_KEEPER_URL:-http://localhost:3000}/mcp",
       "headers": {
         "Authorization": "Bearer ${CONTEXT_KEEPER_TOKEN}"
       }

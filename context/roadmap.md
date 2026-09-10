@@ -79,15 +79,14 @@ technicznego i domknąć kolejkę akceptacji tam, gdzie recenzent decyduje bez k
 ### Dług techniczny 🔴
 
 Cztery pozycje „boli teraz" z [`tech-review.md`](tech-review.md); pełne objawy z dowodami `plik:linia`
-tam, tu zakres.
+tam, tu zakres. Dwie z nich (bezpieczeństwo) domknięte przed upublicznieniem repo.
 
-- **`Set-Cookie` sesji w logach produkcyjnych** ⬜ — `redact` w `app.module.ts` obejmuje tylko stronę
-  żądania, więc domyślny serializer pino loguje wszystkie nagłówki odpowiedzi, w tym ciasteczko sesji.
-  Koszt S.
+- **`Set-Cookie` sesji w logach produkcyjnych** ✅ — `res.headers["set-cookie"]` w `redact` pino
+  (2026-09-10, przed upublicznieniem repo).
 - **Walidacja runtime query-paramów `/api`** ⬜ — gołe `@Query()` dają 500 zamiast 400 przy złym
   `kind`/`limit`/`from`; zod jest już zależnością. Koszt M.
-- **`/health` bez limitu na publicznym porcie MCP** ⬜ — `SELECT 1` + fetch do TEI na każdy request,
-  bez cache i bez throttlingu, na porcie wystawionym publicznie. Koszt S.
+- **`/health` bez limitu na publicznym porcie MCP** ✅ — wynik probe współdzielony przez 5 s, flood
+  nie dociera do puli `pg` ani TEI (2026-09-10, przed upublicznieniem repo).
 - **`Intl.RelativeTimeFormat` zamiast ręcznej drabinki** ⬜ — `format.ts` renderuje „1 dni temu" dla
   24–35 h i nie ma górnego progu. Koszt S.
 

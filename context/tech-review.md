@@ -19,10 +19,8 @@ Legenda: 🔴 boli teraz · 🟠 będzie boleć · 🟢 higiena · ✅ zrobione
 
 | #   | Ustalenie                                        | Wymiar    | Waga | Koszt |
 | --- | ------------------------------------------------ | --------- | ---- | ----- |
-| 1   | Sesja dashboardu w logach produkcyjnych          | ops       | 🔴   | S     |
 | 2   | „1 dni temu" w UI                                | front     | 🔴   | S     |
 | 3   | JSON API dashboardu bez walidacji runtime        | ops       | 🔴   | M     |
-| 4   | `/health` bez limitu na publicznym porcie MCP    | ops       | 🔴   | S     |
 | 5   | `GET /api/proposals` bez `LIMIT`                 | dane      | 🟠   | M     |
 | 6   | ⌘K: request na każdy klawisz + brak indeksu      | dane      | 🟠   | M     |
 | 7   | Filtr projektu w Audycie: brak GIN i brak limitu | dane      | 🟠   | M     |
@@ -37,17 +35,7 @@ Legenda: 🔴 boli teraz · 🟠 będzie boleć · 🟢 higiena · ✅ zrobione
 
 > **Zaplanowane (reconcile 2026-07-29):** pozycje 1–4 (wszystkie 🔴) weszły do zakresu **v1.4** —
 > [`roadmap.md`](roadmap.md), sekcja „Dług techniczny 🔴". Pozostałe (5–15) zostają w
-> [`backlog.md`](backlog.md).
-
-### 1. Sesja dashboardu w logach produkcyjnych 🔴
-
-| Pole         | Treść                                                                                                                                                                                               |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Objaw**    | `redact` obejmuje wyłącznie stronę żądania, a domyślny `resSerializer` pino wkłada do logu wszystkie nagłówki odpowiedzi.                                                                           |
-| **Dowód**    | `apps/server/src/app.module.ts:19`                                                                                                                                                                  |
-| **Powoduje** | `Set-Cookie: ck_session` z `POST /api/auth/login` trafia do stdout kontenera — kto ma dostęp do logów, ma ważną sesję (hard-purge, bulk-approve, tokeny) plus `ck_csrf`, więc i obrona CSRF odpada. |
-| **Fix**      | Dopisać `res.headers["set-cookie"]` do `redact` albo dać własny serializer `res` zwracający sam `statusCode`.                                                                                       |
-| **Koszt**    | S                                                                                                                                                                                                   |
+> [`backlog.md`](backlog.md). Pozycje 1 i 4 zrobione 2026-09-10 → „Zrobione".
 
 ### 2. „1 dni temu" w UI 🔴
 
@@ -68,16 +56,6 @@ Legenda: 🔴 boli teraz · 🟠 będzie boleć · 🟢 higiena · ✅ zrobione
 | **Powoduje** | `?kind=bogus` dolatuje do enuma Postgresa (500 zamiast 400), `?limit=abc` daje `LIMIT NaN`, `?from=wczoraj` — `Invalid Date`; SPA dostaje `code === undefined`. |
 | **Fix**      | `ZodValidationPipe` rzucający `ToolError('validation_error')`, który `DashboardErrorFilter` już mapuje na 400 — zod jest zależnością.                           |
 | **Koszt**    | M                                                                                                                                                               |
-
-### 4. `/health` bez limitu na publicznym porcie MCP 🔴
-
-| Pole         | Treść                                                                                                                                         |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Objaw**    | Kontroler bez guarda, `surface.middleware` jawnie wpuszcza `/health` na `PORT_MCP`; każde wywołanie robi `SELECT 1` i fetch do TEI bez cache. |
-| **Dowód**    | `apps/server/src/health/health.controller.ts:12`, `apps/server/src/dashboard/surface.middleware.ts:19`                                        |
-| **Powoduje** | Nieuwierzytelniony flood wyczerpuje pulę `pg` i zapycha sidecar TEI, przez co `search_memory` realnych agentów degraduje się do FTS-only.     |
-| **Fix**      | Cache wyniku `embeddingProvider.health()` ~5 s, albo objąć kontroler `McpIpThrottleGuard` z własnym, wyższym limitem.                         |
-| **Koszt**    | S                                                                                                                                             |
 
 ### 5. `GET /api/proposals` bez `LIMIT` 🟠
 
@@ -199,6 +177,8 @@ Legenda: 🔴 boli teraz · 🟠 będzie boleć · 🟢 higiena · ✅ zrobione
 | Enumy statusów niepełne w §4           | 2026-07-29 | Dopisane `memories.purged` i `proposals.withdrawn` z „kto je ustawia" i ostrzeżeniem, że predykat „wszystko poza `approved`" jest niepoprawny.                   |
 | Relacje opisane jako forward-compat    | 2026-07-29 | `memory_relations` i graph boost wyprowadzone z §4-forward-compat i §13 do właściwego §4; §6 dostał brakujący krok „post-fuzja: age-decay × graph boost".        |
 | §12 udawał kompletną listę configu     | 2026-07-29 | Tabela (~24 z 54 zmiennych) dostała jawną adnotację „niekompletna, kanon to `.env.example` + `config/env.ts`" i wyliczenie pominiętych rodzin.                   |
+| #1 Sesja dashboardu w logach           | 2026-09-10 | `res.headers["set-cookie"]` dopisane do `redact` (config wydzielony do `common/logger-options.ts`); test puszcza prawdziwy request przez `pino-http`.             |
+| #4 `/health` bez limitu                | 2026-09-10 | Wynik probe (DB + TEI, łącznie z in-flight) współdzielony przez 5 s — flood robi ≤1 `SELECT 1` i ≤1 fetch do TEI na okno; throttle odrzucony jako zbędny.        |
 
 ---
 
