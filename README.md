@@ -91,22 +91,28 @@ MCP `context-keeper` (config w commitowanym [`.mcp.json`](.mcp.json)). Jak agenc
 korzystać (proaktywne `search_memory`, human-gated `save_memory`, higiena zapisów) opisuje
 [`AGENTS.md`](AGENTS.md) — Claude Code zaciąga go przez [`CLAUDE.md`](CLAUDE.md) (`@AGENTS.md`).
 
-Żeby włączyć pamięć na swojej maszynie: `.mcp.json` jedzie z repo, ale token trzymasz lokalnie w
-zmiennej środowiskowej `CONTEXT_KEEPER_TOKEN` (nie ma go w repo):
+Żeby włączyć pamięć na swojej maszynie: `.mcp.json` jedzie z repo, ale adres instancji i token
+trzymasz lokalnie w zmiennych środowiskowych (nie ma ich w repo):
+
+- `CONTEXT_KEEPER_URL` — bazowy adres Twojej instancji, bez `/mcp` (domyślnie
+  `http://localhost:3000`, czyli lokalny `docker compose` / `pnpm dev`),
+- `CONTEXT_KEEPER_TOKEN` — token `ck_` projektu z dashboardu.
 
 ```powershell
-setx CONTEXT_KEEPER_TOKEN "ck_...twoj_klucz_z_dashboardu..."   # Windows (user env)
+setx CONTEXT_KEEPER_URL "https://twoja-instancja.example.com"   # Windows (user env)
+setx CONTEXT_KEEPER_TOKEN "ck_...twoj_klucz_z_dashboardu..."
 ```
 
 ```bash
-export CONTEXT_KEEPER_TOKEN=ck_...                             # Linux/macOS: profil powłoki
+export CONTEXT_KEEPER_URL=https://twoja-instancja.example.com   # Linux/macOS: profil powłoki
+export CONTEXT_KEEPER_TOKEN=ck_...
 ```
 
 Potem zrestartuj terminal i klienta MCP oraz zaakceptuj serwer `context-keeper` przy pierwszym
 uruchomieniu. Health jest publiczny (bez tokenu):
 
 ```bash
-curl https://ck-mcp.dgolczewski.pl/health    # -> {"status":"ok","db":"up","embeddings":"up"}
+curl "$CONTEXT_KEEPER_URL/health"    # -> {"status":"ok","db":"up","embeddings":"up"}
 ```
 
 ## Gdzie co jest
@@ -137,3 +143,7 @@ patrz `package.json`.
 
 - **Deploy (Coolify):** [`docs/deploy-coolify.md`](docs/deploy-coolify.md) · [`docs/deploy-coolify-nginx.md`](docs/deploy-coolify-nginx.md)
 - **Backup / Restore (NFR-5):** [`docs/backup-restore.md`](docs/backup-restore.md) — `infra/backup.sh` (`pg_dump -Fc` + retencja tiered + opcjonalny offsite), `infra/restore.sh` (restore do scratch DB, promocja do prod ręczna).
+
+## Licencja
+
+[MIT](LICENSE) © 2026 Daniel Golczewski
