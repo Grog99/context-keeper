@@ -8,8 +8,8 @@ kontekstu i **proponują** zapisy — ale nic nie trafia do pamięci bez zatwier
 
 Specyfikacja: [`context/prd.md`](context/prd.md) · [`context/tech-stack.md`](context/tech-stack.md) · [`context/design-system.md`](context/design-system.md) · [`context/roadmap.md`](context/roadmap.md)
 
-> **Status:** v1.2 domknięte i wdrożone (dogfooding live). Następny etap: v1.3
-> (dostęp i UI) — patrz [`context/roadmap.md`](context/roadmap.md).
+> **Status:** v1.3 (dostęp i UI) domknięte i wdrożone (dogfooding live). W toku: v1.4 (higiena
+> pamięci i dług techniczny) — patrz [`context/roadmap.md`](context/roadmap.md).
 
 ## Najważniejsze funkcje
 
@@ -30,7 +30,18 @@ Specyfikacja: [`context/prd.md`](context/prd.md) · [`context/tech-stack.md`](co
 - **Baza:** PostgreSQL + pgvector (+ `tsvector` FTS), Drizzle ORM
 - **Deploy:** Docker Compose (opcjonalny Caddy w profilu `edge-proxy`, sidecar embeddingów w `local-embeddings`)
 
-Konkretne wersje i uzasadnienia: [`context/tech-stack.md`](context/tech-stack.md). Wymagania: Node ≥ 22, pnpm 10, Docker + Compose.
+Konkretne wersje i uzasadnienia: [`context/tech-stack.md`](context/tech-stack.md).
+
+## Wymagania
+
+- **Docker + Compose** — każda ścieżka instalacji.
+- **POSIX `sh` + `openssl`** — tylko instalator. Na Windows uruchom go z Git Bash albo WSL.
+- **Node ≥ 22 + pnpm 10** — tylko dev na hoście.
+
+```bash
+git clone https://github.com/Grog99/context-keeper.git
+cd context-keeper
+```
 
 ## Szybki start — instalator (zalecane)
 
@@ -45,17 +56,30 @@ generowanie sekretów; **(2)** opcjonalnie — `docker compose up -d`, migracje,
 (token wypisywany **raz**). Idempotentny: re-run z istniejącym `.env` pyta zachować/regenerować,
 nigdy nie nadpisuje cicho. Flagi (`-y`, `--start`/`--no-start`, `--dry-run`) — `./install.sh --help`.
 
+Po instalacji dashboard jest pod `http://localhost:3001` (w trybie `edge-proxy`: `https://<ACME_DOMAIN>`).
+Hasło to `DASHBOARD_PASSWORD` z wygenerowanego `.env` — instalator go nie wypisuje. Dalej:
+[Podłącz swojego agenta](#podłącz-swojego-agenta).
+
 ## Szybki start — Docker, manualnie (fallback / zaawansowany)
 
 ```bash
 cp .env.example .env          # dostosuj sekrety (SESSION_SECRET, DASHBOARD_PASSWORD)
 docker compose up -d db       # Postgres + pgvector
+docker compose --profile local-embeddings up -d embeddings   # sidecar embeddingów (TEI + bge-m3)
 docker compose up -d app      # serwer — auto-migruje przy starcie (DB_AUTO_MIGRATE=true, domyślnie)
-curl localhost:3000/health    # -> {"status":"ok","db":"up"}
+curl localhost:3000/health    # -> {"status":"ok","db":"up","embeddings":"up"}
 
 # Pierwszy projekt + bearer token (token pokazywany RAZ):
 docker compose run --rm app node dist/cli.js create-project acme
 ```
+
+Dashboard: `http://localhost:3001`, logowanie hasłem `DASHBOARD_PASSWORD` z `.env`.
+
+> **Embeddingi:** `.env.example` ma domyślnie `EMBEDDING_PROVIDER=local`, czyli oczekuje sidecara
+> `embeddings` (pierwszy start pobiera model, ok. 2 GB). Dopóki sidecar nie wstanie — albo gdy go
+> nie uruchomisz — app działa dalej, ale `/health` zwraca `"status":"degraded"`, a wyszukiwanie
+> jest tylko pełnotekstowe (FTS). Zamiast sidecara możesz użyć zewnętrznego API
+> (`EMBEDDING_PROVIDER=api`, opis w `.env.example`).
 
 > Domyślnie `app` migruje bazę in-process przed nasłuchem — nie musisz odpalać osobnego kroku.
 > Przy `DB_AUTO_MIGRATE=false` migrujesz sam PRZED startem appki:
@@ -79,14 +103,40 @@ pnpm install
 cp .env.example .env          # DATABASE_URL wskazuje localhost:5432
 docker compose up -d db       # sama baza w kontenerze
 pnpm --filter @context-keeper/server db:migrate:dev   # migracje z hosta (ts-node)
-pnpm dev                      # nest start --watch  (http://localhost:3000)
+pnpm dev                      # serwer z watch: MCP na :3000, API dashboardu na :3001
+
+# w drugim terminalu — dashboard (Vite z HMR, proxy /api -> :3001):
+pnpm --filter @context-keeper/dashboard dev           # http://localhost:5173
 
 pnpm --filter @context-keeper/server cli:dev create-project acme
 ```
 
+W dev serwer nie serwuje zbudowanego dashboardu (`localhost:3001/` zwraca 404) — SPA idzie z Vite.
+Sidecar embeddingów nie jest wystawiony na host, więc wyszukiwanie działa tylko pełnotekstowo
+(`/health` → `degraded`); do developmentu to wystarcza.
+
+## Podłącz swojego agenta
+
+Po instalacji podpinasz dowolne repo (Claude Code, Codex, Cursor…) pod swoją instancję:
+
+1. **Projekt i token** — dashboard → *Projekty* → *Nowy projekt*. Token `ck_` jest pokazywany
+   **raz** — zapisz go od razu. (Alternatywnie CLI `create-project`, jak w szybkim starcie.)
+2. **Snippety** — dashboard → *Onboarding* daje trzy bloki do skopiowania: `.mcp.json`, fragment
+   `AGENTS.md` (kiedy agent ma sięgać po pamięć i co zapisywać) i `CLAUDE.md` (`@AGENTS.md` dla
+   Claude Code, który nie czyta `AGENTS.md` sam). Adres w bloku `.mcp.json` pochodzi z
+   `PUBLIC_MCP_URL` w `.env` serwera (lokalnie `http://localhost:3000`) — bez niego zobaczysz
+   placeholder do ręcznej podmiany.
+3. **Token lokalnie** — `.mcp.json` odwołuje się do `${CONTEXT_KEEPER_TOKEN}`; ustaw tę zmienną
+   środowiskową (`setx` na Windows, `export` w profilu powłoki). Token nigdy nie trafia do repo.
+4. Zrestartuj terminal i klienta MCP, a przy pierwszym uruchomieniu zaakceptuj serwer
+   `context-keeper`.
+
+Od tej chwili agent szuka w pamięci i proponuje zapisy — każda propozycja czeka w dashboardzie
+(*Kolejka*) na Twoją akceptację.
+
 ## Pamięć projektu (dogfooding)
 
-Repo używa **własnej wdrożonej instancji** jako trwałej pamięci projektu, wystawionej jako serwer
+Dotyczy pracy nad **tym** repo. Repo używa **własnej wdrożonej instancji** jako trwałej pamięci projektu, wystawionej jako serwer
 MCP `context-keeper` (config w commitowanym [`.mcp.json`](.mcp.json)). Jak agenci mają z niej
 korzystać (proaktywne `search_memory`, human-gated `save_memory`, higiena zapisów) opisuje
 [`AGENTS.md`](AGENTS.md) — Claude Code zaciąga go przez [`CLAUDE.md`](CLAUDE.md) (`@AGENTS.md`).
