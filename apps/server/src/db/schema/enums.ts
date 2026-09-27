@@ -13,7 +13,8 @@ export const memorySource = pgEnum('memory_source', ['agent', 'human', 'nightly'
 
 // Słownik typów relacji (roadmap v1.2, "memory-relations + 1-hop graph boost") — świadomie
 // zamknięty, DOKŁADNIE 3 wartości (locked decision planu, nie pojedyncza nietypowana `relates_to`).
-// Trzymany w sync z zod enumem `relations[].type` w `mcp-server.factory.ts` (save_memory).
+// `relations[].type` w `mcp-server.factory.ts` (save_memory) czyta `relationType.enumValues`
+// bezpośrednio (tech-review #3, roadmap v1.4, Q4) — nie ma już ręcznego literału do synchronizacji.
 export const relationType = pgEnum('relation_type', ['caused_by', 'follows', 'context_for']);
 
 export const proposalType = pgEnum('proposal_type', ['create', 'update', 'merge', 'delete']);

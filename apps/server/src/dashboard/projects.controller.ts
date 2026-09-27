@@ -1,6 +1,5 @@
-import { Body, Controller, Get, NotFoundException, Param, Patch, Post, UseFilters, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Param, Patch, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
-import { ToolError } from '../common/errors';
 import type { ProjectRow } from '../db/schema';
 import {
   ProjectsService,
@@ -12,10 +11,22 @@ import {
 } from '../projects/projects.service';
 import { effectiveTokenStatus, type EffectiveTokenStatus } from '../projects/token-status';
 import { UsageService } from '../usage/usage.service';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { CsrfGuard } from './auth/csrf.guard';
 import { SessionGuard } from './auth/session.guard';
 import { DASHBOARD_ACTOR } from './dashboard.constants';
 import { DashboardErrorFilter } from './dashboard-error.filter';
+import {
+  createProjectBody,
+  emptyBody,
+  emptyQuery,
+  opaqueId,
+  tokenLabelBody,
+  updateProjectBody,
+  type CreateProjectBody,
+  type TokenLabelBody,
+  type UpdateProjectBody,
+} from './dashboard.schemas';
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -36,24 +47,6 @@ export interface ProjectTokenDto extends PublicTokenRow {
   searches30d: number;
 }
 
-interface CreateProjectBody {
-  name?: string;
-  /** Etykieta pierwszego tokena (roadmap v1.3) — opcjonalna, serwis spada na `DEFAULT_TOKEN_LABEL`. */
-  tokenLabel?: string;
-}
-
-interface UpdateProjectBody {
-  includeEventsInDefaultSearch?: boolean;
-}
-
-interface CreateTokenBody {
-  label?: string;
-}
-
-interface UpdateTokenLabelBody {
-  label?: string;
-}
-
 /**
  * FR-D3 Projekty/tokeny, na `ProjectsService`. Roadmap v1.3 ("Wiele tokenów per projekt + graceful
  * rotation") rozszerza to o pełne CRUD tokenów per projekt — audyt (`token_created`/`rotated`/
@@ -63,6 +56,10 @@ interface UpdateTokenLabelBody {
  * Ownership check (`assertTokenBelongsToProject`) — `:tokenId` w URL nie implikuje `:id`; bez tej
  * kontroli operator mógłby rotować/unieważnić/przemianować token INNEGO projektu podając dowolne
  * `:id` w ścieżce (parametr URL nigdy nie jest zaufany bez weryfikacji, §Risks planu).
+ *
+ * Walidacja query/param/body (tech-review #3, roadmap v1.4) — `ZodValidationPipe` per-argument,
+ * schematy w `dashboard.schemas.ts`; `create()` traci ręczny `body?.name?.trim()`/`if (!name)` na
+ * rzecz `createProjectBody` (`.trim().min(1)`).
  */
 @Controller('api/projects')
 @UseGuards(SessionGuard, CsrfGuard)
@@ -75,7 +72,9 @@ export class ProjectsController {
   ) {}
 
   @Get()
-  async list(): Promise<ProjectListItem[]> {
+  async list(
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never>,
+  ): Promise<ProjectListItem[]> {
     const [rows, memoryCounts, tokenCounts] = await Promise.all([
       this.projects.listProjects(),
       this.projects.countMemoriesByProject(),
@@ -89,12 +88,11 @@ export class ProjectsController {
   }
 
   @Post()
-  async create(@Body() body: CreateProjectBody): Promise<CreatedProject> {
-    const name = body?.name?.trim();
-    if (!name) {
-      throw new ToolError('validation_error', 'name jest wymagany');
-    }
-    const created = await this.projects.createProject(name, body?.tokenLabel);
+  async create(
+    @Body(new ZodValidationPipe(createProjectBody)) body: CreateProjectBody,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never>,
+  ): Promise<CreatedProject> {
+    const created = await this.projects.createProject(body.name, body.tokenLabel);
     await this.audit.log({
       eventType: 'token_created',
       actor: DASHBOARD_ACTOR,
@@ -115,12 +113,16 @@ export class ProjectsController {
    * przez serwis leci dalej nietknięty (Nest mapuje wbudowane HttpException na 404 samodzielnie —
    * poza `DashboardErrorFilter`, który łapie tylko `ProposalError`/`ToolError`/`PurgeError`). */
   @Patch(':id')
-  async update(@Param('id') id: string, @Body() body: UpdateProjectBody): Promise<ProjectRow> {
+  async update(
+    @Param('id', new ZodValidationPipe(opaqueId)) id: string,
+    @Body(new ZodValidationPipe(updateProjectBody)) body: UpdateProjectBody,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never>,
+  ): Promise<ProjectRow> {
     const before = await this.projects.findById(id);
     const updated = await this.projects.updateProject(id, {
-      includeEventsInDefaultSearch: body?.includeEventsInDefaultSearch,
+      includeEventsInDefaultSearch: body.includeEventsInDefaultSearch,
     });
-    if (body?.includeEventsInDefaultSearch !== undefined) {
+    if (body.includeEventsInDefaultSearch !== undefined) {
       await this.audit.log({
         eventType: 'project_settings_changed',
         actor: DASHBOARD_ACTOR,
@@ -137,7 +139,10 @@ export class ProjectsController {
 
   /** Dialog "Tokeny" — lista + `effectiveStatus`/`searches30d` liczone server-side. */
   @Get(':id/tokens')
-  async listTokens(@Param('id') id: string): Promise<ProjectTokenDto[]> {
+  async listTokens(
+    @Param('id', new ZodValidationPipe(opaqueId)) id: string,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never>,
+  ): Promise<ProjectTokenDto[]> {
     const project = await this.projects.findById(id);
     if (!project) {
       throw new NotFoundException(`Projekt nie istnieje: ${id}`);
@@ -157,8 +162,12 @@ export class ProjectsController {
 
   /** Nowy token obok istniejących (§0 pkt 3 planu — etykieta WYMAGANA, walidowana w serwisie). */
   @Post(':id/tokens')
-  async createToken(@Param('id') id: string, @Body() body: CreateTokenBody): Promise<CreatedToken> {
-    const created = await this.projects.createToken(id, body?.label ?? '');
+  async createToken(
+    @Param('id', new ZodValidationPipe(opaqueId)) id: string,
+    @Body(new ZodValidationPipe(tokenLabelBody)) body: TokenLabelBody,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never>,
+  ): Promise<CreatedToken> {
+    const created = await this.projects.createToken(id, body.label);
     await this.audit.log({
       eventType: 'token_created',
       actor: DASHBOARD_ACTOR,
@@ -171,7 +180,12 @@ export class ProjectsController {
    * zastępuje go od razu. Audyt niesie OBA id/etykiety + moment wygaśnięcia karencji, żeby ekran
    * "Audyt" pokazał pełny obraz bez dodatkowego zapytania. */
   @Post(':id/tokens/:tokenId/rotate')
-  async rotateToken(@Param('id') id: string, @Param('tokenId') tokenId: string): Promise<RotatedToken> {
+  async rotateToken(
+    @Param('id', new ZodValidationPipe(opaqueId)) id: string,
+    @Param('tokenId', new ZodValidationPipe(opaqueId)) tokenId: string,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never>,
+    @Body(new ZodValidationPipe(emptyBody)) _body: Record<string, never>,
+  ): Promise<RotatedToken> {
     await this.assertTokenBelongsToProject(id, tokenId);
     const rotated = await this.projects.rotateToken(tokenId);
     await this.audit.log({
@@ -191,7 +205,12 @@ export class ProjectsController {
 
   /** Unieważnienie natychmiastowe — działa na `active` I `grace`, idempotentne (§ProjectsService.revokeToken). */
   @Post(':id/tokens/:tokenId/revoke')
-  async revokeToken(@Param('id') id: string, @Param('tokenId') tokenId: string): Promise<PublicTokenRow> {
+  async revokeToken(
+    @Param('id', new ZodValidationPipe(opaqueId)) id: string,
+    @Param('tokenId', new ZodValidationPipe(opaqueId)) tokenId: string,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never>,
+    @Body(new ZodValidationPipe(emptyBody)) _body: Record<string, never>,
+  ): Promise<PublicTokenRow> {
     await this.assertTokenBelongsToProject(id, tokenId);
     const revoked = await this.projects.revokeToken(tokenId);
     await this.audit.log({
@@ -205,12 +224,13 @@ export class ProjectsController {
   /** Rename etykiety (§0 pkt 5 planu — w zakresie), dozwolony niezależnie od statusu tokena. */
   @Patch(':id/tokens/:tokenId')
   async updateTokenLabel(
-    @Param('id') id: string,
-    @Param('tokenId') tokenId: string,
-    @Body() body: UpdateTokenLabelBody,
+    @Param('id', new ZodValidationPipe(opaqueId)) id: string,
+    @Param('tokenId', new ZodValidationPipe(opaqueId)) tokenId: string,
+    @Body(new ZodValidationPipe(tokenLabelBody)) body: TokenLabelBody,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never>,
   ): Promise<PublicTokenRow> {
     const before = await this.assertTokenBelongsToProject(id, tokenId);
-    const updated = await this.projects.updateTokenLabel(tokenId, body?.label ?? '');
+    const updated = await this.projects.updateTokenLabel(tokenId, body.label);
     await this.audit.log({
       eventType: 'token_relabeled',
       actor: DASHBOARD_ACTOR,

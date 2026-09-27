@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { ToolError, toErrorEnvelope } from '../common/errors';
+import { memoryKind, relationType } from '../db/schema/enums';
 import { MemoryService } from '../memory/memory.service';
 import type { ProjectContext } from '../projects/projects.service';
 import { GET_MEMORY_DESCRIPTION, SAVE_MEMORY_DESCRIPTION, SEARCH_MEMORY_DESCRIPTION } from './tool-contract';
@@ -47,7 +48,7 @@ export function createMcpServer(memory: MemoryService, ctx: ProjectContext): Mcp
           .optional()
           .describe('Optional tag filter — matches memories sharing at least one tag.'),
         kind: z
-          .enum(['fact', 'document', 'event'])
+          .enum(memoryKind.enumValues)
           .optional()
           .describe(
             'Optional kind filter. Default is fact + document; event is excluded from the default ' +
@@ -89,7 +90,7 @@ export function createMcpServer(memory: MemoryService, ctx: ProjectContext): Mcp
           .optional()
           .describe('Up to ~10 short lowercase tags ([a-z0-9-_/], no spaces).'),
         kind: z
-          .enum(['fact', 'document', 'event'])
+          .enum(memoryKind.enumValues)
           .optional()
           .describe(
             'Optional memory kind. Default "fact". "document" for longer canonical reference ' +
@@ -117,7 +118,7 @@ export function createMcpServer(memory: MemoryService, ctx: ProjectContext): Mcp
         relations: z
           .array(
             z.object({
-              type: z.enum(['caused_by', 'follows', 'context_for']),
+              type: z.enum(relationType.enumValues),
               targetId: z.string().min(1),
             }),
           )

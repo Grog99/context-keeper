@@ -16,6 +16,7 @@ import {
   type MemoryRow,
   type RevisionRow,
 } from '../db/schema';
+import { memoryScope } from '../db/schema/enums';
 import type {
   MemoryKind,
   MemoryScope,
@@ -27,11 +28,17 @@ import type {
 import { EmbeddingService } from '../embeddings/embedding.service';
 import { normalizeHeader, normalizeTags, validateBody, validateEventTime } from './validation';
 
+/** Jedno źródło prawdy dla `scope` filtrów przeglądarki (tech-review #3, roadmap v1.4) — `'all'`
+ * dokłada się do wartości enuma DB (`memoryScope.enumValues`), zamiast być ręcznie przepisanym
+ * literałem. Używane też przez `ZodValidationPipe` (`dashboard.schemas.ts`) do walidacji query. */
+export const LIST_SCOPES = ['all', ...memoryScope.enumValues] as const;
+export type ListScope = (typeof LIST_SCOPES)[number];
+
 export interface ListMemoriesFilter {
   /** `undefined`/`'all'` = brak filtra scope/projectId (FR-D6 "Wszystkie" — dashboard trusted, NFR-1).
    * `'global'` = tylko scope=global. `'project'` (+ `projectId`) = STRICT `scope=project AND
    * project_id=projectId` (bez leakage global, wymóg §9.6 design-systemu). */
-  scope?: 'all' | 'global' | 'project';
+  scope?: ListScope;
   projectId?: string;
   kind?: MemoryKind;
   status?: MemoryStatus;
@@ -44,7 +51,7 @@ export interface ListMemoriesFilter {
  * `ListMemoriesFilter`, ale `kind='event'` jest wymuszony wewnątrz `listEvents`, nie filtrem
  * wywołującego. */
 export interface ListEventsFilter {
-  scope?: 'all' | 'global' | 'project';
+  scope?: ListScope;
   projectId?: string;
   limit?: number;
 }

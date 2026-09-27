@@ -1,13 +1,10 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
-import { relationType, type MemoryKind, type MemoryScope, type MemoryStatus, type RelationType } from '../db/schema/enums';
 import type { RevisionRow } from '../db/schema';
-import { ToolError } from '../common/errors';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import {
   MemoryAdminService,
   type EditMemoryInput,
   type HumanCreateInput,
-  type ListEventsFilter,
-  type ListMemoriesFilter,
   type MemoryDetail,
   type MemoryListItem,
   type RelationListItem,
@@ -18,17 +15,33 @@ import { CsrfGuard } from './auth/csrf.guard';
 import { SessionGuard } from './auth/session.guard';
 import { DASHBOARD_ACTOR } from './dashboard.constants';
 import { DashboardErrorFilter } from './dashboard-error.filter';
-
-function toStringArray(value: string | string[] | undefined): string[] | undefined {
-  if (value === undefined) return undefined;
-  return Array.isArray(value) ? value : [value];
-}
+import {
+  createRelationBody,
+  editMemoryBody,
+  emptyBody,
+  emptyQuery,
+  humanCreateBody,
+  memoriesListQuery,
+  memoryEventsQuery,
+  opaqueId,
+  purgeBody,
+  type CreateRelationBody,
+  type EditMemoryBody,
+  type HumanCreateBody,
+  type MemoriesListQuery,
+  type MemoryEventsQuery,
+  type PurgeBody,
+} from './dashboard.schemas';
 
 /**
  * FR-D2 Przeglądarka pamięci + FR-D5 Human-create, na `MemoryAdminService` (§Ryzyka planu — NIE
  * `MemoryService.get()`, żeby nigdy nie bumpować `access_count`/`last_accessed_at` z przeglądarki).
  * Od roadmap v1.1 dokłada też hard-purge (`:id/purge-preview`/`:id/purge`) — cienki wrapper nad
  * `PurgeService`, ta sama logika co CLI `purge` (§Guiding principle planu dashboard-nightly-purge).
+ *
+ * Walidacja query/param/body (tech-review #3, roadmap v1.4) — `ZodValidationPipe` per-argument,
+ * schematy w `dashboard.schemas.ts`. KAŻDY handler (nawet bez filtrów) ma pipe na query (Q1
+ * resolved, "strict everywhere") — nieznany klucz query zawsze 400.
  */
 @Controller('api/memories')
 @UseGuards(SessionGuard, CsrfGuard)
@@ -41,14 +54,9 @@ export class MemoriesController {
 
   @Get()
   async list(
-    @Query('scope') scope?: ListMemoriesFilter['scope'],
-    @Query('projectId') projectId?: string,
-    @Query('kind') kind?: MemoryKind,
-    @Query('status') status?: MemoryStatus,
-    @Query('tags') tags?: string | string[],
-    @Query('q') q?: string,
+    @Query(new ZodValidationPipe(memoriesListQuery)) query: MemoriesListQuery,
   ): Promise<MemoryListItem[]> {
-    return this.memoryAdmin.listMemories({ scope, projectId, kind, status, tags: toStringArray(tags), q });
+    return this.memoryAdmin.listMemories({ ...query });
   }
 
   /** Ekran "Oś czasu" (roadmap v1.2, "kind=event episodic") — deklarowane PRZED `:id` (Express
@@ -56,19 +64,24 @@ export class MemoriesController {
    * `GET /api/memories/events` trafiłby w `get(id='events')`). */
   @Get('events')
   async events(
-    @Query('scope') scope?: ListEventsFilter['scope'],
-    @Query('projectId') projectId?: string,
+    @Query(new ZodValidationPipe(memoryEventsQuery)) query: MemoryEventsQuery,
   ): Promise<MemoryListItem[]> {
-    return this.memoryAdmin.listEvents({ scope, projectId });
+    return this.memoryAdmin.listEvents({ ...query });
   }
 
   @Get(':id')
-  async get(@Param('id') id: string): Promise<MemoryDetail> {
+  async get(
+    @Param('id', new ZodValidationPipe(opaqueId)) id: string,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never> = {},
+  ): Promise<MemoryDetail> {
     return this.memoryAdmin.getMemoryDetail(id);
   }
 
   @Get(':id/revisions')
-  async revisions(@Param('id') id: string): Promise<RevisionRow[]> {
+  async revisions(
+    @Param('id', new ZodValidationPipe(opaqueId)) id: string,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never> = {},
+  ): Promise<RevisionRow[]> {
     return this.memoryAdmin.listRevisions(id);
   }
 
@@ -79,56 +92,45 @@ export class MemoriesController {
    * ostrzeżenie o kolejności dotyczy tylko literalnych top-level tras typu `events` powyżej `:id`).
    */
   @Get(':id/relations')
-  async listRelations(@Param('id') id: string): Promise<RelationListItem[]> {
+  async listRelations(
+    @Param('id', new ZodValidationPipe(opaqueId)) id: string,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never> = {},
+  ): Promise<RelationListItem[]> {
     return this.memoryAdmin.listRelations(id);
   }
 
-  /** `@Body()` powyżej to czysta asercja typu TS — bez globalnego `ValidationPipe` w `main.ts`
-   * (świadome: MCP i tak waliduje zod-em na wejściu narzędzia, `main.ts` go nie potrzebował do
-   * teraz) request z `type: "bogus"` doleciałby aż do enuma Postgresa (500 zamiast 400), a brak
-   * `toId` wysypałby `MemoryAdminService.createRelation`'s `inArray(memories.id, [fromId, undefined])`.
-   * Walidujemy więc explicit, PRZED wejściem w serwis, tym samym `ToolError('validation_error', …)`
-   * co reszta ścieżek dashboardu — `DashboardErrorFilter` mapuje go na 400 (§dashboard-error.filter.ts).
-   * Wartości `type` czytane z jednego źródła prawdy (`relationType.enumValues`, §db/schema/enums.ts),
-   * bez przepisywania literałów. */
+  /** Walidacja `toId`/`type` (§dashboard.schemas.ts `createRelationBody`) PRZED wejściem w serwis —
+   * `type` czytany z jednego źródła prawdy (`relationType.enumValues`), bez przepisywania literałów;
+   * `ZodValidationPipe` rzuca `ToolError('validation_error', …)`, który `DashboardErrorFilter`
+   * mapuje na 400 (§dashboard-error.filter.ts) — bez tego `type: "bogus"` doleciałby aż do enuma
+   * Postgresa (500 zamiast 400), a brak `toId` wysypałby `MemoryAdminService.createRelation`. */
   @Post(':id/relations')
   async createRelation(
-    @Param('id') id: string,
-    @Body() body: { toId: string; type: RelationType },
+    @Param('id', new ZodValidationPipe(opaqueId)) id: string,
+    @Body(new ZodValidationPipe(createRelationBody)) body: CreateRelationBody,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never> = {},
   ): Promise<{ id: string }> {
-    const toId = body?.toId;
-    if (typeof toId !== 'string' || toId.length === 0) {
-      throw new ToolError('validation_error', 'toId jest wymagany');
-    }
-    const type = body?.type;
-    if (!relationType.enumValues.includes(type)) {
-      throw new ToolError(
-        'validation_error',
-        `type musi być jednym z: ${relationType.enumValues.join(', ')}`,
-      );
-    }
-    return this.memoryAdmin.createRelation({ fromId: id, toId, type });
+    return this.memoryAdmin.createRelation({ fromId: id, toId: body.toId, type: body.type });
   }
 
+  /** Q5 (resolved) — waliduje FORMAT obu `:id`/`:relationId` (`opaqueId`), bez ownership check
+   * (behaviour change odłożony do backlogu). `:id` bindowany WYŁĄCZNIE do walidacji, nigdy nie
+   * przekazywany do serwisu (usunięcie działa po samym `relationId`, jak przed zmianą). */
   @Delete(':id/relations/:relationId')
-  async removeRelation(@Param('relationId') relationId: string): Promise<{ ok: true }> {
+  async removeRelation(
+    @Param('relationId', new ZodValidationPipe(opaqueId)) relationId: string,
+    @Param('id', new ZodValidationPipe(opaqueId)) _id: string = '',
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never> = {},
+    @Body(new ZodValidationPipe(emptyBody)) _body: Record<string, never> = {},
+  ): Promise<{ ok: true }> {
     await this.memoryAdmin.removeRelation(relationId);
     return { ok: true };
   }
 
   @Post()
   async create(
-    @Body()
-    body: {
-      kind: MemoryKind;
-      header: string;
-      body: string;
-      tags?: string[];
-      scope: MemoryScope;
-      projectId?: string | null;
-      /** Wymagany gdy `kind='event'` (roadmap v1.2) — ISO timestamp, backdatable. */
-      eventTime?: string;
-    },
+    @Body(new ZodValidationPipe(humanCreateBody)) body: HumanCreateBody,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never> = {},
   ): Promise<{ id: string } & WithWarnings> {
     const input: HumanCreateInput = {
       kind: body.kind,
@@ -143,18 +145,31 @@ export class MemoriesController {
   }
 
   @Patch(':id')
-  async edit(@Param('id') id: string, @Body() body: EditMemoryInput): Promise<WithWarnings> {
-    return this.memoryAdmin.editMemory(id, body);
+  async edit(
+    @Param('id', new ZodValidationPipe(opaqueId)) id: string,
+    @Body(new ZodValidationPipe(editMemoryBody)) body: EditMemoryBody,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never> = {},
+  ): Promise<WithWarnings> {
+    const edits: EditMemoryInput = body;
+    return this.memoryAdmin.editMemory(id, edits);
   }
 
   @Post(':id/archive')
-  async archive(@Param('id') id: string): Promise<{ ok: true }> {
+  async archive(
+    @Param('id', new ZodValidationPipe(opaqueId)) id: string,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never> = {},
+    @Body(new ZodValidationPipe(emptyBody)) _body: Record<string, never> = {},
+  ): Promise<{ ok: true }> {
     await this.memoryAdmin.archiveMemory(id);
     return { ok: true };
   }
 
   @Post(':id/promote')
-  async promote(@Param('id') id: string): Promise<{ ok: true }> {
+  async promote(
+    @Param('id', new ZodValidationPipe(opaqueId)) id: string,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never> = {},
+    @Body(new ZodValidationPipe(emptyBody)) _body: Record<string, never> = {},
+  ): Promise<{ ok: true }> {
     await this.memoryAdmin.promoteToGlobal(id);
     return { ok: true };
   }
@@ -162,14 +177,22 @@ export class MemoriesController {
   /** Read-only dry-run (roadmap v1.1) — skala hard-purge PRZED potwierdzeniem, jak `purge` CLI bez
    * `--confirm`. `PurgeService.preview()` sam rzuca `PurgeError('not_found')`, gdy id nie istnieje. */
   @Get(':id/purge-preview')
-  async purgePreview(@Param('id') id: string): Promise<PurgePreview> {
+  async purgePreview(
+    @Param('id', new ZodValidationPipe(opaqueId)) id: string,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never> = {},
+  ): Promise<PurgePreview> {
     return this.purgeService.preview(id);
   }
 
   /** Wymaga `reason` (§Resolved design decisions planu — CLI parity, bez typed-id confirmation).
-   * `PurgeService.purge()` waliduje pusty `reason` sam (`validation_error`) — nie duplikujemy tu. */
+   * `reason` jest teraz WYMAGANY na poziomie kształtu (`purgeBody`) — `PurgeService.purge()` dalej
+   * waliduje pusty-po-trim string (`validation_error`), nie duplikujemy tej reguły tutaj. */
   @Post(':id/purge')
-  async purge(@Param('id') id: string, @Body() body: { reason: string }): Promise<PurgeResult> {
-    return this.purgeService.purge(id, { reason: body?.reason ?? '', actor: DASHBOARD_ACTOR });
+  async purge(
+    @Param('id', new ZodValidationPipe(opaqueId)) id: string,
+    @Body(new ZodValidationPipe(purgeBody)) body: PurgeBody,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never> = {},
+  ): Promise<PurgeResult> {
+    return this.purgeService.purge(id, { reason: body.reason, actor: DASHBOARD_ACTOR });
   }
 }

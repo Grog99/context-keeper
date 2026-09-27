@@ -1,5 +1,6 @@
 import type { ArgumentsHost } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
+import { ToolError } from '../src/common/errors';
 import { DashboardErrorFilter } from '../src/dashboard/dashboard-error.filter';
 import { PurgeError } from '../src/purge/purge.errors';
 
@@ -56,5 +57,16 @@ describe('DashboardErrorFilter — mapowanie PurgeError na HTTP', () => {
 
     expect(captured.statusCode).toBe(400);
     expect(captured.body).toEqual({ code: 'validation_error', message: '--reason jest wymagany' });
+  });
+
+  /** `ZodValidationPipe` (tech-review #3, roadmap v1.4) rzuca dokładnie ten sam `ToolError`, który
+   * już był mapowany na 400 dla walidacji serwisów (`TOOL_STATUS['validation_error']`) — ten test
+   * dokumentuje, że pipe nie potrzebował żadnej zmiany w filtrze, tylko nowego producenta błędu. */
+  it('ToolError("validation_error") z ZodValidationPipe -> 400 {code, message}', () => {
+    const captured: CapturedResponse = {};
+    filter.catch(new ToolError('validation_error', 'Invalid input — query.kind: …'), hostCapturing(captured));
+
+    expect(captured.statusCode).toBe(400);
+    expect(captured.body).toEqual({ code: 'validation_error', message: 'Invalid input — query.kind: …' });
   });
 });
