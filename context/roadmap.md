@@ -92,9 +92,11 @@ tam, tu zakres. Dwie z nich (bezpieczeństwo) domknięte przed upublicznieniem r
 
 ### UI
 
-- **Tagi i `kind` w kolejce akceptacji** ⬜ — recenzent podejmuje decyzję bez dwóch pól, które
+- **Tagi i `kind` w kolejce akceptacji** ✅ — recenzent podejmuje decyzję bez dwóch pól, które
   propozycja niesie: nie widzi tagów ani rodzaju wpisu. Domyka serię „kolejka pokazuje to, co
-  zatwierdzasz", zaczętą w v1.3 wyświetleniem `event_time`. (z backlogu)
+  zatwierdzasz", zaczętą w v1.3 wyświetleniem `event_time`. (z backlogu) — 2026-09-27: tagi
+  okazały się już renderowane (wiersz + detal), doszedł `kind` (`KindGutter` + `KindMarker` w
+  `ProposalRow`, `KindMarker` + nazwa w pasku metadanych detalu); API bez zmian.
 
 ## Backlog ⬜
 

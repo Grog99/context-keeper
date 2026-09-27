@@ -142,6 +142,7 @@ export function DevPreviewScreen() {
           <ProposalRow
             type="create"
             status="pending"
+            kind="fact"
             title="Klient acme używa PostgreSQL 16 na produkcji (upgrade z 15 w Q2)"
             origin="agent"
             scope="project"
@@ -154,6 +155,7 @@ export function DevPreviewScreen() {
           <ProposalRow
             type="merge"
             status="pending"
+            kind="document"
             title="Scal 2 fakty o wersji Node w jeden"
             origin="nightly"
             scope="project"
@@ -166,6 +168,7 @@ export function DevPreviewScreen() {
           <ProposalRow
             type="update"
             status="pending"
+            kind="event"
             title="Endpoint sesji to POST /api/v2/session, nie /login"
             origin="human"
             scope="global"

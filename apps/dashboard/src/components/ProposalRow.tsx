@@ -2,7 +2,8 @@ import { ArrowLeftRight, GitMerge, Plus, Trash2 } from 'lucide-react';
 import type { KeyboardEvent, MouseEvent } from 'react';
 import { formatRelativeTime } from '../lib/format';
 import { cn } from '../lib/utils';
-import type { MemoryScope, ProposalOrigin, ProposalType } from '../types/domain';
+import type { MemoryKind, MemoryScope, ProposalOrigin, ProposalType } from '../types/domain';
+import { KindGutter, KindMarker } from './KindMarker';
 import { OriginPath } from './OriginPath';
 import { StatusChip, type StatusChipStatus } from './StatusChip';
 import { Checkbox } from './ui/checkbox';
@@ -28,10 +29,16 @@ const MAX_VISIBLE_TAGS = 2;
  * komórkę grida ze `stopPropagation()` — klik w checkbox przełącza zaznaczenie, NIGDY nie otwiera
  * podglądu, i odwrotnie. Hover na całym wierszu (w tym nad checkboxem) podświetla tło — świadome,
  * checkbox i treść to wciąż wizualnie jeden wiersz.
+ *
+ * `kind` (roadmap v1.4, "Tagi i kind w kolejce akceptacji") — te same kanały co wiersz przeglądarki
+ * pamięci (§2.3/§9.2): `KindGutter` przy lewej krawędzi (ustępuje paskowi zaznaczenia) + `KindMarker`
+ * obok StatusChipa. Brak `kind` (patch `update` bez zmiany kind, `delete`) → pusty slot tej samej
+ * szerokości, żeby tytuły w kolumnie się nie rozjeżdżały; wiersz nie dociąga stanu pamięci.
  */
 export interface ProposalRowProps {
   type: ProposalType;
   status: StatusChipStatus;
+  kind?: MemoryKind;
   title: string;
   origin: ProposalOrigin;
   scope: MemoryScope;
@@ -51,6 +58,7 @@ export interface ProposalRowProps {
 export function ProposalRow({
   type,
   status,
+  kind,
   title,
   origin,
   scope,
@@ -91,7 +99,11 @@ export function ProposalRow({
         selected && 'bg-accent-subtle',
       )}
     >
-      {selected && <span className="absolute inset-y-0 left-0 w-[2px] bg-primary" aria-hidden />}
+      {selected ? (
+        <span className="absolute inset-y-0 left-0 w-[2px] bg-primary" aria-hidden />
+      ) : (
+        kind && <KindGutter kind={kind} />
+      )}
       {selectable && (
         <div className="flex items-center pl-3.5 pr-1" onClick={handleCheckboxCellClick}>
           <Checkbox
@@ -108,12 +120,13 @@ export function ProposalRow({
         onKeyDown={handleKeyDown}
         aria-selected={selected}
         className={cn(
-          'grid min-w-0 cursor-pointer grid-cols-[auto_1fr_auto] items-center gap-2.5 py-2.5 pr-3.5',
+          'grid min-w-0 cursor-pointer grid-cols-[auto_auto_1fr_auto] items-center gap-2.5 py-2.5 pr-3.5',
           selectable ? 'pl-2' : 'pl-3.5',
           'focus-visible:outline-none',
         )}
       >
         <StatusChip status={status} />
+        {kind ? <KindMarker kind={kind} className="shrink-0" /> : <span className="size-[22px]" aria-hidden />}
         <div className="flex min-w-0 flex-col gap-1">
           <div className="flex min-w-0 items-center gap-1.5 truncate text-[13.5px] font-medium text-foreground">
             <Icon className="size-3.5 shrink-0 text-faint" />
