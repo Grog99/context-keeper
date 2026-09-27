@@ -19,7 +19,6 @@ Legenda: 🔴 boli teraz · 🟠 będzie boleć · 🟢 higiena · ✅ zrobione
 
 | #   | Ustalenie                                        | Wymiar    | Waga | Koszt |
 | --- | ------------------------------------------------ | --------- | ---- | ----- |
-| 2   | „1 dni temu" w UI                                | front     | 🔴   | S     |
 | 3   | JSON API dashboardu bez walidacji runtime        | ops       | 🔴   | M     |
 | 5   | `GET /api/proposals` bez `LIMIT`                 | dane      | 🟠   | M     |
 | 6   | ⌘K: request na każdy klawisz + brak indeksu      | dane      | 🟠   | M     |
@@ -35,17 +34,7 @@ Legenda: 🔴 boli teraz · 🟠 będzie boleć · 🟢 higiena · ✅ zrobione
 
 > **Zaplanowane (reconcile 2026-07-29):** pozycje 1–4 (wszystkie 🔴) weszły do zakresu **v1.4** —
 > [`roadmap.md`](roadmap.md), sekcja „Dług techniczny 🔴". Pozostałe (5–15) zostają w
-> [`backlog.md`](backlog.md). Pozycje 1 i 4 zrobione 2026-09-10 → „Zrobione".
-
-### 2. „1 dni temu" w UI 🔴
-
-| Pole         | Treść                                                                                                                                      |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Objaw**    | `${diffD} dni temu` bez odmiany przez liczebnik i bez górnego progu; sąsiedni `pluralProposals` w tym samym pliku odmienia poprawnie.      |
-| **Dowód**    | `apps/dashboard/src/lib/format.ts:11`                                                                                                      |
-| **Powoduje** | Dla 24–35 h UI renderuje „1 dni temu", a pamięć sprzed dwóch lat — „730 dni temu"; widoczne w kolejce, przeglądarce pamięci i osi rewizji. |
-| **Fix**      | `Intl.RelativeTimeFormat('pl', { numeric: 'auto' })` — platformowe, zero zależności, gratis „wczoraj".                                     |
-| **Koszt**    | S                                                                                                                                          |
+> [`backlog.md`](backlog.md). Pozycje 1 i 4 zrobione 2026-09-10, pozycja 2 — 2026-09-27 → „Zrobione".
 
 ### 3. JSON API dashboardu bez walidacji runtime 🔴
 
@@ -179,6 +168,7 @@ Legenda: 🔴 boli teraz · 🟠 będzie boleć · 🟢 higiena · ✅ zrobione
 | §12 udawał kompletną listę configu     | 2026-07-29 | Tabela (~24 z 54 zmiennych) dostała jawną adnotację „niekompletna, kanon to `.env.example` + `config/env.ts`" i wyliczenie pominiętych rodzin.                   |
 | #1 Sesja dashboardu w logach           | 2026-09-10 | `res.headers["set-cookie"]` dopisane do `redact` (config wydzielony do `common/logger-options.ts`); test puszcza prawdziwy request przez `pino-http`.             |
 | #4 `/health` bez limitu                | 2026-09-10 | Wynik probe (DB + TEI, łącznie z in-flight) współdzielony przez 5 s — flood robi ≤1 `SELECT 1` i ≤1 fetch do TEI na okno; throttle odrzucony jako zbędny.        |
+| #2 „1 dni temu" w UI                   | 2026-09-27 | `formatRelativeTime` na `Intl.RelativeTimeFormat('pl', { numeric: 'auto', style: 'short' })`; dni liczone kalendarzowo („wczoraj"), od 30 dni data absolutna.    |
 
 ---
 

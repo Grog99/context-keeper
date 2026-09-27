@@ -87,8 +87,9 @@ tam, tu zakres. Dwie z nich (bezpieczeństwo) domknięte przed upublicznieniem r
   `kind`/`limit`/`from`; zod jest już zależnością. Koszt M.
 - **`/health` bez limitu na publicznym porcie MCP** ✅ — wynik probe współdzielony przez 5 s, flood
   nie dociera do puli `pg` ani TEI (2026-09-10, przed upublicznieniem repo).
-- **`Intl.RelativeTimeFormat` zamiast ręcznej drabinki** ⬜ — `format.ts` renderuje „1 dni temu" dla
-  24–35 h i nie ma górnego progu. Koszt S.
+- **`Intl.RelativeTimeFormat` zamiast ręcznej drabinki** ✅ — `format.ts` renderował „1 dni temu" dla
+  24–35 h i nie miał górnego progu; teraz „wczoraj", dni kalendarzowe, od 30 dni data absolutna
+  (2026-09-27).
 
 ### UI
 
