@@ -3,7 +3,12 @@
 Rzeczy świadomie odłożone poza bieżącą wersję. Nie są porzucone — czekają na decyzję albo na sygnał
 z danych (część jest **warunkowa**). Aktywny plan i to, co robimy teraz → [`roadmap.md`](roadmap.md).
 
-**Aktualizacja:** 2026-07-29 (wieczór) · przy otwarciu v1.4 do [`roadmap.md`](roadmap.md) poszły:
+**Aktualizacja:** 2026-10-03 · sesja planowania v1.5–v1.6: lepszy prune i `conflicts_report` przeszły
+w [`roadmap.md`](roadmap.md) z v1.4 do v1.6 (razem z auto mode); „Auto-allow po N spójnych decyzjach"
+zastąpione przez auto mode per projekt (v1.6) → „Wycięte"; per-user auth zostaje tu jako następny krok
+po tokenie konta z v1.5; dług 🟠 #5 (`GET /api/proposals` bez `LIMIT`) i #7 (audyt per projekt)
+poszły do v1.6 („Nocny job na skali"); doszły token tylko do odczytu i powiadomienia o kolejce.
+2026-07-29 (wieczór) — przy otwarciu v1.4 do [`roadmap.md`](roadmap.md) poszły:
 lepszy prune w nocnym jobie, `conflicts_report`, „tagi i `kind` w kolejce akceptacji" (dawne
 „Brak tagów przy akceptacji") oraz cztery pozycje długu 🔴 (`Set-Cookie` w logach, walidacja
 query-paramów `/api`, throttle na `/health`, `Intl.RelativeTimeFormat`). Wcześniej tego samego dnia
@@ -40,19 +45,26 @@ Legenda: ⬜ przed nami · ⏸️ warunkowe (czeka na sygnał / decyzję)
 - **Tuning retrievalu na realnych danych** ⬜ — top-k, próg relevance, próg dedup, `k` RRF, chunking
   (PRD §11). Karmi się instrumentacją z Pomiarów — pomiar najpierw, dostrojenie potem.
 
-> `conflicts_report` i „lepszy prune w nocnym jobie" → [`roadmap.md`](roadmap.md), v1.4 (dzielą skan
-> i mały model, więc idą razem).
+> `conflicts_report` i „lepszy prune w nocnym jobie" → [`roadmap.md`](roadmap.md), v1.6 (dzielą skan
+> i mały model, więc idą razem; przeniesione z v1.4 razem z auto mode).
 
 ## Kolejka akceptacji
 
-- **Auto-allow po N spójnych decyzjach** ⬜ — `confidence` / `auto_eligible` w schemie już gotowe.
-  Zostaje w backlogu świadomie: rozmiękcza human-gate, czyli rdzeń produktu, a przy jednym recenzencie
-  nie ma jeszcze zmęczenia, które miałby leczyć. Bulk approve/reject — druga połowa dawnego punktu
-  „anti-fatigue kolejki" — poszło do v1.3 ([`roadmap.md`](roadmap.md)), bo nie dotyka gate'u.
+- **Powiadomienia o kolejce** ⬜ — webhook / Slack / mail (np. dzienny digest) o oczekujących
+  propozycjach. Przy wielu repo nikt nie zagląda do dashboardu bez powodu; kolejka bez recenzenta
+  to pamięć, która stoi w miejscu.
+
+> Auto mode per projekt → [`roadmap.md`](roadmap.md), v1.6 (zastąpił dawne „Auto-allow po N
+> spójnych decyzjach", patrz „Wycięte").
 
 ## Auth i dostęp
 
-- **Per-user auth** ⬜ — + kontrola dostępu per-projekt dla człowieka.
+- **Per-user auth** ⬜ — + kontrola dostępu per-projekt dla człowieka. Następny krok po tokenie konta
+  z v1.5: token konta staje się tokenem konkretnego usera, a „wszystkie projekty instancji" zawęża się
+  do projektów, do których user ma dostęp.
+- **Token tylko do odczytu** ⬜ — token (konta albo projektowy) ograniczony do `search_memory` /
+  `get_memory`. Token konta to klucz do wszystkich projektów, a CI czy mniej zaufany agent zwykle
+  potrzebuje tylko odczytu. Naturalnie łączy się z per-user auth (uprawnienia per user/projekt).
 - **Rewokacja sesji** ⬜ — świadomie odłożone w review bezpieczeństwa v1.1.
 - **Pamięć usera** ⬜ — osobny scope na pamięć o konkretnym użytkowniku, widoczną tylko dla niego.
   **Zablokowane na per-user auth** wyżej — bez tożsamości człowieka nie ma czego zawęzić; osobny token
@@ -70,14 +82,11 @@ Legenda: ⬜ przed nami · ⏸️ warunkowe (czeka na sygnał / decyzję)
 Z przeglądu technicznego 2026-07-29 → [`tech-review.md`](tech-review.md) (tam objawy z dowodami
 `plik:linia`, tu jednolinijkowce). Wagi: 🟠 będzie boleć · 🟢 higiena.
 
-> Wszystkie cztery pozycje 🔴 („boli teraz") → [`roadmap.md`](roadmap.md), v1.4.
+> Wszystkie cztery pozycje 🔴 („boli teraz") → zrobione w v1.4. `GET /api/proposals` bez `LIMIT` (#5)
+> i audyt per projekt (#7) → [`roadmap.md`](roadmap.md), v1.6 („Nocny job na skali").
 
-- **`GET /api/proposals` bez `LIMIT`** ⬜ 🟠 — pełne payloady jsonb, polling co 15 s, `?status=approved`
-  zwraca całą historię. Koszt M.
 - **⌘K: debounce + indeks `memories(updated_at)`** ⬜ 🟠 — request na każdy klawisz, `ILIKE '%q%'` i
   sort po nieindeksowanej kolumnie. Koszt M.
-- **Audyt per projekt: GIN na `affected_ids`** ⬜ 🟠 — nieograniczony fetch id pamięci + `&&` bez
-  indeksu; koszt rośnie iloczynem rozmiarów. Koszt M.
 - **Jedna implementacja archiwizacji** ⬜ 🟠 — dwie kopie w `ProposalsService` i `MemoryAdminService`,
   już rozjechane (różne `via`, snapshot bez `eventTime`). Koszt M.
 - **Wspólny zapis embeddingów** ⬜ 🟠 — to samo mapowanie chunków w 7 miejscach, jedno z innym polem.
@@ -107,3 +116,7 @@ wracał co przegląd.
   a koszt to nowe narzędzie MCP wymagające zdyscyplinowanego użycia przez agenta — najgorszy stosunek
   wartości do złożoności w całym backlogu. Score w rankingu jest pluggable, więc temat wraca, jeśli
   pojawi się realny sygnał.
+- **Auto-allow po N spójnych decyzjach** (2026-10-03) — zastąpione przez jawny przełącznik auto mode
+  per projekt (v1.6). Heurystyka „po N zgodnych decyzjach" zgadywała, kiedy recenzent przestał być
+  potrzebny; przy wielu repo właściciel wie to sam i woli zdecydować wprost per projekt. Kolumny
+  `confidence` / `auto_eligible` w schemie zostają — mogą się przydać przy auto mode.

@@ -8,8 +8,8 @@ kontekstu i **proponują** zapisy — ale nic nie trafia do pamięci bez zatwier
 
 Specyfikacja: [`context/prd.md`](context/prd.md) · [`context/tech-stack.md`](context/tech-stack.md) · [`context/design-system.md`](context/design-system.md) · [`context/roadmap.md`](context/roadmap.md)
 
-> **Status:** v1.3 (dostęp i UI) domknięte i wdrożone (dogfooding live). W toku: v1.4 (higiena
-> pamięci i dług techniczny) — patrz [`context/roadmap.md`](context/roadmap.md).
+> **Status:** v1.4 (dług techniczny i UI) domknięte, dogfooding live. W toku: v1.5 (wiele repo
+> bez konfiguracji per projekt) — patrz [`context/roadmap.md`](context/roadmap.md).
 
 ## Najważniejsze funkcje
 

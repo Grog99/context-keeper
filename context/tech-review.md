@@ -32,9 +32,11 @@ Legenda: 🔴 boli teraz · 🟠 będzie boleć · 🟢 higiena · ✅ zrobione
 | 15  | Odwrócona zależność ESLint w dashboardzie        | deps      | 🟢   | S     |
 
 > **Zaplanowane (reconcile 2026-07-29):** pozycje 1–4 (wszystkie 🔴) weszły do zakresu **v1.4** —
-> [`roadmap.md`](roadmap.md), sekcja „Dług techniczny 🔴". Pozostałe (5–15) zostają w
+> [`archive/roadmap-2026-10-03-v1.4-complete.md`](archive/roadmap-2026-10-03-v1.4-complete.md),
+> sekcja „Dług techniczny 🔴" (v1.4 domknięte). Pozostałe (5–15) zostają w
 > [`backlog.md`](backlog.md). Pozycje 1 i 4 zrobione 2026-09-10, pozycje 2 i 3 — 2026-09-27 →
-> „Zrobione".
+> „Zrobione". **Planowanie 2026-10-03:** pozycje 5 i 7 → [`roadmap.md`](roadmap.md), v1.6 („Nocny
+> job na skali") — bolą właśnie przy wielu projektach i auto mode; reszta (6, 8–15) w backlogu.
 
 ### 5. `GET /api/proposals` bez `LIMIT` 🟠
 
