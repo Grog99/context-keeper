@@ -23,6 +23,7 @@ import { Input } from '../components/ui/input';
 import { BulkFailuresDialog } from '../components/BulkFailuresDialog';
 import { DiffView } from '../components/DiffView';
 import { EmptyState } from '../components/EmptyState';
+import { KindMarker } from '../components/KindMarker';
 import { MonoId } from '../components/MonoId';
 import { OriginPath } from '../components/OriginPath';
 import { ProposalActions, type SupersedeCandidate } from '../components/ProposalActions';
@@ -461,6 +462,7 @@ export function QueueScreen() {
                 key={p.id}
                 type={p.type}
                 status="pending"
+                kind={(p.editedPayload ?? p.payload).kind}
                 title={rowTitle(p)}
                 origin={p.origin}
                 scope={p.scope}
@@ -671,6 +673,8 @@ function ProposalDetail({
       ? (beforeMemory?.header ?? effective.memoryId ?? proposal.id)
       : (effective.header ?? beforeMemory?.header ?? `(propozycja ${proposal.id})`);
   const tags = effective.tags ?? beforeMemory?.tags ?? [];
+  // Patch `update` bez zmiany kind i `delete` nie niosą `kind` — wtedy kind pamięci, której dotyczą.
+  const kind = effective.kind ?? beforeMemory?.kind;
 
   return (
     <>
@@ -686,6 +690,16 @@ function ProposalDetail({
           <OriginPath origin={proposal.origin} scope={proposal.scope} projectName={projectName} />
           <Dot />
           <span className="text-faint">type: {proposal.type}</span>
+          {kind && (
+            <>
+              <Dot />
+              {/* Ten sam kolor tożsamości co na wierszu kolejki i w detalu przeglądarki pamięci (§2.3). */}
+              <span className="inline-flex items-center gap-1.5">
+                <KindMarker kind={kind} decorative />
+                <span className="font-mono text-faint">{kind}</span>
+              </span>
+            </>
+          )}
           {tags.length > 0 && (
             <>
               <Dot />

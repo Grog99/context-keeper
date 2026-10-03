@@ -41,21 +41,10 @@ describe('ProposalsController — bulk approve/reject (roadmap v1.3, "Bulk appro
     expect(result).toBe(RESULT);
   });
 
-  it('POST bulk-approve z brakującym body przekazuje ids=undefined (walidację koperty robi ProposalsService.normalizeBulkIds)', async () => {
-    let captured: unknown;
-    const controller = new ProposalsController(
-      fakeProposalsService({
-        bulkApprove: async (ids) => {
-          captured = ids;
-          return RESULT;
-        },
-      }),
-    );
-
-    await controller.bulkApprove(undefined as unknown as { ids: string[] });
-
-    expect(captured).toBeUndefined();
-  });
+  // "POST bulk-approve z brakującym body" przeniesione na `dashboard-validation.http.spec.ts` —
+  // od tech-review #3 (roadmap v1.4) `bulkApproveBody` wymaga `ids` na poziomie kształtu
+  // (`ZodValidationPipe`), więc brakujące body jest teraz 400 `validation_error` (pipe), nie
+  // `ids: undefined` przekazane dalej do `normalizeBulkIds`.
 
   it('POST bulk-reject przekazuje {ids, reason} + {actor: DASHBOARD_ACTOR} do ProposalsService.bulkReject', async () => {
     let captured: { ids: unknown; options: BulkRejectOptions } | undefined;

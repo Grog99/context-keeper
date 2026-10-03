@@ -318,7 +318,7 @@ Bazujemy na shadcn (kopiowane do repo → pełna kontrola). Poniżej — bazowe 
 
 **`MonoId`** — `mem_…`/`ck_…`/`rev_…` w mono `text-xs`, klik = kopiuj (toast). Token zawsze maskowany poza jednorazowym reveal.
 
-**`ProposalRow`** — wiersz kolejki `h-12`: `[StatusChip] [type ikona] Header (truncate) … [OriginPath] [tagi ≤2 + „+N"] [czas rel.]`. Stale → dodatkowy `danger` badge po prawej. Hover `surface-muted`, aktywny `accent-subtle` + lewy pasek `2px` iris.
+**`ProposalRow`** — wiersz kolejki `h-12`: `[StatusChip] [KindMarker] [type ikona] Header (truncate) … [OriginPath] [tagi ≤2 + „+N"] [czas rel.]`. Stale → dodatkowy `danger` badge po prawej. Hover `surface-muted`, aktywny `accent-subtle` + lewy pasek `2px` iris. `kind` (v1.4) tymi samymi kanałami co wiersz pamięci (§2.3): `KindGutter` przy lewej krawędzi (ustępuje paskowi zaznaczenia) + `KindMarker`; propozycja bez `kind` w payloadzie (patch `update` bez zmiany kind, `delete`) dostaje pusty slot 22px, żeby tytuły się nie rozjeżdżały.
 
 **`DiffView`** — **zależny od `type`** (FR-D1). Najbardziej produktowy komponent:
 
@@ -417,7 +417,7 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
   wiersz — pierwszy toggle'uje zaznaczenie, drugi otwiera podgląd); `QueueBulkBar` pod paskiem filtrów,
   WYŁĄCZNIE gdy zaznaczenie niepuste — licznik + „Zatwierdź (N)"/„Odrzuć (N)"/„Anuluj zaznaczenie".
   Badge stale widoczny na wierszu.
-- **Prawa:** header + `OriginPath` + tagi; `DedupHint` (jeśli jest); Tabs `Diff`/`Metadane`/`Rewizje`; sticky `ProposalActions`.
+- **Prawa:** header + `OriginPath` + `type` + `kind` (`KindMarker` + nazwa, v1.4; dla `update`/`delete` bez `kind` w payloadzie — kind pamięci, której dotyczą) + tagi; `DedupHint` (jeśli jest); Tabs `Diff`/`Metadane`/`Rewizje`; sticky `ProposalActions`.
 - **Stany specjalne:** `stale` → primary disabled + alert danger z powodem; `edit-before-approve` → header/body stają się edytowalne inline, akcja zmienia się na „Zatwierdź z edycją" (badge „approved with edits"). Bulk (roadmap v1.3): potwierdzenie przez `AlertDialog` (ostrzeżenie o `stale` dla approve, wspólne pole `reason` dla reject); po operacji sukcesy znikają z zaznaczenia, porażki zostają zaznaczone i widoczne przez „Szczegóły" na toaście (`BulkFailuresDialog`, id + kod + komunikat).
 - **Klawiatura:** `j/k` nawigacja, `A/R/E`, `S` zamiennik, `x` zaznacz/odznacz (bulk, roadmap v1.3 — `A`/`R` świadomie zostają jednoelementowe, bulk zawsze wymaga jawnego kliknięcia), `Enter` otwiera, `/` search.
 

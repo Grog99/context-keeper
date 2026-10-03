@@ -101,17 +101,10 @@ describe('MemoriesController — hard-purge endpoints (roadmap v1.1)', () => {
     expect(result).toBe(RESULT);
   });
 
-  it('POST :id/purge z brakującym body traktuje reason jako pusty string (walidację robi PurgeService)', async () => {
-    let captured: PurgeOptions | undefined;
-    const controller = new MemoriesController(
-      unusedMemoryAdmin(),
-      fakePurge({ captureOptions: (_id, options) => (captured = options) }),
-    );
-
-    await controller.purge('mem_1', undefined as unknown as { reason: string });
-
-    expect(captured).toEqual({ reason: '', actor: DASHBOARD_ACTOR });
-  });
+  // "POST :id/purge z brakującym body" przeniesione na `dashboard-validation.http.spec.ts` —
+  // od tech-review #3 (roadmap v1.4) `purgeBody` wymaga `reason` na poziomie kształtu, więc
+  // brakujące body jest teraz 400 `validation_error` (pipe), nie `reason: ''` (kontroler już
+  // nie ma fallbacku `body?.reason ?? ''`).
 });
 
 describe('MemoriesController — relations endpoints (roadmap v1.2, "memory-relations + 1-hop graph boost")', () => {
@@ -151,41 +144,11 @@ describe('MemoriesController — relations endpoints (roadmap v1.2, "memory-rela
     expect(result).toEqual({ id: 'rel_created' });
   });
 
-  it('POST :id/relations z nieznanym type odrzuca PRZED wejściem w serwis jako ToolError(validation_error)', async () => {
-    let called = false;
-    const controller = new MemoriesController(
-      fakeMemoryAdmin({
-        createRelation: async (_input) => {
-          called = true;
-          return { id: 'rel_created' };
-        },
-      }),
-      fakePurge({}),
-    );
-
-    await expect(
-      controller.createRelation('mem_1', { toId: 'mem_2', type: 'bogus' as unknown as CreateRelationInput['type'] }),
-    ).rejects.toMatchObject({ code: 'validation_error' });
-    expect(called).toBe(false);
-  });
-
-  it('POST :id/relations z brakującym toId odrzuca PRZED wejściem w serwis jako ToolError(validation_error)', async () => {
-    let called = false;
-    const controller = new MemoriesController(
-      fakeMemoryAdmin({
-        createRelation: async (_input) => {
-          called = true;
-          return { id: 'rel_created' };
-        },
-      }),
-      fakePurge({}),
-    );
-
-    await expect(
-      controller.createRelation('mem_1', { toId: undefined as unknown as string, type: 'caused_by' }),
-    ).rejects.toMatchObject({ code: 'validation_error' });
-    expect(called).toBe(false);
-  });
+  // "POST :id/relations z nieznanym type" / "z brakującym toId" przeniesione na
+  // `dashboard-validation.http.spec.ts` — od tech-review #3 (roadmap v1.4) walidacja `toId`/`type`
+  // żyje w `ZodValidationPipe` (`createRelationBody`, `dashboard.schemas.ts`), nie inline w
+  // kontrolerze; wywołanie metody kontrolera BEZPOŚREDNIO (jak tutaj) omija pipe'y Nesta, więc
+  // te dwa case'y muszą być sprawdzone przez prawdziwy request HTTP.
 
   it('DELETE :id/relations/:relationId woła memoryAdmin.removeRelation(relationId) i zwraca {ok:true}', async () => {
     let captured: string | undefined;

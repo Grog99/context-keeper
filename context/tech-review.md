@@ -19,7 +19,6 @@ Legenda: 🔴 boli teraz · 🟠 będzie boleć · 🟢 higiena · ✅ zrobione
 
 | #   | Ustalenie                                        | Wymiar    | Waga | Koszt |
 | --- | ------------------------------------------------ | --------- | ---- | ----- |
-| 3   | JSON API dashboardu bez walidacji runtime        | ops       | 🔴   | M     |
 | 5   | `GET /api/proposals` bez `LIMIT`                 | dane      | 🟠   | M     |
 | 6   | ⌘K: request na każdy klawisz + brak indeksu      | dane      | 🟠   | M     |
 | 7   | Filtr projektu w Audycie: brak GIN i brak limitu | dane      | 🟠   | M     |
@@ -34,17 +33,8 @@ Legenda: 🔴 boli teraz · 🟠 będzie boleć · 🟢 higiena · ✅ zrobione
 
 > **Zaplanowane (reconcile 2026-07-29):** pozycje 1–4 (wszystkie 🔴) weszły do zakresu **v1.4** —
 > [`roadmap.md`](roadmap.md), sekcja „Dług techniczny 🔴". Pozostałe (5–15) zostają w
-> [`backlog.md`](backlog.md). Pozycje 1 i 4 zrobione 2026-09-10, pozycja 2 — 2026-09-27 → „Zrobione".
-
-### 3. JSON API dashboardu bez walidacji runtime 🔴
-
-| Pole         | Treść                                                                                                                                                           |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Objaw**    | `@Query()` w kontrolerach to czysta asercja typu TS; powierzchnia MCP jest walidowana zodem, bliźniacza `/api` nie jest wcale.                                  |
-| **Dowód**    | `apps/server/src/dashboard/memories.controller.ts:46`, `apps/server/src/dashboard/audit.controller.ts:30`, diagnoza w komentarzu `memories.controller.ts:86`    |
-| **Powoduje** | `?kind=bogus` dolatuje do enuma Postgresa (500 zamiast 400), `?limit=abc` daje `LIMIT NaN`, `?from=wczoraj` — `Invalid Date`; SPA dostaje `code === undefined`. |
-| **Fix**      | `ZodValidationPipe` rzucający `ToolError('validation_error')`, który `DashboardErrorFilter` już mapuje na 400 — zod jest zależnością.                           |
-| **Koszt**    | M                                                                                                                                                               |
+> [`backlog.md`](backlog.md). Pozycje 1 i 4 zrobione 2026-09-10, pozycje 2 i 3 — 2026-09-27 →
+> „Zrobione".
 
 ### 5. `GET /api/proposals` bez `LIMIT` 🟠
 
@@ -160,15 +150,16 @@ Legenda: 🔴 boli teraz · 🟠 będzie boleć · 🟢 higiena · ✅ zrobione
 
 ## Zrobione
 
-| Ustalenie                              | Data       | Co zrobiono                                                                                                                                                      |
-| -------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Dryf kontraktu `save_memory` w kanonie | 2026-07-29 | §5 opisywał `(header, body, tags)` i „agent tylko tworzy", §4 — `event` jako human-only; przepisane wraz z formułą hasha i komentarzem w `db/schema/enums.ts:3`. |
-| Enumy statusów niepełne w §4           | 2026-07-29 | Dopisane `memories.purged` i `proposals.withdrawn` z „kto je ustawia" i ostrzeżeniem, że predykat „wszystko poza `approved`" jest niepoprawny.                   |
-| Relacje opisane jako forward-compat    | 2026-07-29 | `memory_relations` i graph boost wyprowadzone z §4-forward-compat i §13 do właściwego §4; §6 dostał brakujący krok „post-fuzja: age-decay × graph boost".        |
-| §12 udawał kompletną listę configu     | 2026-07-29 | Tabela (~24 z 54 zmiennych) dostała jawną adnotację „niekompletna, kanon to `.env.example` + `config/env.ts`" i wyliczenie pominiętych rodzin.                   |
-| #1 Sesja dashboardu w logach           | 2026-09-10 | `res.headers["set-cookie"]` dopisane do `redact` (config wydzielony do `common/logger-options.ts`); test puszcza prawdziwy request przez `pino-http`.             |
-| #4 `/health` bez limitu                | 2026-09-10 | Wynik probe (DB + TEI, łącznie z in-flight) współdzielony przez 5 s — flood robi ≤1 `SELECT 1` i ≤1 fetch do TEI na okno; throttle odrzucony jako zbędny.        |
-| #2 „1 dni temu" w UI                   | 2026-09-27 | `formatRelativeTime` na `Intl.RelativeTimeFormat('pl', { numeric: 'auto', style: 'short' })`; dni liczone kalendarzowo („wczoraj"), od 30 dni data absolutna.    |
+| Ustalenie                                    | Data       | Co zrobiono                                                                                                                                                                                                                                                                                             |
+| -------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dryf kontraktu `save_memory` w kanonie       | 2026-07-29 | §5 opisywał `(header, body, tags)` i „agent tylko tworzy", §4 — `event` jako human-only; przepisane wraz z formułą hasha i komentarzem w `db/schema/enums.ts:3`.                                                                                                                                        |
+| Enumy statusów niepełne w §4                 | 2026-07-29 | Dopisane `memories.purged` i `proposals.withdrawn` z „kto je ustawia" i ostrzeżeniem, że predykat „wszystko poza `approved`" jest niepoprawny.                                                                                                                                                          |
+| Relacje opisane jako forward-compat          | 2026-07-29 | `memory_relations` i graph boost wyprowadzone z §4-forward-compat i §13 do właściwego §4; §6 dostał brakujący krok „post-fuzja: age-decay × graph boost".                                                                                                                                               |
+| §12 udawał kompletną listę configu           | 2026-07-29 | Tabela (~24 z 54 zmiennych) dostała jawną adnotację „niekompletna, kanon to `.env.example` + `config/env.ts`" i wyliczenie pominiętych rodzin.                                                                                                                                                          |
+| #1 Sesja dashboardu w logach                 | 2026-09-10 | `res.headers["set-cookie"]` dopisane do `redact` (config wydzielony do `common/logger-options.ts`); test puszcza prawdziwy request przez `pino-http`.                                                                                                                                                   |
+| #4 `/health` bez limitu                      | 2026-09-10 | Wynik probe (DB + TEI, łącznie z in-flight) współdzielony przez 5 s — flood robi ≤1 `SELECT 1` i ≤1 fetch do TEI na okno; throttle odrzucony jako zbędny.                                                                                                                                               |
+| #2 „1 dni temu" w UI                         | 2026-09-27 | `formatRelativeTime` na `Intl.RelativeTimeFormat('pl', { numeric: 'auto', style: 'short' })`; dni liczone kalendarzowo („wczoraj"), od 30 dni data absolutna.                                                                                                                                           |
+| #3 JSON API dashboardu bez walidacji runtime | 2026-09-27 | `ZodValidationPipe` (`common/zod-validation.pipe.ts`) + schematy w `dashboard/dashboard.schemas.ts`, dołożony na KAŻDYM `@Query()`/`@Param()`/`@Body()` w `dashboard/*.controller.ts` (enumy z `db/schema/enums.ts`, nigdy ręczne literały); `AuthController` celowo pominięty (throttle-przed-hasłem). |
 
 ---
 

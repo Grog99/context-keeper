@@ -1,12 +1,12 @@
 import { Controller, Get, Query, UseFilters, UseGuards } from '@nestjs/common';
-import { ToolError } from '../common/errors';
 import type { ProposalBucketRow, SearchBucketRow, UsageBucket } from '../usage/usage.service';
 import { UsageService } from '../usage/usage.service';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { CsrfGuard } from './auth/csrf.guard';
 import { SessionGuard } from './auth/session.guard';
+import { type UsageQuery, usageQuery } from './dashboard.schemas';
 import { DashboardErrorFilter } from './dashboard-error.filter';
 
-const VALID_BUCKETS: readonly UsageBucket[] = ['day', 'hour'];
 const DEFAULT_RANGE_DAYS = 30;
 const DAY_MS = 24 * 60 * 60_000;
 
@@ -54,6 +54,10 @@ function zeroResultRate(searches: number, zeroResult: number): number {
  * (`edit` = approved-with-edits, podzbiór accepted — §5(f)). Guardy DOKŁADNIE jak `MetricsController`
  * (kontroler-scoped, `SessionGuard`+`CsrfGuard`, NIGDY globalne — `/mcp` nie może dostać nowego
  * globalnego guarda).
+ *
+ * Walidacja query (tech-review #3, roadmap v1.4) — `usageQuery` (`dashboard.schemas.ts`) zastępuje
+ * `parseBucket`/`parseDate` inline: `bucket` z `USAGE_BUCKETS`, `from`/`to` jako `Date`. Domyślny
+ * bucket/zakres (`day`, ostatnie 30 dni) zostają TUTAJ, w kontrolerze — nie są kształtem wejścia.
  */
 @Controller('api/metrics/usage')
 @UseGuards(SessionGuard, CsrfGuard)
@@ -63,18 +67,15 @@ export class UsageMetricsController {
 
   @Get()
   async get(
-    @Query('from') fromRaw?: string,
-    @Query('to') toRaw?: string,
-    @Query('bucket') bucketRaw?: string,
-    @Query('projectId') projectId?: string,
+    @Query(new ZodValidationPipe(usageQuery)) query: UsageQuery = {},
   ): Promise<UsageMetricsDto> {
-    const bucket = this.parseBucket(bucketRaw);
-    const to = this.parseDate('to', toRaw) ?? new Date();
-    const from = this.parseDate('from', fromRaw) ?? new Date(to.getTime() - DEFAULT_RANGE_DAYS * DAY_MS);
+    const bucket = query.bucket ?? 'day';
+    const to = query.to ?? new Date();
+    const from = query.from ?? new Date(to.getTime() - DEFAULT_RANGE_DAYS * DAY_MS);
 
     const [searchRows, proposalRows] = await Promise.all([
-      this.usage.searchSeries({ from, to, bucket, projectId }),
-      this.usage.proposalOutcomeSeries({ from, to, bucket, projectId }),
+      this.usage.searchSeries({ from, to, bucket, projectId: query.projectId }),
+      this.usage.proposalOutcomeSeries({ from, to, bucket, projectId: query.projectId }),
     ]);
 
     const searchSeries = this.shapeSearchSeries(searchRows);
@@ -85,24 +86,6 @@ export class UsageMetricsController {
       searchTotals: this.sumSearchTotals(searchSeries),
       proposalSeries: this.shapeProposalSeries(proposalRows),
     };
-  }
-
-  /** Whitelist server-side (plan §2 krok 8) — `date_trunc`-owalna wartość, nigdy dowolny string z query. */
-  private parseBucket(raw: string | undefined): UsageBucket {
-    if (raw === undefined) return 'day';
-    if (!VALID_BUCKETS.includes(raw as UsageBucket)) {
-      throw new ToolError('validation_error', `bucket musi być jednym z: ${VALID_BUCKETS.join(', ')}`);
-    }
-    return raw as UsageBucket;
-  }
-
-  private parseDate(field: 'from' | 'to', raw: string | undefined): Date | undefined {
-    if (raw === undefined || raw === '') return undefined;
-    const parsed = new Date(raw);
-    if (Number.isNaN(parsed.getTime())) {
-      throw new ToolError('validation_error', `${field}: nieprawidłowa data ISO — "${raw}"`);
-    }
-    return parsed;
   }
 
   /** Kształtuje surowe wiersze `(projectId, projectName, ts, …)` w serie per projekt (plan §2 krok 8

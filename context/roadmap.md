@@ -83,8 +83,9 @@ tam, tu zakres. Dwie z nich (bezpieczeństwo) domknięte przed upublicznieniem r
 
 - **`Set-Cookie` sesji w logach produkcyjnych** ✅ — `res.headers["set-cookie"]` w `redact` pino
   (2026-09-10, przed upublicznieniem repo).
-- **Walidacja runtime query-paramów `/api`** ⬜ — gołe `@Query()` dają 500 zamiast 400 przy złym
-  `kind`/`limit`/`from`; zod jest już zależnością. Koszt M.
+- **Walidacja runtime query-paramów `/api`** ✅ — `ZodValidationPipe` (`common/zod-validation.pipe.ts`)
+  + schematy w `dashboard/dashboard.schemas.ts`, dołożony per-argument na KAŻDYM `@Query()`/
+  `@Param()`/`@Body()` całego `dashboard/*.controller.ts` (2026-09-27).
 - **`/health` bez limitu na publicznym porcie MCP** ✅ — wynik probe współdzielony przez 5 s, flood
   nie dociera do puli `pg` ani TEI (2026-09-10, przed upublicznieniem repo).
 - **`Intl.RelativeTimeFormat` zamiast ręcznej drabinki** ✅ — `format.ts` renderował „1 dni temu" dla
@@ -93,9 +94,11 @@ tam, tu zakres. Dwie z nich (bezpieczeństwo) domknięte przed upublicznieniem r
 
 ### UI
 
-- **Tagi i `kind` w kolejce akceptacji** ⬜ — recenzent podejmuje decyzję bez dwóch pól, które
+- **Tagi i `kind` w kolejce akceptacji** ✅ — recenzent podejmuje decyzję bez dwóch pól, które
   propozycja niesie: nie widzi tagów ani rodzaju wpisu. Domyka serię „kolejka pokazuje to, co
-  zatwierdzasz", zaczętą w v1.3 wyświetleniem `event_time`. (z backlogu)
+  zatwierdzasz", zaczętą w v1.3 wyświetleniem `event_time`. (z backlogu) — 2026-09-27: tagi
+  okazały się już renderowane (wiersz + detal), doszedł `kind` (`KindGutter` + `KindMarker` w
+  `ProposalRow`, `KindMarker` + nazwa w pasku metadanych detalu); API bez zmian.
 
 ## Backlog ⬜
 

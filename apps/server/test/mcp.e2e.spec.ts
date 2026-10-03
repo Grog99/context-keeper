@@ -15,6 +15,7 @@ import type { AppModule as AppModuleType } from '../src/app.module';
 import { DB, type Database } from '../src/db/db.tokens';
 import * as schema from '../src/db/schema';
 import { auditLog, projectTokens, proposals, searchEvents } from '../src/db/schema';
+import { memoryKind, relationType } from '../src/db/schema/enums';
 import { MemoryAdminService } from '../src/memory/memory-admin.service';
 import { MemoryService } from '../src/memory/memory.service';
 import { ProjectsService } from '../src/projects/projects.service';
@@ -196,8 +197,30 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
         'supersedes',
         'tags',
       ]);
+      // tech-review #3 (roadmap v1.4, Q4 resolved) — `mcp-server.factory.ts` czyta
+      // `memoryKind.enumValues`/`relationType.enumValues` bezpośrednio (bez ręcznie przepisanych
+      // literałów), więc `tools/list` MUSI zgadzać się bajt-w-bajt (te same wartości, ta sama
+      // kolejność) z `db/schema/enums.ts` — jedno źródło prawdy.
       const kindProp = props.kind as { enum?: string[] };
-      expect(kindProp.enum).toEqual(expect.arrayContaining(['fact', 'document', 'event']));
+      expect(kindProp.enum).toEqual(memoryKind.enumValues);
+
+      const relationsProp = props.relations as { items?: { properties?: Record<string, unknown> } };
+      const relationTypeProp = relationsProp.items?.properties?.type as { enum?: string[] };
+      expect(relationTypeProp.enum).toEqual(relationType.enumValues);
+    } finally {
+      await transport.close();
+    }
+  });
+
+  it('search_memory eksponuje kind z tego samego enuma co save_memory (memoryKind.enumValues, roadmap v1.4 Q4)', async () => {
+    const { client, transport } = newClient(token);
+    await client.connect(transport);
+    try {
+      const tools = await client.listTools();
+      const search = tools.tools.find((t) => t.name === 'search_memory')!;
+      const props = (search.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
+      const kindProp = props.kind as { enum?: string[] };
+      expect(kindProp.enum).toEqual(memoryKind.enumValues);
     } finally {
       await transport.close();
     }

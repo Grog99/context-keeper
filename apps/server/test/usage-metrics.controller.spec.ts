@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { ToolError } from '../src/common/errors';
 import { UsageMetricsController } from '../src/dashboard/usage-metrics.controller';
 import type { ProposalBucketRow, SearchBucketRow, UsageSeriesFilter } from '../src/usage/usage.service';
 import type { UsageService } from '../src/usage/usage.service';
@@ -33,17 +32,11 @@ describe('UsageMetricsController — walidacja query + kształtowanie serii (roa
     expect(spanDays).toBeCloseTo(30, 1);
   });
 
-  it('bucket spoza whitelisty ("week") rzuca ToolError(validation_error)', async () => {
-    const controller = new UsageMetricsController(fakeUsage({}));
-    await expect(controller.get(undefined, undefined, 'week')).rejects.toMatchObject({
-      code: 'validation_error',
-    });
-  });
-
-  it('nieprawidłowa data ISO w "from" rzuca ToolError(validation_error)', async () => {
-    const controller = new UsageMetricsController(fakeUsage({}));
-    await expect(controller.get('nie-jest-data', undefined)).rejects.toBeInstanceOf(ToolError);
-  });
+  // "bucket spoza whitelisty" / "nieprawidłowa data ISO" przeniesione na
+  // `dashboard-validation.http.spec.ts` — od tech-review #3 (roadmap v1.4) ta walidacja żyje w
+  // `ZodValidationPipe` (`usageQuery`, `dashboard.schemas.ts`), nie w `parseBucket`/`parseDate`
+  // inline; `controller.get(query)` teraz przyjmuje już sparsowany `UsageQuery`, więc wywołanie
+  // metody BEZPOŚREDNIO (jak tutaj) omija pipe'y Nesta.
 
   it('shapeSearchSeries: sumuje buckety per projekt, zeroResultRate liczony z sum (nie ze średniej per-bucket)', async () => {
     const rows: SearchBucketRow[] = [

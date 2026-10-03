@@ -13,6 +13,12 @@ export interface LogAuditInput {
   metadata?: Record<string, unknown>;
 }
 
+/** Domyślny/maks. `limit` dla `GET /api/audit` (tech-review #3, roadmap v1.4, Q2 — bez zmiany
+ * zachowania: 1..500, domyślnie 100). Jedno źródło prawdy dla kontrolera (`ZodValidationPipe`,
+ * `dashboard.schemas.ts`) i tego serwisu, zamiast literału powielonego w obu miejscach. */
+export const AUDIT_QUERY_DEFAULT_LIMIT = 100;
+export const AUDIT_QUERY_MAX_LIMIT = 500;
+
 export interface AuditQueryFilter {
   eventType?: AuditEventType;
   from?: Date;
@@ -77,7 +83,7 @@ export class AuditService {
       .from(auditLog)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .orderBy(desc(auditLog.createdAt))
-      .limit(filter.limit ?? 100);
+      .limit(filter.limit ?? AUDIT_QUERY_DEFAULT_LIMIT);
   }
 
   async latestByEventType(eventType: AuditEventType): Promise<AuditLogRow | null> {
