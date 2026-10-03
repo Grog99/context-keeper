@@ -1,14 +1,26 @@
-/** §11 design-systemu: "Czas: relatywny + absolutny w tooltipie". */
+const relativeTimeFormat = new Intl.RelativeTimeFormat('pl', { numeric: 'auto', style: 'short' });
+
+/** Od tylu dni kalendarzowych wstecz relatywny czas przestaje nieść informację („73 dni temu") —
+ * pokazujemy datę absolutną. */
+const RELATIVE_TIME_MAX_DAYS = 30;
+
+/** §11 design-systemu: "Czas: relatywny + absolutny w tooltipie". Odmianę i „wczoraj"/„przedwczoraj"
+ * daje `Intl.RelativeTimeFormat`; dni liczymy KALENDARZOWO w strefie lokalnej (nie jako 24 h), żeby
+ * „wczoraj" znaczyło wczoraj. Powyżej `RELATIVE_TIME_MAX_DAYS` — data absolutna. */
 export function formatRelativeTime(iso: string, now: Date = new Date()): string {
-  const diffSec = Math.round((now.getTime() - new Date(iso).getTime()) / 1000);
+  const then = new Date(iso);
+  const diffSec = Math.floor((now.getTime() - then.getTime()) / 1000);
   if (diffSec < 5) return 'przed chwilą';
-  if (diffSec < 60) return `${diffSec}s temu`;
-  const diffMin = Math.round(diffSec / 60);
-  if (diffMin < 60) return `${diffMin} min temu`;
-  const diffH = Math.round(diffMin / 60);
-  if (diffH < 24) return `${diffH} godz. temu`;
-  const diffD = Math.round(diffH / 24);
-  return `${diffD} dni temu`;
+  if (diffSec < 60) return relativeTimeFormat.format(-diffSec, 'second');
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return relativeTimeFormat.format(-diffMin, 'minute');
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return relativeTimeFormat.format(-diffH, 'hour');
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  // Math.round, nie floor: doba ze zmianą czasu (DST) ma 23 albo 25 h.
+  const diffDays = Math.round((startOfDay(now) - startOfDay(then)) / 86_400_000);
+  if (diffDays < RELATIVE_TIME_MAX_DAYS) return relativeTimeFormat.format(-diffDays, 'day');
+  return then.toLocaleDateString('pl-PL', { dateStyle: 'medium' });
 }
 
 export function formatAbsoluteTime(iso: string): string {
