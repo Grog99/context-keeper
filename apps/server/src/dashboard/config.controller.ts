@@ -1,8 +1,10 @@
-import { Controller, Get, UseFilters, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseFilters, UseGuards } from '@nestjs/common';
 import { AppConfigService } from '../config/config.service';
 import { HEADER_MAX_LEN } from '../memory/validation';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { CsrfGuard } from './auth/csrf.guard';
 import { SessionGuard } from './auth/session.guard';
+import { emptyQuery } from './dashboard.schemas';
 import { DashboardErrorFilter } from './dashboard-error.filter';
 
 export interface DashboardLimits {
@@ -23,6 +25,9 @@ export interface DashboardLimits {
  * (`BODY_MAX_FACT`/`BODY_MAX_DOCUMENT` są env-configurable, §Ryzyka planu "Human-create...
  * header/body counters"), a frontend nie ma innego sposobu poznania ich niż zapytać serwer —
  * stąd ten mały, czysto odczytowy dodatek do API M1 (dozwolony w brief, gdy M1 czegoś nie pokrywa).
+ *
+ * Walidacja query (tech-review #3, roadmap v1.4, Q1 resolved "strict everywhere") — endpoint nie
+ * przyjmuje żadnych filtrów, ale nieznany klucz query dalej jest 400, nie ciche zignorowanie.
  */
 @Controller('api/config')
 @UseGuards(SessionGuard, CsrfGuard)
@@ -31,7 +36,7 @@ export class ConfigController {
   constructor(private readonly config: AppConfigService) {}
 
   @Get()
-  get(): DashboardLimits {
+  get(@Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never>): DashboardLimits {
     return {
       headerMaxLen: HEADER_MAX_LEN,
       bodyMaxFact: this.config.get('BODY_MAX_FACT'),

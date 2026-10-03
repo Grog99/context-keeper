@@ -83,8 +83,9 @@ tam, tu zakres. Dwie z nich (bezpieczeństwo) domknięte przed upublicznieniem r
 
 - **`Set-Cookie` sesji w logach produkcyjnych** ✅ — `res.headers["set-cookie"]` w `redact` pino
   (2026-09-10, przed upublicznieniem repo).
-- **Walidacja runtime query-paramów `/api`** ⬜ — gołe `@Query()` dają 500 zamiast 400 przy złym
-  `kind`/`limit`/`from`; zod jest już zależnością. Koszt M.
+- **Walidacja runtime query-paramów `/api`** ✅ — `ZodValidationPipe` (`common/zod-validation.pipe.ts`)
+  + schematy w `dashboard/dashboard.schemas.ts`, dołożony per-argument na KAŻDYM `@Query()`/
+  `@Param()`/`@Body()` całego `dashboard/*.controller.ts` (2026-09-27).
 - **`/health` bez limitu na publicznym porcie MCP** ✅ — wynik probe współdzielony przez 5 s, flood
   nie dociera do puli `pg` ani TEI (2026-09-10, przed upublicznieniem repo).
 - **`Intl.RelativeTimeFormat` zamiast ręcznej drabinki** ⬜ — `format.ts` renderuje „1 dni temu" dla

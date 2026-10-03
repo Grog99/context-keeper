@@ -1,11 +1,13 @@
-import { Controller, Get, Inject, UseFilters, UseGuards } from '@nestjs/common';
+import { Controller, Get, Inject, Query, UseFilters, UseGuards } from '@nestjs/common';
 import { eq, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { DB, type Database } from '../db/db.tokens';
 import { proposals } from '../db/schema';
 import { EmbeddingService } from '../embeddings/embedding.service';
+import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { CsrfGuard } from './auth/csrf.guard';
 import { SessionGuard } from './auth/session.guard';
+import { emptyQuery } from './dashboard.schemas';
 import { DashboardErrorFilter } from './dashboard-error.filter';
 
 const SECRET_BLOCKED_WINDOW_MS = 24 * 60 * 60_000;
@@ -26,6 +28,9 @@ export interface DashboardMetrics {
  * FR-D7 Metryki / health strip (§9.0 design-systemu, P1/P7). `GET /api/projects` (istniejący
  * kontroler) podwójnie służy jako lista dla `ContextSwitcher` — bez osobnego `/api/context`
  * (plan explicitnie dopuszcza tę opcję).
+ *
+ * Walidacja query (tech-review #3, roadmap v1.4, Q1 resolved "strict everywhere") — endpoint nie
+ * przyjmuje żadnych filtrów, ale nieznany klucz query dalej jest 400, nie ciche zignorowanie.
  */
 @Controller('api/metrics')
 @UseGuards(SessionGuard, CsrfGuard)
@@ -38,7 +43,9 @@ export class MetricsController {
   ) {}
 
   @Get()
-  async get(): Promise<DashboardMetrics> {
+  async get(
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never> = {},
+  ): Promise<DashboardMetrics> {
     const [queueDepthRow] = await this.db
       .select({ count: sql<number>`count(*)::int` })
       .from(proposals)

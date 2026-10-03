@@ -4,7 +4,10 @@ import { generateId, ID_PREFIX } from '../common/ids';
 import { DB, type Database } from '../db/db.tokens';
 import { projects, proposals, searchEvents } from '../db/schema';
 
-export type UsageBucket = 'day' | 'hour';
+/** Jedno źródło prawdy dla `bucket` (tech-review #3, roadmap v1.4) — `ZodValidationPipe`
+ * (`dashboard.schemas.ts`) waliduje query po tej samej liście, zamiast po ręcznie przepisanej. */
+export const USAGE_BUCKETS = ['day', 'hour'] as const;
+export type UsageBucket = (typeof USAGE_BUCKETS)[number];
 
 /**
  * Zwraca `date_trunc('day'|'hour', column, 'UTC')` jako fragment SQL z jednostką wklejoną literalnie
