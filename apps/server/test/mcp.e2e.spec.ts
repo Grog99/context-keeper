@@ -12,6 +12,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { desc, eq, sql } from 'drizzle-orm';
 import type { AppModule as AppModuleType } from '../src/app.module';
+import type { ToolErrorEnvelope } from '../src/common/errors';
 import { DB, type Database } from '../src/db/db.tokens';
 import * as schema from '../src/db/schema';
 import { auditLog, projectTokens, proposals, searchEvents } from '../src/db/schema';
@@ -732,7 +733,7 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
       return { status: res.status, body: await res.text() };
     }
 
-    function envelopeOf(res: unknown): { code: string; message: string; details?: { projects?: Array<{ slug: string; name: string }> } } {
+    function envelopeOf(res: unknown): ToolErrorEnvelope {
       return JSON.parse(textOf(res as CallToolResult));
     }
 
@@ -862,7 +863,7 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
       await client.connect(transport); // HTTP 200 — brak nagłówka NIE jest błędem transportu
       try {
         const { tools } = await client.listTools();
-        expect(tools.map((t) => t.name).sort()).toEqual(['get_memory', 'save_memory', 'search_memory']); // B: 5
+        expect(tools.map((t) => t.name).sort()).toEqual(['get_memory', 'save_memory', 'search_memory']); // TODO(v1.5-B): 5 narzędzi
 
         const before = await countRows();
 

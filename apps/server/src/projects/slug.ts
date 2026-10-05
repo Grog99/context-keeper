@@ -4,9 +4,11 @@ import { ToolError } from '../common/errors';
  * Slug projektu (roadmap v1.5, "Wskazanie projektu nagłówkiem" — ticket #16): stabilny, czytelny
  * identyfikator wpisywany do commitowanego `.mcp.json` (`X-Context-Keeper-Project: <slug>`).
  * Format `^[a-z0-9]+(-[a-z0-9]+)*$`, 2–48 znaków, unikalny w `projects` (indeks + CHECK w migracji
- * 0012). Moduł jest CZYSTY (bez DB) — te same reguły transliteracji/kolizji ma SQL-owy backfill w
- * `db/migrations/0012_account_tokens_project_slug.sql`; zmieniając jedno, zmień drugie (test
- * `project-slug.migration.spec.ts` pilnuje parytetu na wspólnej tabeli przypadków).
+ * 0012). Moduł jest CZYSTY (bez DB) — reguły transliteracji/kolizji żyją w TRZECH miejscach:
+ * tutaj, w SQL-owym backfillu `db/migrations/0012_account_tokens_project_slug.sql` oraz w
+ * `test/helpers/project-slug-fixtures.ts` (`assignSlugsLikeMigration`). Zmieniając jedno, zmień
+ * pozostałe — wspólne fixture'y (`project-slug.spec.ts` + `project-slug.migration.spec.ts`)
+ * pilnują parytetu.
  */
 
 export const PROJECT_SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;

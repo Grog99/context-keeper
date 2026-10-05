@@ -108,7 +108,7 @@ export function createMcpServer(
     throw await buildScopeError(auth.project, deps.projects);
   }
 
-  // B: if (auth.tokenScope === 'account') register list_projects/create_project here — the tool set
+  // TODO(v1.5-B): if (auth.tokenScope === 'account') register list_projects/create_project here — the tool set
   // may depend on the token type (never on the header or the DB state, ticket #13).
 
   server.registerTool(

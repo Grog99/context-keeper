@@ -17,7 +17,6 @@ import { assignSlugsLikeMigration, MIGRATION_SLUG_FIXTURES } from './helpers/pro
  */
 describe('migracja 0012 — backfill slugów na niepustej bazie (testcontainers)', () => {
   const REAL_FOLDER = resolve(process.cwd(), 'src/db/migrations');
-  const PRE_0012_COUNT = 12; // 0000…0011
 
   let container: StartedPostgreSqlContainer;
   let pool: Pool;
@@ -28,14 +27,16 @@ describe('migracja 0012 — backfill slugów na niepustej bazie (testcontainers)
     pool = new Pool({ connectionString: container.getConnectionUri() });
     const db = drizzle(pool);
 
-    // Katalog „sprzed 0012": pierwsze 12 plików SQL + journal obcięty do 12 wpisów.
+    // Katalog „sprzed 0012": pliki SQL wpisów 0000…0011 + journal obcięty do tych wpisów.
     tmpFolder = mkdtempSync(join(tmpdir(), 'ck-mig-pre0012-'));
     mkdirSync(join(tmpFolder, 'meta'));
     const journal = JSON.parse(readFileSync(join(REAL_FOLDER, 'meta', '_journal.json'), 'utf8')) as {
       entries: Array<{ tag: string }>;
     };
-    expect(journal.entries.length).toBeGreaterThan(PRE_0012_COUNT); // 0012 istnieje w prawdziwym journalu
-    const pre = journal.entries.slice(0, PRE_0012_COUNT);
+    // Liczba wpisów sprzed 0012 = indeks wpisu 0012_* w prawdziwym journalu (bez magicznej stałej).
+    const idx0012 = journal.entries.findIndex((e) => e.tag.startsWith('0012_'));
+    if (idx0012 < 0) throw new Error('Brak wpisu 0012_* w meta/_journal.json — test migracji 0012 nie ma czego sprawdzać.');
+    const pre = journal.entries.slice(0, idx0012);
     for (const entry of pre) copyFileSync(join(REAL_FOLDER, `${entry.tag}.sql`), join(tmpFolder, `${entry.tag}.sql`));
     writeFileSync(join(tmpFolder, 'meta', '_journal.json'), JSON.stringify({ ...journal, entries: pre }, null, 2));
 

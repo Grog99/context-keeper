@@ -6,7 +6,7 @@ import { generateToken, hashToken, isValidTokenFormat } from '../common/tokens';
 import { AppConfigService } from '../config/config.service';
 import { DB, type Database, type Tx } from '../db/db.tokens';
 import { memories, projectTokens, projects, proposals, type ProjectRow, type ProjectTokenRow } from '../db/schema';
-import { resolveProjectScope, type ProjectResolution } from './project-scope';
+import { resolveProjectScope, tokenScopeOf, type ProjectResolution, type TokenScope } from './project-scope';
 import {
   assertValidProjectSlug,
   fallbackSlug,
@@ -137,6 +137,12 @@ function isUniqueViolation(err: unknown, constraint?: string): boolean {
   return false;
 }
 
+/** Nazwa partial unique indexu etykiety aktywnych tokenów dla danego scope'u — `23505` na innym
+ * indeksie (np. `project_tokens_token_hash_key`) NIE jest kolizją etykiety i ma propagować. */
+function labelIndexFor(scope: TokenScope): string {
+  return scope === 'account' ? 'project_tokens_account_label_active_key' : 'project_tokens_project_label_active_key';
+}
+
 @Injectable()
 export class ProjectsService {
   private readonly logger = new Logger(ProjectsService.name);
@@ -239,7 +245,7 @@ export class ProjectsService {
         .returning();
       return { token, tokenRow: toPublicTokenRow(tokenRow) };
     } catch (err) {
-      if (isUniqueViolation(err)) {
+      if (isUniqueViolation(err, labelIndexFor('account'))) {
         throw this.labelCollisionError(normalizedLabel, 'account');
       }
       throw err;
@@ -283,8 +289,8 @@ export class ProjectsService {
         .returning();
       return { token, tokenRow: toPublicTokenRow(tokenRow) };
     } catch (err) {
-      if (isUniqueViolation(err)) {
-        throw this.labelCollisionError(normalizedLabel);
+      if (isUniqueViolation(err, labelIndexFor('project'))) {
+        throw this.labelCollisionError(normalizedLabel, 'project');
       }
       throw err;
     }
@@ -331,7 +337,7 @@ export class ProjectsService {
         await this.assertLabelAvailable(oldRow.projectId, label, undefined, tx);
       }
 
-      const scope = oldRow.projectId === null ? 'account' : 'project';
+      const scope = tokenScopeOf(oldRow.projectId);
       const token = generateToken();
       try {
         const [newRow] = await tx
@@ -350,7 +356,7 @@ export class ProjectsService {
           previousTokenRow: toPublicTokenRow(oldRow),
         };
       } catch (err) {
-        if (isUniqueViolation(err)) {
+        if (isUniqueViolation(err, labelIndexFor(scope))) {
           throw this.labelCollisionError(label, scope);
         }
         throw err;
@@ -405,8 +411,9 @@ export class ProjectsService {
         .returning();
       return toPublicTokenRow(updated);
     } catch (err) {
-      if (isUniqueViolation(err)) {
-        throw this.labelCollisionError(normalizedLabel, existing.projectId === null ? 'account' : 'project');
+      const scope = tokenScopeOf(existing.projectId);
+      if (isUniqueViolation(err, labelIndexFor(scope))) {
+        throw this.labelCollisionError(normalizedLabel, scope);
       }
       throw err;
     }
@@ -630,7 +637,7 @@ export class ProjectsService {
   /** Kolizja etykiety wśród aktywnych tokenów projektu (albo tokenów konta) — komunikat dzielony
    * przez `createToken`/`createAccountToken`/`rotateToken`/`updateTokenLabel` (pre-check ORAZ
    * `23505` fallback). */
-  private labelCollisionError(label: string, scope: 'project' | 'account' = 'project'): ToolError {
+  private labelCollisionError(label: string, scope: TokenScope): ToolError {
     return new ToolError(
       'validation_error',
       scope === 'account'
@@ -658,7 +665,7 @@ export class ProjectsService {
       .where(and(...conditions))
       .limit(1);
     if (existing) {
-      throw this.labelCollisionError(label, projectId === null ? 'account' : 'project');
+      throw this.labelCollisionError(label, tokenScopeOf(projectId));
     }
   }
 }

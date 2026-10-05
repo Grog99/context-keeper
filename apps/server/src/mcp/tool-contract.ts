@@ -2,6 +2,11 @@
  * Warstwa 1 kontraktu z agentem (§14 tech-stack) — opisy narzędzi MCP niesione przez `tools/list`.
  * Źródło/baseline wersjonowane w `context/mcp-tool-contract.md` — te stringi są z nim
  * zsynchronizowane 1:1 (ręcznie; przy zmianie jednego zaktualizuj drugie).
+ *
+ * WYJĄTEK (stan na 2026-10-06): akapit błędów scope'u projektu v1.5 (`PROJECT_SCOPE_ERRORS`) oraz
+ * zaktualizowane brzmienie o HTTP 429 (limit per token, per narzędzie, per projekt) NIE są jeszcze
+ * w `context/mcp-tool-contract.md`. Synchronizacja kanonu to osobny krok po zakresach A/B/C
+ * (ticket `.tickets/multi-repo-contract.md`, "Poza zakresem").
  */
 
 /**

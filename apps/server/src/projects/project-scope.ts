@@ -12,12 +12,17 @@ import type { ProjectContext, PublicTokenRow } from './projects.service';
  * niepodłączony i agent nie dostałby wskazówki — dlatego tool-level.
  */
 
-/** Nagłówek wskazujący projekt (Node lowercase'uje nazwy nagłówków w `req.headers`). */
-export const PROJECT_HEADER = 'x-context-keeper-project';
 /** Postać do wyświetlania (szablony `.mcp.json`, opisy narzędzi). */
 export const PROJECT_HEADER_NAME = 'X-Context-Keeper-Project';
+/** Nagłówek wskazujący projekt (Node lowercase'uje nazwy nagłówków w `req.headers`). */
+export const PROJECT_HEADER = PROJECT_HEADER_NAME.toLowerCase();
 
 export type TokenScope = 'project' | 'account';
+
+/** Scope tokenu z jego `project_id`: `NULL` = token konta, inaczej projektowy (jedyne miejsce tej reguły). */
+export function tokenScopeOf(projectId: string | null): TokenScope {
+  return projectId === null ? 'account' : 'project';
+}
 
 export type ProjectResolution =
   | { status: 'resolved'; context: ProjectContext }

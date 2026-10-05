@@ -1,3 +1,4 @@
+-- Operacyjnie nieodwracalna po utworzeniu pierwszego tokenu konta: powrót do `project_id NOT NULL` wymagałby usunięcia tokenów konta.
 ALTER TABLE "project_tokens" ALTER COLUMN "project_id" DROP NOT NULL;--> statement-breakpoint
 -- Kolumna `slug` najpierw NULLABLE: generowane przez drizzle-kit `ADD COLUMN ... NOT NULL` wywaliłoby
 -- migrację na niepustej tabeli `projects`. Kolejność jest load-bearing (precedens: 0010): dodaj

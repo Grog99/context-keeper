@@ -5,14 +5,15 @@ import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ToolError } from '../src/common/errors';
 import { hashToken } from '../src/common/tokens';
 import { AppConfigService } from '../src/config/config.service';
 import { envSchema } from '../src/config/env';
 import type { Database } from '../src/db/db.tokens';
 import * as schema from '../src/db/schema';
 import { projectTokens } from '../src/db/schema';
-import { ProjectsService } from '../src/projects/projects.service';
+import { DEFAULT_TOKEN_LABEL, ProjectsService, type CreatedProject } from '../src/projects/projects.service';
 import { effectiveTokenStatus } from '../src/projects/token-status';
 
 function sleep(ms: number): Promise<void> {
@@ -121,7 +122,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
       const { project, token, tokenRow } = await service.createProject('acme');
       expect(project.id).toMatch(/^proj_/);
       expect(token).toMatch(/^ck_/);
-      expect(tokenRow.label).toBe('default');
+      expect(tokenRow.label).toBe(DEFAULT_TOKEN_LABEL);
       expect(tokenRow.status).toBe('active');
       expect((tokenRow as Record<string, unknown>).tokenHash).toBeUndefined();
 
@@ -544,16 +545,16 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
     });
 
     it('jawny slug jest normalizowany (trim + lowercase) i zapisany bez sufiksu', async () => {
-      const { project } = await service.createProject('Explicit Slug Project', 'default', { slug: ' Explicit-Slug ' });
+      const { project } = await service.createProject('Explicit Slug Project', DEFAULT_TOKEN_LABEL, { slug: ' Explicit-Slug ' });
       expect(project.slug).toBe('explicit-slug');
     });
 
     it('jawny slug: zły format -> validation_error; zajęty -> validation_error (bez sufiksu)', async () => {
-      await expect(service.createProject('x1', 'default', { slug: 'Bad Slug' })).rejects.toMatchObject({
+      await expect(service.createProject('x1', DEFAULT_TOKEN_LABEL, { slug: 'Bad Slug' })).rejects.toMatchObject({
         code: 'validation_error',
       });
-      await service.createProject('Taken Slug Owner', 'default', { slug: 'taken-slug' });
-      await expect(service.createProject('x2', 'default', { slug: 'TAKEN-SLUG ' })).rejects.toMatchObject({
+      await service.createProject('Taken Slug Owner', DEFAULT_TOKEN_LABEL, { slug: 'taken-slug' });
+      await expect(service.createProject('x2', DEFAULT_TOKEN_LABEL, { slug: 'TAKEN-SLUG ' })).rejects.toMatchObject({
         code: 'validation_error',
       });
     });
@@ -575,9 +576,10 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
       );
     });
 
-    it('drizzle owija 23505 w DrizzleQueryError z przyczyną w cause; jawny slug zajęty w wyścigu -> validation_error', async () => {
+    it('guard: drizzle 0.45 owija 23505 w błąd bez code na wierzchu, z przyczyną (code + constraint) w cause', async () => {
       // Dokładnie ta ścieżka, którą obsługuje isUniqueViolation: insert przez drizzle łamiący
-      // projects_slug_key rzuca DrizzleQueryError BEZ code/constraint (te są w err.cause).
+      // projects_slug_key rzuca DrizzleQueryError BEZ code/constraint (te są w err.cause). Gdyby
+      // kolejna wersja drizzle to zmieniła, ten test (a nie cicho wyścig o slug) wskaże przyczynę.
       const { project } = await service.createProject('Drizzle Wrap Probe');
       const wrapped = await db
         .insert(schema.projects)
@@ -589,16 +591,25 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
       expect(wrapped).toBeInstanceOf(Error);
       expect(wrapped).not.toHaveProperty('code');
       expect(wrapped).toMatchObject({ cause: { code: '23505', constraint: 'projects_slug_key' } });
+    });
 
-      // Jawny slug przechodzi pre-check (symulujemy wyścig: slug zajęty dopiero po pre-checku) —
-      // wstawiamy konflikt przez spy na assertSlugAvailable.
-      const spy = vi.spyOn(service, 'assertSlugAvailable').mockResolvedValueOnce(undefined);
-      try {
-        await expect(
-          service.createProject('Explicit Race Loser', 'default', { slug: project.slug }),
-        ).rejects.toMatchObject({ code: 'validation_error' });
-      } finally {
-        spy.mockRestore();
+    it('równoległe createProject z tym samym jawnym slugiem: dokładnie jeden sukces, reszta validation_error', async () => {
+      // Bez spy'a na serwisie: część wywołań odpadnie na pre-checku, część dopiero na 23505 przy
+      // insercie — obie ścieżki muszą kończyć się tym samym ToolError('validation_error').
+      const slug = 'explicit-slug-race';
+      const results = await Promise.allSettled(
+        Array.from({ length: 5 }, (_, i) =>
+          service.createProject(`Explicit Race ${i}`, DEFAULT_TOKEN_LABEL, { slug }),
+        ),
+      );
+      const fulfilled = results.filter((r): r is PromiseFulfilledResult<CreatedProject> => r.status === 'fulfilled');
+      const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+      expect(fulfilled).toHaveLength(1);
+      expect(fulfilled[0].value.project.slug).toBe(slug);
+      expect(rejected).toHaveLength(4);
+      for (const r of rejected) {
+        expect(r.reason).toBeInstanceOf(ToolError);
+        expect((r.reason as ToolError).code).toBe('validation_error');
       }
     });
 

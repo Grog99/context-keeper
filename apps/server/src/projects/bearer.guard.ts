@@ -1,6 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { extractBearer } from '../common/tokens';
-import { PROJECT_HEADER, readProjectHeader, type RequestWithMcpAuth } from './project-scope';
+import { PROJECT_HEADER, readProjectHeader, tokenScopeOf, type RequestWithMcpAuth } from './project-scope';
 import { ProjectsService } from './projects.service';
 
 type RequestLike = Pick<RequestWithMcpAuth, 'headers' | 'mcpAuth'>;
@@ -43,7 +43,7 @@ export class BearerGuard implements CanActivate {
       tokenId: lookup.token.id,
       tokenLabel: lookup.token.label,
       // Scope rozstrzyga `projectId` tokena, nie "brak wiersza projektu" (FK cascade).
-      tokenScope: lookup.token.projectId === null ? 'account' : 'project',
+      tokenScope: tokenScopeOf(lookup.token.projectId),
       project: await this.projects.resolveProjectScope(lookup, readProjectHeader(req.headers[PROJECT_HEADER])),
     };
     // Best-effort, fire-and-forget (§D3 planu) — NIGDY awaited na ścieżce auth. Oba typy tokenów.
