@@ -4,6 +4,20 @@
  * zsynchronizowane 1:1 (ręcznie; przy zmianie jednego zaktualizuj drugie).
  */
 
+/**
+ * Wspólny akapit o wyborze projektu i kodach błędów scope'u (roadmap v1.5, ticket #12/#21) —
+ * doklejany do opisów WSZYSTKICH narzędzi pamięci. Celowo bez wzmianek o list_projects /
+ * create_project (te narzędzia dochodzą w osobnym zakresie i dostaną własne opisy).
+ */
+const PROJECT_SCOPE_ERRORS = `Project selection: your project is determined by your token. A project token is bound to one project. An account token works in any project of the instance — the project is then chosen by the \`X-Context-Keeper-Project: <slug>\` HTTP header configured in the repo's .mcp.json (a lowercase slug such as "my-project").
+
+Project errors (returned as a tool error {code, message, details?} — the MCP connection itself stays healthy):
+- project_required: you use an account token but no project header was sent. \`details.projects\` lists every project as {slug, name}; pick the right slug and add the header to .mcp.json.
+- project_not_found: the header slug matches no project. \`details.projects\` lists the known projects; fix the header value (the usual cause is a typo).
+- project_pending: the slug belongs to a project that is still awaiting human approval — try again after a human approves it.
+- project_forbidden: your token is bound to a different project than the header names. Remove the header or use a token valid for that project; no list is returned.
+These are configuration problems, not transient failures: do not retry them in a loop — fix the configuration or tell the user.`;
+
 export const SEARCH_MEMORY_DESCRIPTION = `Search the shared project memory (facts and documents) using hybrid full-text + semantic search.
 
 Scope: your project's memories plus "global" memories (shared across all projects). You cannot see other projects' memories.
@@ -12,13 +26,17 @@ Returns headers only, ranked by relevance — call get_memory(id) to fetch the f
 
 If semantic search is temporarily unavailable, results silently fall back to full-text only — no error, no signal that this happened.
 
-If nothing relevant is found, an empty list is returned — this is not an error.`;
+If nothing relevant is found, an empty list is returned — this is not an error.
+
+${PROJECT_SCOPE_ERRORS}`;
 
 export const GET_MEMORY_DESCRIPTION = `Fetch the full body of a single memory by id (as returned by search_memory or save_memory).
 
 Enforces the same project+global scope as search_memory: an id outside your scope returns the exact same not_found error as an id that does not exist at all. This is by design — no information is leaked about whether an id belongs to another project's memory.
 
-Errors: {code: "not_found", message} when the id is unknown or out of scope for your token.`;
+Errors: {code: "not_found", message} when the id is unknown or out of scope for your token.
+
+${PROJECT_SCOPE_ERRORS}`;
 
 export const SAVE_MEMORY_DESCRIPTION = `Propose a new memory (a fact, a document, or an event) to add to the shared project memory.
 
@@ -50,4 +68,6 @@ Return value: {id, status}.
 
 None of these statuses are errors. This is fire-and-forget — do not poll or wait for approval.
 
-If a call is rejected with HTTP 429 (rate limited, per project and per tool), back off and retry after the indicated delay — do not retry in a tight loop.`;
+If a call is rejected with HTTP 429 (rate limited per token and per tool — with an account token, separately for each project), back off and retry after the indicated delay — do not retry in a tight loop.
+
+${PROJECT_SCOPE_ERRORS}`;

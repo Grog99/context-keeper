@@ -2,7 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { AppConfigService } from '../config/config.service';
 import { sweepStaleBuckets, TokenBucket } from './token-bucket';
 
-export type RateLimitedTool = 'search_memory' | 'get_memory' | 'save_memory';
+/** Narzędzia pamięci — klucz limitu `tokenId:projectId` (osobny budżet per projekt, v1.5 #17). */
+export const MEMORY_TOOLS = ['search_memory', 'get_memory', 'save_memory'] as const;
+/** Narzędzia tokenu konta (scope B) — klucz `tokenId:account`, bez projektu. */
+export const ACCOUNT_TOOLS = ['list_projects', 'create_project'] as const;
+
+export type RateLimitedTool = (typeof MEMORY_TOOLS)[number] | (typeof ACCOUNT_TOOLS)[number];
 
 export type ConsumeResult = { allowed: true } | { allowed: false; retryAfterSec: number };
 
@@ -22,6 +27,11 @@ const SWEEP_THRESHOLD = 10_000;
  * (drugi agent = połowa przepustowości pierwszego). Per-token matchuje udokumentowany zamiar
  * (tech-stack §10 "Rate limiting per-token") i jest drobnym zyskiem bezpieczeństwa — skompromitowany
  * token dostaje WŁASNY bucket, nie może zagłodzić legalnego agenta tym samym projektem.
+ *
+ * v1.5 (ticket #17): wołający składa `key` przez `rateLimitKey` (`mcp-rate-limit.guard.ts`) —
+ * `tokenId:projectId` dla narzędzi pamięci (token konta ma osobny budżet w każdym projekcie, więc
+ * zapętlony agent w jednym repo nie dusi pozostałych), `tokenId:account` dla narzędzi konta. Dla
+ * tokenu projektowego (projekt stały) zachowanie bez zmian. Okno jest wyłącznie per-minutowe.
  */
 @Injectable()
 export class RateLimiterService {
@@ -51,6 +61,10 @@ export class RateLimiterService {
         return this.config.get('RATE_LIMIT_SEARCH_PER_MIN');
       case 'get_memory':
         return this.config.get('RATE_LIMIT_GET_PER_MIN');
+      case 'list_projects':
+        return this.config.get('RATE_LIMIT_SEARCH_PER_MIN');
+      case 'create_project':
+        return this.config.get('RATE_LIMIT_CREATE_PROJECT_PER_MIN');
     }
   }
 }

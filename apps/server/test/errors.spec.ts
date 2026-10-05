@@ -8,6 +8,22 @@ describe('ToolError / toErrorEnvelope (taksonomia błędów, §5 tech-stack)', (
     expect(toErrorEnvelope(err)).toEqual({ code: 'not_found', message: 'Pamięć nie istnieje: mem_xyz' });
   });
 
+  it('dokłada details do koperty tylko gdy obecne', () => {
+    const projects = [{ slug: 'alpha', name: 'Alpha' }];
+    const withDetails = new ToolError('project_required', 'x', { projects });
+    expect(toErrorEnvelope(withDetails)).toEqual({ code: 'project_required', message: 'x', details: { projects } });
+
+    const without = toErrorEnvelope(new ToolError('project_forbidden', 'y'));
+    expect(without).toEqual({ code: 'project_forbidden', message: 'y' });
+    expect('details' in without).toBe(false);
+  });
+
+  it("cztery kody scope'u projektu (v1.5)", () => {
+    for (const code of ['project_required', 'project_not_found', 'project_pending', 'project_forbidden'] as const) {
+      expect(new ToolError(code, 'x').code).toBe(code);
+    }
+  });
+
   it('trzy stabilne kody z taksonomii', () => {
     expect(new ToolError('validation_error', 'x').code).toBe('validation_error');
     expect(new ToolError('secret_blocked', 'x').code).toBe('secret_blocked');

@@ -1,10 +1,11 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { ToolError, toErrorEnvelope } from '../common/errors';
+import { ToolError, toErrorEnvelope, type ProjectSummary } from '../common/errors';
 import { memoryKind, relationType } from '../db/schema/enums';
 import { MemoryService } from '../memory/memory.service';
-import type { ProjectContext } from '../projects/projects.service';
+import { PROJECT_HEADER_NAME, type McpAuthContext, type ProjectResolution } from '../projects/project-scope';
+import type { ProjectContext, ProjectsService } from '../projects/projects.service';
 import { GET_MEMORY_DESCRIPTION, SAVE_MEMORY_DESCRIPTION, SEARCH_MEMORY_DESCRIPTION } from './tool-contract';
 
 function jsonResult(data: unknown): CallToolResult {
@@ -29,13 +30,86 @@ async function runTool(fn: () => Promise<CallToolResult>): Promise<CallToolResul
   }
 }
 
+/** Ile slugów wymieniamy w `message` błędu scope'u — pełna lista zawsze w `details.projects`. */
+const MESSAGE_SLUG_CAP = 20;
+
+function describeProjects(projects: ProjectSummary[]): string {
+  if (projects.length === 0) {
+    return 'There are no projects on this instance yet — a human has to create one in the dashboard.';
+  }
+  const shown = projects.slice(0, MESSAGE_SLUG_CAP).map((p) => p.slug);
+  const more = projects.length - shown.length;
+  return `Known projects: ${shown.join(', ')}${more > 0 ? ` (+${more} more, see details.projects)` : ''}.`;
+}
+
+/**
+ * Błąd tool-level dla projektu nierozwiązanego (roadmap v1.5, ticket #12/#21). Listę projektów
+ * (`details.projects`) pobieramy LENIWIE — wyłącznie tutaj, więc `initialize`/`tools/list` nie kosztują
+ * zapytania do bazy. Anty-probing: `project_forbidden` (token projektowy + obcy nagłówek) ma stały
+ * komunikat, bez `details` i bez echa wartości nagłówka — identyczny niezależnie od istnienia slugu.
+ * Komunikaty są agent-facing (angielski, jak `tool-contract.ts`).
+ */
+async function buildScopeError(
+  unresolved: Extract<ProjectResolution, { status: 'unresolved' }>,
+  projects: Pick<ProjectsService, 'listProjectSummaries'>,
+): Promise<ToolError> {
+  switch (unresolved.reason) {
+    case 'project_required': {
+      const list = await projects.listProjectSummaries();
+      return new ToolError(
+        'project_required',
+        `This account token is not bound to a project. Set the "${PROJECT_HEADER_NAME}: <slug>" header ` +
+          `(in the repo's .mcp.json) to choose the project. ${describeProjects(list)}`,
+        { projects: list },
+      );
+    }
+    case 'project_not_found': {
+      const list = await projects.listProjectSummaries();
+      const what = unresolved.requestedSlug
+        ? `No project with slug "${unresolved.requestedSlug}" exists.`
+        : 'The project slug in the header is malformed (lowercase a-z, digits and single hyphens, 2-48 chars).';
+      return new ToolError(
+        'project_not_found',
+        `${what} Fix the "${PROJECT_HEADER_NAME}" header value. ${describeProjects(list)}`,
+        { projects: list },
+      );
+    }
+    case 'project_pending':
+      return new ToolError(
+        'project_pending',
+        `Project "${unresolved.requestedSlug ?? ''}" is awaiting human approval in the dashboard queue — ` +
+          'memory tools will work once it is approved. This is not retryable right now; do not call in a loop.',
+      );
+    case 'project_forbidden':
+      return new ToolError(
+        'project_forbidden',
+        `This token is bound to a single project and cannot be used with the "${PROJECT_HEADER_NAME}" ` +
+          'header value that was sent. Remove the header, or use a token that is valid for that project.',
+      );
+  }
+}
+
 /**
  * Buduje nowy `McpServer` per-request (transport bezstanowy — §5 tech-stack, decyzja 1).
- * `projectContext` (z `BearerGuard`) domykany w closure: narzędzia widzą scope tokena bez
- * globalnego stanu/mapy sesji.
+ * Kontekst auth (`McpAuthContext` z `BearerGuard`) domykany w closure: narzędzia widzą scope tokena
+ * i stan rozwiązania projektu bez globalnego stanu/mapy sesji. Narzędzia pamięci wołają
+ * `requireProject()` — dla projektu nierozwiązanego rzuca `ToolError` (→ `isError` + koperta
+ * `{code, message, details?}`), nie zostawiając żadnych skutków ubocznych (audyt, `search_events`).
  */
-export function createMcpServer(memory: MemoryService, ctx: ProjectContext): McpServer {
+export function createMcpServer(
+  deps: { memory: MemoryService; projects: Pick<ProjectsService, 'listProjectSummaries'> },
+  auth: McpAuthContext,
+): McpServer {
+  const { memory } = deps;
   const server = new McpServer({ name: 'context-keeper', version: '0.1.0' });
+
+  async function requireProject(): Promise<ProjectContext> {
+    if (auth.project.status === 'resolved') return auth.project.context;
+    throw await buildScopeError(auth.project, deps.projects);
+  }
+
+  // B: if (auth.tokenScope === 'account') register list_projects/create_project here — the tool set
+  // may depend on the token type (never on the header or the DB state, ticket #13).
 
   server.registerTool(
     'search_memory',
@@ -58,6 +132,7 @@ export function createMcpServer(memory: MemoryService, ctx: ProjectContext): Mcp
     },
     async ({ query, tags, kind }) =>
       runTool(async () => {
+        const ctx = await requireProject();
         const results = await memory.search({ query, tags, kind }, ctx);
         return jsonResult(results);
       }),
@@ -73,6 +148,7 @@ export function createMcpServer(memory: MemoryService, ctx: ProjectContext): Mcp
     },
     async ({ id }) =>
       runTool(async () => {
+        const ctx = await requireProject();
         const result = await memory.get(id, ctx);
         return jsonResult(result);
       }),
@@ -138,6 +214,7 @@ export function createMcpServer(memory: MemoryService, ctx: ProjectContext): Mcp
     },
     async ({ header, body, tags, kind, event_time, supersedes, relations }) =>
       runTool(async () => {
+        const ctx = await requireProject();
         const result = await memory.save(
           { header, body, tags, kind, eventTime: event_time, supersedes, relations },
           ctx,

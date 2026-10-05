@@ -15,6 +15,12 @@ const TOOL_STATUS: Record<ToolErrorCode, HttpStatus> = {
   validation_error: HttpStatus.BAD_REQUEST,
   secret_blocked: HttpStatus.UNPROCESSABLE_ENTITY,
   not_found: HttpStatus.NOT_FOUND,
+  // Roadmap v1.5 — kody scope'u projektu (MCP); wymusza je `Record<ToolErrorCode, …>`. Dashboard
+  // sam ich dziś nie rzuca, ale `ToolError` jest współdzielony.
+  project_required: HttpStatus.BAD_REQUEST,
+  project_not_found: HttpStatus.NOT_FOUND,
+  project_pending: HttpStatus.CONFLICT,
+  project_forbidden: HttpStatus.FORBIDDEN,
 };
 
 /** Roadmap v1.1 — hard-purge z dashboardu (`MemoriesController.purge`/`purgePreview`), kontrakt w
@@ -51,6 +57,10 @@ export class DashboardErrorFilter implements ExceptionFilter {
       return;
     }
     const status = TOOL_STATUS[exception.code] ?? HttpStatus.INTERNAL_SERVER_ERROR;
-    res.status(status).json({ code: exception.code, message: exception.message });
+    res.status(status).json({
+      code: exception.code,
+      message: exception.message,
+      ...(exception.details ? { details: exception.details } : {}),
+    });
   }
 }
