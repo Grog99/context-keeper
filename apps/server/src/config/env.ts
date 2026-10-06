@@ -149,6 +149,11 @@ export const envSchema = z
     RATE_LIMIT_SAVE_PER_MIN: z.coerce.number().int().positive().default(20),
     RATE_LIMIT_SEARCH_PER_MIN: z.coerce.number().int().positive().default(120),
     RATE_LIMIT_GET_PER_MIN: z.coerce.number().int().positive().default(240),
+    // `create_project` (roadmap v1.5, narzędzie konta w scope B) — własny, NISKI limit: zakładanie
+    // projektu jest rzadkie, a każde wywołanie to propozycja w kolejce człowieka. Tylko per minutę —
+    // bucket jest sprzątany po 60 s bezczynności (`RateLimiterService`), więc limit godzinny by się
+    // resetował. Backstop przed zaśmieceniem kolejki: unikalność slugu + human-gate.
+    RATE_LIMIT_CREATE_PROJECT_PER_MIN: z.coerce.number().int().positive().default(3),
     // Throttle PRE-AUTH per IP na /mcp — backstop DoS zanim BearerGuard dotknie DB przy każdym
     // (dobrze sformatowanym, ale nieważnym) tokenie. Fidelity per-IP wymaga TRUST_PROXY=true za
     // zaufanym, jedynym proxy-ingres; bez tego degraduje się do coarse limitu per-instancja

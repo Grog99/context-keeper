@@ -85,3 +85,14 @@ describe('resolveDotenvCandidates — fallback na korzeń monorepo', () => {
     expect(resolveDotenvCandidates(undefined)).toEqual(['.env', '../../.env']);
   });
 });
+
+describe('envSchema — RATE_LIMIT_CREATE_PROJECT_PER_MIN (roadmap v1.5)', () => {
+  it('default 3 gdy nieustawione', () => {
+    expect(envSchema.parse({ ...BASE }).RATE_LIMIT_CREATE_PROJECT_PER_MIN).toBe(3);
+  });
+
+  it('parsuje wartość z env (coerce) i odrzuca nie-dodatnią', () => {
+    expect(envSchema.parse({ ...BASE, RATE_LIMIT_CREATE_PROJECT_PER_MIN: '7' }).RATE_LIMIT_CREATE_PROJECT_PER_MIN).toBe(7);
+    expect(() => envSchema.parse({ ...BASE, RATE_LIMIT_CREATE_PROJECT_PER_MIN: '0' })).toThrow();
+  });
+});

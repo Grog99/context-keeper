@@ -70,3 +70,30 @@ describe('DashboardErrorFilter — mapowanie PurgeError na HTTP', () => {
     expect(captured.body).toEqual({ code: 'validation_error', message: 'Invalid input — query.kind: …' });
   });
 });
+
+/** Roadmap v1.5 — kody scope'u projektu muszą mieć status HTTP (`Record<ToolErrorCode, …>`) i
+ * przekazywać `details` w kopercie JSON. */
+describe("DashboardErrorFilter — kody scope'u projektu (v1.5)", () => {
+  const filter = new DashboardErrorFilter();
+
+  it.each([
+    ['project_required', 400],
+    ['project_not_found', 404],
+    ['project_pending', 409],
+    ['project_forbidden', 403],
+  ] as const)('ToolError("%s") -> %i', (code, status) => {
+    const captured: CapturedResponse = {};
+    filter.catch(new ToolError(code, 'm'), hostCapturing(captured));
+
+    expect(captured.statusCode).toBe(status);
+    expect(captured.body).toEqual({ code, message: 'm' });
+  });
+
+  it('przekazuje details w kopercie JSON', () => {
+    const captured: CapturedResponse = {};
+    const projects = [{ slug: 'alpha', name: 'Alpha' }];
+    filter.catch(new ToolError('project_not_found', 'm', { projects }), hostCapturing(captured));
+
+    expect(captured.body).toEqual({ code: 'project_not_found', message: 'm', details: { projects } });
+  });
+});

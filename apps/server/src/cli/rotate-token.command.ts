@@ -23,8 +23,9 @@ export class RotateTokenCommand extends CommandRunner {
       throw new Error('Podaj id tokena: rotate-token <tokenId> (patrz: list-tokens <projectId>)');
     }
     const { tokenRow, previousTokenRow, token } = await this.projects.rotateToken(tokenId);
-    const project = await this.projects.findById(tokenRow.projectId);
-    if (!project) {
+    // Token konta (`projectId === null`, roadmap v1.5) nie ma projektu — reveal bez nazwy projektu.
+    const project = tokenRow.projectId === null ? null : await this.projects.findById(tokenRow.projectId);
+    if (tokenRow.projectId !== null && !project) {
       throw new Error(`Projekt nie istnieje: ${tokenRow.projectId}`);
     }
     printTokenReveal(project, token, 'zrotowany', tokenRow.label, previousTokenRow.expiresAt ?? undefined);

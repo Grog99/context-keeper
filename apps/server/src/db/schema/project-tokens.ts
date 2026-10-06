@@ -31,9 +31,11 @@ export const projectTokens = pgTable(
   'project_tokens',
   {
     id: text('id').primaryKey(), // tok_…
-    projectId: text('project_id')
-      .notNull()
-      .references(() => projects.id, { onDelete: 'cascade' }), // token bez projektu jest bez sensu
+    // NULL = token KONTA (roadmap v1.5, ticket #11): działa w dowolnym projekcie instancji, projekt
+    // wskazuje nagłówek `X-Context-Keeper-Project`. Cykl życia (grace/revoke) i FK z
+    // `search_events.token_id` identyczne jak dla tokenu projektowego. FK z cascade zostaje —
+    // token projektowy znika razem z projektem.
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
     tokenHash: text('token_hash').notNull(),
     label: text('label').notNull(), // atrybucja per-agent (WYMAGANA przy tworzeniu, §token-status.ts)
     status: projectTokenState('status').notNull().default('active'),
@@ -49,6 +51,11 @@ export const projectTokens = pgTable(
     uniqueIndex('project_tokens_project_label_active_key')
       .on(t.projectId, t.label)
       .where(sql`${t.status} = 'active'`),
+    // Tokeny konta: `project_id IS NULL` → NULL-e są w unikalnych indeksach rozłączne, więc powyższy
+    // indeks nie pilnuje ich etykiet; ten partial unique robi to samo dla `(label)` wśród aktywnych.
+    uniqueIndex('project_tokens_account_label_active_key')
+      .on(t.label)
+      .where(sql`${t.projectId} IS NULL AND ${t.status} = 'active'`),
   ],
 );
 

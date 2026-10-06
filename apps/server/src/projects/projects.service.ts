@@ -1,11 +1,19 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, gt, isNotNull, ne, or, sql } from 'drizzle-orm';
-import { ToolError } from '../common/errors';
+import { and, asc, desc, eq, gt, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
+import { ToolError, type ProjectSummary } from '../common/errors';
 import { generateId, ID_PREFIX } from '../common/ids';
 import { generateToken, hashToken, isValidTokenFormat } from '../common/tokens';
 import { AppConfigService } from '../config/config.service';
 import { DB, type Database, type Tx } from '../db/db.tokens';
-import { memories, projectTokens, projects, type ProjectRow, type ProjectTokenRow } from '../db/schema';
+import { memories, projectTokens, projects, proposals, type ProjectRow, type ProjectTokenRow } from '../db/schema';
+import { resolveProjectScope, tokenScopeOf, type ProjectResolution, type TokenScope } from './project-scope';
+import {
+  assertValidProjectSlug,
+  fallbackSlug,
+  normalizeProjectSlugInput,
+  slugifyProjectName,
+  withCollisionSuffix,
+} from './slug';
 import { normalizeTokenLabel } from './token-status';
 
 /** Etykieta pierwszego tokena gdy operator nie poda własnej (`createProject`/CLI/dashboard "Nowy projekt"). */
@@ -88,11 +96,51 @@ function toPublicTokenRow(row: ProjectTokenRow): PublicTokenRow {
   return rest;
 }
 
+/** Wynik `lookupToken`: token + projekt (NULL dla tokenu konta, `project_tokens.project_id IS NULL`).
+ * Scope tokenu rozstrzyga `token.projectId === null`, nie samo "brak wiersza projektu". */
+export interface TokenLookup {
+  token: PublicTokenRow;
+  project: ProjectRow | null;
+}
+
+/** Ile razy `createProject` powtarza całą transakcję po wyścigu o slug (23505 na `projects_slug_key`). */
+const SLUG_RETRY_ATTEMPTS = 5;
+
+/** Kształt błędu `pg` (`DatabaseError`) + `cause` — to, czego szukamy w łańcuchu przyczyn. */
+interface PgErrorLike {
+  code?: unknown;
+  constraint?: unknown;
+  cause?: unknown;
+}
+
+/** Ile poziomów `cause` sprawdzamy (drizzle owija błąd drivera raz; zapas na kolejne owinięcia). */
+const MAX_CAUSE_DEPTH = 4;
+
 /** Postgres `unique_violation` (23505) — fallback dla race na partial unique index
  * `project_tokens_project_label_active_key` gdy dwa równoległe requesty przechodzą pre-check
- * jednocześnie (§createToken/rotateToken/updateTokenLabel). */
-function isUniqueViolation(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === '23505';
+ * jednocześnie (§createToken/rotateToken/updateTokenLabel). `constraint` (opcjonalnie) zawęża do
+ * konkretnego indeksu — np. `projects_slug_key` przy wyścigu o slug.
+ *
+ * drizzle-orm 0.45 rethrowuje KAŻDY błąd drivera jako `DrizzleQueryError` (tylko `query`/`params`/
+ * `cause`, bez `code`/`constraint`), więc oryginalny błąd `pg` siedzi w `err.cause` — stąd przejście
+ * po łańcuchu `cause` zamiast czytania `err.code` wprost. */
+function isUniqueViolation(err: unknown, constraint?: string): boolean {
+  let current: unknown = err;
+  for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth++) {
+    if (typeof current !== 'object' || current === null) return false;
+    const pgErr = current as PgErrorLike;
+    if (pgErr.code === '23505' && (constraint === undefined || pgErr.constraint === constraint)) {
+      return true;
+    }
+    current = pgErr.cause;
+  }
+  return false;
+}
+
+/** Nazwa partial unique indexu etykiety aktywnych tokenów dla danego scope'u — `23505` na innym
+ * indeksie (np. `project_tokens_token_hash_key`) NIE jest kolizją etykiety i ma propagować. */
+function labelIndexFor(scope: TokenScope): string {
+  return scope === 'account' ? 'project_tokens_account_label_active_key' : 'project_tokens_project_label_active_key';
 }
 
 @Injectable()
@@ -118,27 +166,99 @@ export class ProjectsService {
     );
   }
 
-  /** Projekt + pierwszy token, jedna transakcja (atomowe — nigdy projekt bez tokena). */
-  async createProject(name: string, label: string = DEFAULT_TOKEN_LABEL): Promise<CreatedProject> {
+  /**
+   * Projekt + pierwszy token, jedna transakcja (atomowe — nigdy projekt bez tokena; zniesienie tego
+   * niezmiennika dla propozycji `create_project` to osobny krok, ticket #15).
+   *
+   * Slug (roadmap v1.5): bez `opts.slug` wyprowadzany z nazwy (`slugifyProjectName`, fallback
+   * `project-<końcówka id>`) i pierwszy wolny kandydat `-2`, `-3`… (zajęty = istniejący projekt ALBO
+   * oczekująca propozycja `create_project`). Jawny `opts.slug` jest normalizowany (trim + lowercase),
+   * walidowany i NIE dostaje sufiksu — kolizja to `validation_error`. Wyścig o slug (23505 na
+   * `projects_slug_key`) powtarza całą transakcję (po błędzie jest już przerwana), max
+   * `SLUG_RETRY_ATTEMPTS` razy.
+   */
+  async createProject(
+    name: string,
+    label: string = DEFAULT_TOKEN_LABEL,
+    opts?: { slug?: string },
+  ): Promise<CreatedProject> {
     const normalizedLabel = normalizeTokenLabel(label);
+    const projectId = generateId(ID_PREFIX.project);
+    let explicitSlug: string | undefined;
+    if (opts?.slug !== undefined) {
+      explicitSlug = normalizeProjectSlugInput(opts.slug);
+      assertValidProjectSlug(explicitSlug);
+      await this.assertSlugAvailable(explicitSlug);
+    }
+
+    for (let attempt = 1; ; attempt++) {
+      const slug = explicitSlug ?? (await this.pickFreeSlug(name, projectId));
+      const token = generateToken();
+      try {
+        return await this.db.transaction(async (tx) => {
+          const [project] = await tx.insert(projects).values({ id: projectId, name, slug }).returning();
+          const [tokenRow] = await tx
+            .insert(projectTokens)
+            .values({
+              id: generateId(ID_PREFIX.token),
+              projectId: project.id,
+              tokenHash: hashToken(token),
+              label: normalizedLabel,
+              status: 'active',
+            })
+            .returning();
+          return { project, token, tokenRow: toPublicTokenRow(tokenRow) };
+        });
+      } catch (err) {
+        if (isUniqueViolation(err, 'projects_slug_key')) {
+          if (explicitSlug !== undefined) {
+            throw new ToolError('validation_error', `Slug "${slug}" jest już zajęty.`);
+          }
+          if (attempt < SLUG_RETRY_ATTEMPTS) continue;
+        }
+        throw err;
+      }
+    }
+  }
+
+  /**
+   * Token KONTA (roadmap v1.5, ticket #11) — `project_id = NULL`, działa w każdym projekcie
+   * instancji (projekt wskazuje nagłówek). Etykieta wymagana jak dla tokenów projektowych, unikalna
+   * wśród AKTYWNYCH tokenów konta (partial unique `project_tokens_account_label_active_key`).
+   * Tylko poziom serwisu — endpointy `/api` i komenda CLI to osobny zakres (C).
+   */
+  async createAccountToken(label: string): Promise<CreatedToken> {
+    const normalizedLabel = normalizeTokenLabel(label);
+    await this.assertLabelAvailable(null, normalizedLabel);
+
     const token = generateToken();
-    return this.db.transaction(async (tx) => {
-      const [project] = await tx
-        .insert(projects)
-        .values({ id: generateId(ID_PREFIX.project), name })
-        .returning();
-      const [tokenRow] = await tx
+    try {
+      const [tokenRow] = await this.db
         .insert(projectTokens)
         .values({
           id: generateId(ID_PREFIX.token),
-          projectId: project.id,
+          projectId: null,
           tokenHash: hashToken(token),
           label: normalizedLabel,
           status: 'active',
         })
         .returning();
-      return { project, token, tokenRow: toPublicTokenRow(tokenRow) };
-    });
+      return { token, tokenRow: toPublicTokenRow(tokenRow) };
+    } catch (err) {
+      if (isUniqueViolation(err, labelIndexFor('account'))) {
+        throw this.labelCollisionError(normalizedLabel, 'account');
+      }
+      throw err;
+    }
+  }
+
+  /** Tokeny konta, najnowsze pierwsze — jawna projekcja kolumn, NIGDY `token_hash`. */
+  async listAccountTokens(): Promise<PublicTokenRow[]> {
+    return this.db
+      .select(TOKEN_ROW_COLUMNS)
+      .from(projectTokens)
+      .where(isNull(projectTokens.projectId))
+      .orderBy(desc(projectTokens.createdAt));
   }
 
   /**
@@ -169,8 +289,8 @@ export class ProjectsService {
         .returning();
       return { token, tokenRow: toPublicTokenRow(tokenRow) };
     } catch (err) {
-      if (isUniqueViolation(err)) {
-        throw this.labelCollisionError(normalizedLabel);
+      if (isUniqueViolation(err, labelIndexFor('project'))) {
+        throw this.labelCollisionError(normalizedLabel, 'project');
       }
       throw err;
     }
@@ -217,6 +337,7 @@ export class ProjectsService {
         await this.assertLabelAvailable(oldRow.projectId, label, undefined, tx);
       }
 
+      const scope = tokenScopeOf(oldRow.projectId);
       const token = generateToken();
       try {
         const [newRow] = await tx
@@ -235,8 +356,8 @@ export class ProjectsService {
           previousTokenRow: toPublicTokenRow(oldRow),
         };
       } catch (err) {
-        if (isUniqueViolation(err)) {
-          throw this.labelCollisionError(label);
+        if (isUniqueViolation(err, labelIndexFor(scope))) {
+          throw this.labelCollisionError(label, scope);
         }
         throw err;
       }
@@ -290,8 +411,9 @@ export class ProjectsService {
         .returning();
       return toPublicTokenRow(updated);
     } catch (err) {
-      if (isUniqueViolation(err)) {
-        throw this.labelCollisionError(normalizedLabel);
+      const scope = tokenScopeOf(existing.projectId);
+      if (isUniqueViolation(err, labelIndexFor(scope))) {
+        throw this.labelCollisionError(normalizedLabel, scope);
       }
       throw err;
     }
@@ -318,8 +440,11 @@ export class ProjectsService {
         revoked: sql<number>`count(*) FILTER (WHERE ${eq(projectTokens.status, 'revoked')})::int`,
       })
       .from(projectTokens)
+      .where(isNotNull(projectTokens.projectId)) // tokeny konta nie należą do żadnego projektu
       .groupBy(projectTokens.projectId);
-    return new Map(rows.map((r) => [r.projectId, { active: r.active, grace: r.grace, revoked: r.revoked }]));
+    return new Map(
+      rows.map((r) => [r.projectId as string, { active: r.active, grace: r.grace, revoked: r.revoked }]),
+    );
   }
 
   /**
@@ -397,39 +522,139 @@ export class ProjectsService {
   }
 
   /**
-   * Lookup token → (projekt, token) (§10, roadmap v1.3): jeden trafiony indeks po `token_hash`
-   * (SHA-256) + `usableTokenCondition()` w tym samym zapytaniu (JOIN `project_tokens`+`projects`) —
-   * revocation i wygasanie grace są więc synchroniczne z auth, bez osobnego kroku/cache.
-   * Bez constant-time compare (token wysokoentropijny, lookup indeksowany).
+   * Lookup tokenu (§10, roadmap v1.3/v1.5) — główne wejście auth `BearerGuard`: jeden trafiony indeks
+   * po `token_hash` (SHA-256) + `usableTokenCondition()` w tym samym zapytaniu, więc revocation i
+   * wygasanie grace są synchroniczne z auth, bez osobnego kroku/cache. LEFT JOIN `projects`: token
+   * konta (`project_id IS NULL`) zwraca `project: null`. Bez constant-time compare (token
+   * wysokoentropijny, lookup indeksowany).
    */
-  async resolveByToken(token: string): Promise<{ project: ProjectRow; token: PublicTokenRow } | null> {
+  async lookupToken(token: string): Promise<TokenLookup | null> {
     if (!isValidTokenFormat(token)) return null;
     const [row] = await this.db
       .select({ project: projects, token: TOKEN_ROW_COLUMNS })
       .from(projectTokens)
-      .innerJoin(projects, eq(projects.id, projectTokens.projectId))
+      .leftJoin(projects, eq(projects.id, projectTokens.projectId))
       .where(and(eq(projectTokens.tokenHash, hashToken(token)), this.usableTokenCondition()))
       .limit(1);
     return row ?? null;
   }
 
-  /** Kolizja etykiety wśród aktywnych tokenów projektu — komunikat dzielony przez
-   * `createToken`/`rotateToken`/`updateTokenLabel` (pre-check ORAZ `23505` fallback). */
-  private labelCollisionError(label: string): ToolError {
-    return new ToolError(
-      'validation_error',
-      `Etykieta "${label}" jest już użyta przez aktywny token tego projektu.`,
+  /**
+   * Kompatybilny wrapper nad `lookupToken` — TYLKO dla tokenów projektowych (zwraca `null` dla
+   * tokenu konta, który nie ma "swojego" projektu). Sygnatura bez zmian, żeby istniejące testy
+   * (e2e/integration) działały nietknięte. To NIE jest wejście auth — guard używa `lookupToken`.
+   */
+  async resolveByToken(token: string): Promise<{ project: ProjectRow; token: PublicTokenRow } | null> {
+    const found = await this.lookupToken(token);
+    if (!found || found.project === null) return null;
+    return { project: found.project, token: found.token };
+  }
+
+  async findBySlug(slug: string): Promise<ProjectRow | null> {
+    const [row] = await this.db.select().from(projects).where(eq(projects.slug, slug)).limit(1);
+    return row ?? null;
+  }
+
+  /**
+   * Czy slug czeka w oczekującej propozycji `create_project` (scope B). Porównanie `type::text`, a
+   * nie `type = 'create_project'`: zapytanie jest poprawne zarówno PRZED migracją B (wartość enuma
+   * jeszcze nie istnieje — rzutowanie na text nie rzuca na nieznanej etykiecie, w odróżnieniu od
+   * porównania z enumem), jak i po niej. B może przejść na typowane `eq` i partial unique index na
+   * `payload->>'slug'`. B MUSI zapisywać w payloadzie slug ZNORMALIZOWANY (trim + lowercase).
+   */
+  async isSlugPending(slug: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: proposals.id })
+      .from(proposals)
+      .where(
+        and(
+          sql`${proposals.type}::text = 'create_project'`,
+          eq(proposals.status, 'pending'),
+          sql`${proposals.payload}->>'slug' = ${slug}`,
+        ),
+      )
+      .limit(1);
+    return row !== undefined;
+  }
+
+  /**
+   * Slug wolny = nie trzyma go istniejący projekt (poza `excludeProjectId` — edycja własnego slugu)
+   * ani oczekująca propozycja `create_project` (ticket #14, otwarty punkt: domyślnie blokujemy).
+   * Wspólny check dla `createProject`, `create_project` (B) i edycji slugu (C) — `validation_error`.
+   */
+  async assertSlugAvailable(slug: string, opts?: { excludeProjectId?: string }): Promise<void> {
+    const conditions = [eq(projects.slug, slug)];
+    if (opts?.excludeProjectId) conditions.push(ne(projects.id, opts.excludeProjectId));
+    const [existing] = await this.db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(...conditions))
+      .limit(1);
+    if (existing) {
+      throw new ToolError('validation_error', `Slug "${slug}" jest już zajęty przez istniejący projekt.`);
+    }
+    if (await this.isSlugPending(slug)) {
+      throw new ToolError(
+        'validation_error',
+        `Slug "${slug}" jest zarezerwowany przez oczekującą propozycję create_project.`,
+      );
+    }
+  }
+
+  /** `[{slug, name}]` wszystkich projektów instancji (posortowane po slugu) — `details.projects` w
+   * błędach `project_required`/`project_not_found` (wyłącznie dla tokenu konta). */
+  async listProjectSummaries(): Promise<ProjectSummary[]> {
+    return this.db.select({ slug: projects.slug, name: projects.name }).from(projects).orderBy(asc(projects.slug));
+  }
+
+  /** Rozwiązanie scope'u projektu dla żądania MCP (patrz `project-scope.ts`). `slug` = wartość
+   * nagłówka już po `readProjectHeader` (trim + lowercase, pusty → `undefined`). */
+  async resolveProjectScope(lookup: TokenLookup, slug: string | undefined): Promise<ProjectResolution> {
+    return resolveProjectScope(
+      { token: lookup.token, tokenProject: lookup.project, slug },
+      {
+        findBySlug: (s) => this.findBySlug(s),
+        isSlugPending: (s) => this.isSlugPending(s),
+      },
     );
   }
 
+  /** Pierwszy wolny slug dla nowego projektu: baza z nazwy (albo `project-<końcówka id>`), potem
+   * `-2`, `-3`… — pre-check; ostateczną gwarancją jest unikalny indeks (retry w `createProject`). */
+  private async pickFreeSlug(name: string, projectId: string): Promise<string> {
+    const base = slugifyProjectName(name) || fallbackSlug(projectId);
+    let candidate = base;
+    for (let n = 2; await this.isSlugTaken(candidate); n++) {
+      candidate = withCollisionSuffix(base, n);
+    }
+    return candidate;
+  }
+
+  private async isSlugTaken(slug: string): Promise<boolean> {
+    return (await this.findBySlug(slug)) !== null || (await this.isSlugPending(slug));
+  }
+
+  /** Kolizja etykiety wśród aktywnych tokenów projektu (albo tokenów konta) — komunikat dzielony
+   * przez `createToken`/`createAccountToken`/`rotateToken`/`updateTokenLabel` (pre-check ORAZ
+   * `23505` fallback). */
+  private labelCollisionError(label: string, scope: TokenScope): ToolError {
+    return new ToolError(
+      'validation_error',
+      scope === 'account'
+        ? `Etykieta "${label}" jest już użyta przez aktywny token konta.`
+        : `Etykieta "${label}" jest już użyta przez aktywny token tego projektu.`,
+    );
+  }
+
+  /** `projectId === null` → unikalność wśród aktywnych tokenów KONTA (`project_id IS NULL`). */
   private async assertLabelAvailable(
-    projectId: string,
+    projectId: string | null,
     label: string,
     excludeTokenId?: string,
     executor: Database | Tx = this.db,
   ): Promise<void> {
     const conditions = [
-      eq(projectTokens.projectId, projectId),
+      projectId === null ? isNull(projectTokens.projectId) : eq(projectTokens.projectId, projectId),
       eq(projectTokens.label, label),
       eq(projectTokens.status, 'active'),
     ];
@@ -440,7 +665,7 @@ export class ProjectsService {
       .where(and(...conditions))
       .limit(1);
     if (existing) {
-      throw this.labelCollisionError(label);
+      throw this.labelCollisionError(label, tokenScopeOf(projectId));
     }
   }
 }
