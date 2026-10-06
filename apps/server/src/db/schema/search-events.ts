@@ -15,6 +15,12 @@ import { projects } from './projects';
  * `degraded` = zapytanie policzone BEZ ramienia wektorowego (`qvec === null` w `MemoryService.search`,
  * provider embeddingów down/timeout) — wynik 0 przy degradacji nie znaczy "pamięć nie ma treści",
  * więc jest wyłączony z sygnału zero-result rate na ekranie Pomiary.
+ *
+ * `cross_project` = wyszukiwanie z `all_projects: true` (roadmap v1.5, "Wyszukiwanie między
+ * projektami"): zapisywane pod BIEŻĄCYM projektem i tokenem jak zwykłe, ale z flagą. Takie zapytanie
+ * rzadziej daje 0 wyników (przeszukuje całą instancję), więc — jak `degraded` — jest wyłączone z
+ * zero-result rate na ekranie Pomiary (licznik i mianownik); w liczbie wyszukiwań i na wykresie
+ * wolumenu nadal się liczy.
  */
 export const searchEvents = pgTable(
   'search_events',
@@ -31,6 +37,7 @@ export const searchEvents = pgTable(
     tokenId: text('token_id').references(() => projectTokens.id, { onDelete: 'set null' }),
     resultCount: integer('result_count').notNull(),
     degraded: boolean('degraded').notNull().default(false),
+    crossProject: boolean('cross_project').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

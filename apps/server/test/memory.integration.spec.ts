@@ -1352,6 +1352,243 @@ describe('MemoryService (integration, testcontainers)', () => {
     });
   });
 
+  describe('search — cross-project (roadmap v1.5, "Wyszukiwanie między projektami")', () => {
+    // Świeże projekty X (źródło) i Y (pytający). Kontener jest wspólny dla całego pliku, więc każdy
+    // test używa UNIKALNEGO markera — cross widzi pamięć WSZYSTKICH projektów, także z innych describe.
+    let projectX: ProjectContext;
+    let projectY: ProjectContext;
+    let slugX: string;
+
+    beforeAll(async () => {
+      const createdX = await projects.createProject('memory-test-cross-x');
+      projectX = { projectId: createdX.project.id, projectName: createdX.project.name };
+      slugX = createdX.project.slug;
+      const createdY = await projects.createProject('memory-test-cross-y');
+      projectY = { projectId: createdY.project.id, projectName: createdY.project.name };
+    });
+
+    async function lastSearchEvent(projectId: string) {
+      const rows = await db
+        .select()
+        .from(searchEvents)
+        .where(eq(searchEvents.projectId, projectId))
+        .orderBy(desc(searchEvents.createdAt));
+      return rows[0];
+    }
+
+    async function seedRawMemory(values: Partial<typeof schema.memories.$inferInsert>) {
+      const [row] = await db
+        .insert(schema.memories)
+        .values({
+          id: generateId(ID_PREFIX.memory),
+          header: 'Pamięć cross-project',
+          body: 'Treść pamięci testowej (cross-project).',
+          kind: 'fact',
+          tags: [],
+          scope: 'project',
+          status: 'approved',
+          source: 'human',
+          approvedAt: new Date(),
+          ...values,
+        })
+        .returning();
+      return row;
+    }
+
+    it('ramię wektorowe (AC1): trafienie WYŁĄCZNIE semantyczne z projektu X widoczne z Y w cross, niewidoczne w trybie domyślnym', async () => {
+      const provider = new StubEmbeddingProvider('cross-project-vector-model');
+      const { memory: vecMemory } = buildMemoryService(provider);
+
+      const query = 'crossvektorzapytanie01 usluga';
+      provider.register(query, topicVector(1));
+      // Zero wspólnych tokenów z query (FTS go nie znajdzie), wektor IDENTYCZNY z query. Wektor musi być
+      // zarejestrowany PRZED devSeedApproved (ono woła embed() na tekście chunku).
+      const header = 'Notatka zupelnie inna';
+      const body = 'Bez zadnego zwiazku leksykalnego z pytaniem.';
+      provider.register(`${header}\n\n${body}`, topicVector(1));
+      const seeded = await vecMemory.devSeedApproved({
+        header,
+        body,
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectX.projectId,
+      });
+
+      const cross = await vecMemory.search({ query }, projectY, 'all_projects');
+      const hit = cross.find((r) => r.id === seeded.id);
+      expect(hit).toBeDefined();
+      expect(hit!.project).toBe(slugX);
+
+      const normal = await vecMemory.search({ query }, projectY);
+      expect(normal.some((r) => r.id === seeded.id)).toBe(false);
+    });
+
+    it('ramię FTS-only (AC1): provider down -> cross znajduje leksykalne trafienie z X; default nie; search_events degraded+cross', async () => {
+      const throwingProvider = new StubEmbeddingProvider('cross-project-fts-throwing');
+      throwingProvider.throwOnEmbed = true;
+      const { memory: ftsMemory } = buildMemoryService(throwingProvider);
+
+      const marker = 'crossftsonlymarker02';
+      const seeded = await ftsMemory.devSeedApproved({
+        header: `Fakt X ${marker}`,
+        body: 'Treść do znalezienia przez FTS z innego projektu.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectX.projectId,
+      });
+
+      const normal = await ftsMemory.search({ query: marker }, projectY);
+      expect(normal.some((r) => r.id === seeded.id)).toBe(false);
+      const normalEvent = await lastSearchEvent(projectY.projectId);
+      expect(normalEvent.crossProject).toBe(false);
+
+      const cross = await ftsMemory.search({ query: marker }, projectY, 'all_projects');
+      const hit = cross.find((r) => r.id === seeded.id);
+      expect(hit).toBeDefined();
+      expect(hit!.project).toBe(slugX);
+
+      const event = await lastSearchEvent(projectY.projectId);
+      expect(event.degraded).toBe(true);
+      expect(event.crossProject).toBe(true);
+    });
+
+    it('global w cross ma project=null, a tryb domyślny w ogóle nie ma klucza project (bajt w bajt jak dotąd)', async () => {
+      const marker = 'crossglobalmarker03';
+      const globalMem = await seedRawMemory({
+        header: `Global ${marker}`,
+        scope: 'global',
+        projectId: null,
+      });
+      const ownMem = await seedRawMemory({ header: `Własna Y ${marker}`, projectId: projectY.projectId });
+
+      const cross = await memory.search({ query: marker }, projectY, 'all_projects');
+      expect(cross.find((r) => r.id === globalMem.id)!.project).toBeNull();
+      expect(cross.find((r) => r.id === ownMem.id)!.project).toBeDefined();
+      expect(cross.every((r) => 'project' in r)).toBe(true);
+
+      const normal = await memory.search({ query: marker }, projectY);
+      expect(normal.some((r) => r.id === globalMem.id)).toBe(true);
+      expect(normal.every((r) => !('project' in r))).toBe(true);
+      // Domyślny tryb z jawnym readScope='project' jest tożsamy z pominięciem parametru.
+      expect(await memory.search({ query: marker }, projectY, 'project')).toEqual(normal);
+    });
+
+    it('graph boost (AC6/G8): krawędź w projekcie X boostuje wyniki cross pytane z Y; bez poszerzenia filtra krawędzi boost by nie zadziałał', async () => {
+      const marker = 'crossgraphboostmarker04';
+      const throwingProvider = new StubEmbeddingProvider('cross-graph-boost-throwing');
+      throwingProvider.throwOnEmbed = true;
+      const { memory: seedMemory } = buildMemoryService(throwingProvider);
+
+      // Jak w teście 1-hop graph boost wyżej: A (rank 1) -> B (rank 3) powiązane, C (rank 2) kontrolny.
+      const a = await seedMemory.devSeedApproved({
+        header: `${marker} ${marker} ${marker}`,
+        body: `${marker} czwarty raz w tresci.`,
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectX.projectId,
+      });
+      const c = await seedMemory.devSeedApproved({
+        header: `Fakt ${marker} ${marker}`,
+        body: 'Fakt kontrolny, bez powiazan grafowych.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectX.projectId,
+      });
+      const b = await seedMemory.devSeedApproved({
+        header: `Fakt B ${marker}`,
+        body: 'Powiazany z A przez relacje follows.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectX.projectId,
+      });
+      await db.insert(schema.memoryRelations).values({
+        id: generateId(ID_PREFIX.relation),
+        fromMemoryId: a.id,
+        toMemoryId: b.id,
+        type: 'follows',
+        projectId: projectX.projectId,
+        source: 'human',
+      });
+
+      const { memory: baselineMemory } = buildMemoryService(throwingProvider, { GRAPH_BOOST_WEIGHT: 0 });
+      const baseline = await baselineMemory.search({ query: marker }, projectY, 'all_projects');
+      expect(baseline.map((r) => r.id)).toEqual([a.id, c.id, b.id]);
+
+      const { memory: boostMemory } = buildMemoryService(throwingProvider, { GRAPH_BOOST_WEIGHT: 1 });
+      const boosted = await boostMemory.search({ query: marker }, projectY, 'all_projects');
+      const scoreOf = (rows: typeof boosted, id: string) => rows.find((r) => r.id === id)!.score;
+      expect(scoreOf(boosted, a.id)).toBeCloseTo(scoreOf(baseline, a.id) * 2, 10);
+      expect(scoreOf(boosted, b.id)).toBeCloseTo(scoreOf(baseline, b.id) * 2, 10);
+      expect(scoreOf(boosted, c.id)).toBeCloseTo(scoreOf(baseline, c.id), 10);
+    });
+
+    it('kind (AC7/G7): event z X nieobecny w domyślnym cross, obecny przy kind=event i gdy toggle BIEŻĄCEGO projektu jest włączony', async () => {
+      const marker = 'crosseventkindmarker05';
+      const seeded = await seedRawMemory({
+        header: `Zdarzenie ${marker}`,
+        kind: 'event',
+        projectId: projectX.projectId,
+        eventTime: new Date(),
+      });
+
+      const byDefault = await memory.search({ query: marker }, projectY, 'all_projects');
+      expect(byDefault.some((r) => r.id === seeded.id)).toBe(false);
+
+      const explicit = await memory.search({ query: marker, kind: 'event' }, projectY, 'all_projects');
+      expect(explicit.some((r) => r.id === seeded.id)).toBe(true);
+
+      // Toggle liczy się z projektu PYTAJĄCEGO (Y), nie ze źródła (X) — X go nie ma, Y włącza.
+      const ctxToggle: ProjectContext = { ...projectY, includeEventsInDefaultSearch: true };
+      const withToggle = await memory.search({ query: marker }, ctxToggle, 'all_projects');
+      expect(withToggle.some((r) => r.id === seeded.id)).toBe(true);
+    });
+
+    it('limit: cross zwraca nie więcej niż SEARCH_TOP_K wyników', async () => {
+      const marker = 'crosstopkmarker06';
+      const { memory: smallMemory, config: smallConfig } = buildMemoryService(
+        (() => {
+          const p = new StubEmbeddingProvider('cross-topk-throwing');
+          p.throwOnEmbed = true;
+          return p;
+        })(),
+        { SEARCH_TOP_K: 3 },
+      );
+      for (let i = 0; i < 5; i++) {
+        await seedRawMemory({ header: `Fakt ${i} ${marker}`, projectId: i % 2 === 0 ? projectX.projectId : projectY.projectId });
+      }
+
+      const results = await smallMemory.search({ query: marker }, projectY, 'all_projects');
+      expect(results.length).toBe(smallConfig.get('SEARCH_TOP_K'));
+    });
+
+    it('get (AC8): all_projects czyta pamięć X z Y i bumpuje access_count; tryb domyślny -> not_found', async () => {
+      const seeded = await memory.devSeedApproved({
+        header: 'Fakt X do odczytu cross',
+        body: 'Pełna treść pamięci z projektu X.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectX.projectId,
+      });
+
+      const first = await memory.get(seeded.id, projectY, 'all_projects');
+      expect(first.body).toBe('Pełna treść pamięci z projektu X.');
+      expect(first.accessCount).toBe(1);
+      const second = await memory.get(seeded.id, projectY, 'all_projects');
+      expect(second.accessCount).toBe(2);
+
+      await expect(memory.get(seeded.id, projectY)).rejects.toMatchObject({ code: 'not_found' });
+      await expect(memory.get(seeded.id, projectY, 'project')).rejects.toMatchObject({ code: 'not_found' });
+    });
+
+    it('get w trybie all_projects nadal ukrywa nie-approved (archived) i nieistniejące id (identyczny not_found)', async () => {
+      const archived = await seedRawMemory({ projectId: projectX.projectId, status: 'archived' });
+      await expect(memory.get(archived.id, projectY, 'all_projects')).rejects.toMatchObject({ code: 'not_found' });
+      await expect(memory.get('mem_nieistnieje', projectY, 'all_projects')).rejects.toMatchObject({
+        code: 'not_found',
+      });
+    });
+  });
+
   describe('save — staged embedding (Faza 3, best-effort fail-open)', () => {
     let projectS: ProjectContext;
 

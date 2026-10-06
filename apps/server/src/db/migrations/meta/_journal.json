@@ -99,6 +99,13 @@
       "when": 1791272392069,
       "tag": "0013_create_project_proposals",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791286396033,
+      "tag": "0014_search_events_cross_project",
+      "breakpoints": true
     }
   ]
 }

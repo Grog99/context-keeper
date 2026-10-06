@@ -15,7 +15,8 @@ export interface AnnSearchParams {
   /** Wektor query cosine ANN (`<=>`) — własny wektor faktu w nightly, query-embedding w retrieval. */
   queryVector: number[];
   embeddingModel: string;
-  /** Warunek scope, budowany przez wołającego: permisywna unia `global OR project` (retrieval,
+  /** Warunek scope, budowany przez wołającego: permisywna unia z `memory/read-scope.ts` — `global OR
+   * project` albo, w trybie cross-project (v1.5), `global OR każdy projekt` (retrieval,
    * `MemoryService.vectorArm`) albo ścisłe dopasowanie do JEDNEGO `(scope, projectId)` bez unii
    * (nightly, `NightlyService.findNeighborPairs` — nigdy nie scala między projektami/global).
    * `undefined` dozwolone tak jak wszędzie w Drizzle `and()`/`or()` — po prostu pomijane. */

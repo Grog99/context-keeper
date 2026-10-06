@@ -5,7 +5,7 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { desc, eq, sql } from 'drizzle-orm';
 import { DB, type Database } from '../src/db/db.tokens';
-import { auditLog, projectTokens, proposals, searchEvents } from '../src/db/schema';
+import { auditLog, memories, projectTokens, proposals, searchEvents } from '../src/db/schema';
 import { rateLimitKey } from '../src/mcp/mcp-rate-limit.guard';
 import { MemoryService } from '../src/memory/memory.service';
 import { ProjectsService } from '../src/projects/projects.service';
@@ -28,6 +28,7 @@ describe('MCP e2e v1.5 — token konta + X-Context-Keeper-Project', () => {
   let token: string; // token projektowy projektu X (`mcp-e2e`)
   let projectXId: string;
   let projectYId: string;
+  let projectYToken: string; // token projektowy projektu Y (`mcp-e2e-y`)
   let accountToken: string;
   let accountTokenId: string;
   const { withClient } = mcpClients(() => baseUrl);
@@ -55,6 +56,7 @@ describe('MCP e2e v1.5 — token konta + X-Context-Keeper-Project', () => {
     const y = await projects.createProject('mcp-e2e-y');
     expect(y.project.slug).toBe(PROJECT_Y_SLUG);
     projectYId = y.project.id;
+    projectYToken = y.token;
     await app.get(MemoryService).devSeedApproved({
       header: `Redis działa w projekcie Y ${Y_MARKER}`,
       body: `Fakt widoczny wyłącznie w projekcie Y (${Y_MARKER}).`,
@@ -100,6 +102,7 @@ describe('MCP e2e v1.5 — token konta + X-Context-Keeper-Project', () => {
       expect(res.isError).not.toBe(true);
       const results = JSON.parse(textOf(res as CallToolResult)) as Array<{ id: string; header: string }>;
       expect(results.some((r) => r.header.includes('pgvector'))).toBe(true);
+      expect((results as Array<Record<string, unknown>>).every((r) => !('project' in r))).toBe(true); // tryb domyślny: bez pola project
 
       const other = await client.callTool({ name: 'search_memory', arguments: { query: Y_MARKER } });
       expect(JSON.parse(textOf(other as CallToolResult))).toEqual([]); // seed Y niewidoczny w X
@@ -109,7 +112,7 @@ describe('MCP e2e v1.5 — token konta + X-Context-Keeper-Project', () => {
     });
   });
 
-  it('token konta + nagłówek Y: widzi seed Y; get_memory cudzego (X) id -> not_found', async () => {
+  it('token konta + nagłówek Y: widzi seed Y; get_memory id z X -> body (G6), a tokenem projektowym Y -> not_found', async () => {
     const xId = await withClient(accountToken, 'mcp-e2e', async (clientX) => {
       const res = await clientX.callTool({ name: 'search_memory', arguments: { query: 'pgvector' } });
       return (JSON.parse(textOf(res as CallToolResult)) as Array<{ id: string }>)[0].id;
@@ -120,6 +123,14 @@ describe('MCP e2e v1.5 — token konta + X-Context-Keeper-Project', () => {
       const results = JSON.parse(textOf(res as CallToolResult)) as Array<{ header: string }>;
       expect(results.some((r) => r.header.includes(Y_MARKER))).toBe(true);
 
+      // Token konta czyta pamięć dowolnego projektu (roadmap v1.5, G6) — nagłówek Y niczego tu nie zawęża.
+      const foreign = await client.callTool({ name: 'get_memory', arguments: { id: xId } });
+      expect(foreign.isError).not.toBe(true);
+      expect((JSON.parse(textOf(foreign as CallToolResult)) as { id: string }).id).toBe(xId);
+    });
+
+    // Token projektowy zostaje przy scope'ie projekt+global: cudzy id nadal daje not_found.
+    await withClient(projectYToken, undefined, async (client) => {
       const foreign = await client.callTool({ name: 'get_memory', arguments: { id: xId } });
       expect(foreign.isError).toBe(true);
       expect(envelopeOf(foreign).code).toBe('not_found');
@@ -383,6 +394,229 @@ describe('MCP e2e v1.5 — token konta + X-Context-Keeper-Project', () => {
       }
       const save = memoryTools.find((t) => t.name === 'save_memory')!;
       expect(save.description).toMatch(/per token and per tool/);
+    });
+  });
+
+  describe('cross-project search (roadmap v1.5, "Wyszukiwanie między projektami")', () => {
+    interface SearchHit {
+      id: string;
+      header: string;
+      project?: string | null;
+    }
+    const searchCall = (client: Client, args: Record<string, unknown>) =>
+      client.callTool({ name: 'search_memory', arguments: { query: 'pgvector', ...args } });
+    const hitsOf = (res: unknown): SearchHit[] => JSON.parse(textOf(res as CallToolResult)) as SearchHit[];
+
+    /** Najnowszy `search_events` danego tokena (każdy test używa tokena konta, a testy lecą sekwencyjnie). */
+    async function latestSearchEvent(tokenId: string) {
+      const db = app.get<Database>(DB);
+      const [row] = await db
+        .select()
+        .from(searchEvents)
+        .where(eq(searchEvents.tokenId, tokenId))
+        .orderBy(desc(searchEvents.createdAt))
+        .limit(1);
+      return row;
+    }
+
+    async function pgvectorFactIdFromX(): Promise<string> {
+      return withClient(accountToken, 'mcp-e2e', async (client) => {
+        const hit = hitsOf(await searchCall(client, {})).find((r) => r.header.includes('pgvector'));
+        if (!hit) throw new Error('seed pgvector w projekcie X nie znaleziony');
+        return hit.id;
+      });
+    }
+
+    it('AC1: token konta + nagłówek Y + all_projects:true -> trafienie z X z project="mcp-e2e", każdy wynik ma klucz project; FTS-only (degraded)', async () => {
+      await withClient(accountToken, PROJECT_Y_SLUG, async (client) => {
+        const res = await searchCall(client, { all_projects: true });
+        expect(res.isError).not.toBe(true);
+        const hits = hitsOf(res);
+        const xFact = hits.find((r) => r.header.includes('pgvector'));
+        expect(xFact).toBeDefined();
+        expect(xFact!.project).toBe('mcp-e2e');
+        expect(hits.every((r) => 'project' in r)).toBe(true);
+
+        // Seed Y też jest widoczny (cross = wszystkie projekty), z własnym slugiem.
+        const yHits = hitsOf(await searchCall(client, { query: Y_MARKER, all_projects: true }));
+        expect(yHits.find((r) => r.header.includes(Y_MARKER))?.project).toBe(PROJECT_Y_SLUG);
+      });
+
+      // Środowisko e2e nie ma osiągalnego providera embeddingów -> ramię wektorowe pominięte, więc
+      // powyższe trafienie przyszło z samego ramienia FTS (dowód `degraded`).
+      expect((await latestSearchEvent(accountTokenId)).degraded).toBe(true);
+    });
+
+    it('AC2: bez parametru i z all_projects:false -> tylko Y + global, bez pola project, odpowiedź identyczna', async () => {
+      await withClient(accountToken, PROJECT_Y_SLUG, async (client) => {
+        const byDefault = await searchCall(client, {});
+        const explicitFalse = await searchCall(client, { all_projects: false });
+        expect(hitsOf(byDefault).some((r) => r.header.includes('pgvector'))).toBe(false); // X niewidoczny z Y
+        expect(hitsOf(byDefault).every((r) => !('project' in r))).toBe(true);
+        expect(textOf(byDefault as CallToolResult)).toBe(textOf(explicitFalse as CallToolResult));
+
+        const own = hitsOf(await searchCall(client, { query: Y_MARKER }));
+        expect(own.some((r) => r.header.includes(Y_MARKER))).toBe(true);
+        expect(own.every((r) => !('project' in r))).toBe(true);
+      });
+    });
+
+    it('AC3: token projektowy + all_projects:true -> validation_error (account token), zero skutków ubocznych; bez parametru działa', async () => {
+      await withClient(token, 'mcp-e2e', async (client) => {
+        const before = await countRows();
+        const res = await searchCall(client, { all_projects: true });
+        expect(res.isError).toBe(true);
+        const envelope = envelopeOf(res);
+        expect(envelope.code).toBe('validation_error');
+        expect(envelope.message).toContain('account token');
+        expect(await countRows()).toEqual(before); // brak search_events
+
+        const fine = await searchCall(client, {});
+        expect(fine.isError).not.toBe(true);
+        expect(hitsOf(fine).some((r) => r.header.includes('pgvector'))).toBe(true);
+        expect(hitsOf(fine).every((r) => !('project' in r))).toBe(true);
+
+        const explicitFalse = await searchCall(client, { all_projects: false });
+        expect(explicitFalse.isError).not.toBe(true);
+      });
+    });
+
+    it('AC4: token konta bez nagłówka + all_projects:true -> project_required z details.projects, zero skutków ubocznych', async () => {
+      await withClient(accountToken, undefined, async (client) => {
+        const before = await countRows();
+        const res = await searchCall(client, { all_projects: true });
+        expect(res.isError).toBe(true);
+        const envelope = envelopeOf(res);
+        expect(envelope.code).toBe('project_required');
+        expect(envelope.details?.projects?.some((p) => p.slug === PROJECT_Y_SLUG)).toBe(true);
+        expect(await countRows()).toEqual(before);
+      });
+    });
+
+    it('AC5: inputSchema search_memory ma all_projects dla obu typów tokena; opis jedną stałą z parametrem, tokenem konta i polem project; get_memory wspomina token konta', async () => {
+      const seen: Array<{ search: string; get: string }> = [];
+      for (const [bearer, slug] of [
+        [accountToken, undefined],
+        [accountToken, 'mcp-e2e'],
+        [token, undefined],
+        [token, 'mcp-e2e'],
+      ] as const) {
+        await withClient(bearer, slug, async (client) => {
+          const { tools } = await client.listTools();
+          const search = tools.find((t) => t.name === 'search_memory')!;
+          const get = tools.find((t) => t.name === 'get_memory')!;
+          expect(Object.keys(search.inputSchema.properties ?? {}).sort()).toEqual([
+            'all_projects',
+            'kind',
+            'query',
+            'tags',
+          ]);
+          expect(search.description).toContain('all_projects');
+          expect(search.description).toContain('account token');
+          expect(search.description).toContain('`project`');
+          expect(get.description).toContain('account token');
+          seen.push({ search: search.description ?? '', get: get.description ?? '' });
+        });
+      }
+      for (const d of seen) expect(d).toEqual(seen[0]); // opis niezależny od typu tokena
+    });
+
+    it('AC8: get_memory id z X tokenem konta (nagłówek Y) -> body + bump access_count; token projektowy Y -> not_found', async () => {
+      const xId = await pgvectorFactIdFromX();
+      const db = app.get<Database>(DB);
+      const accessCount = async () => {
+        const [row] = await db
+          .select({ n: memories.accessCount })
+          .from(memories)
+          .where(eq(memories.id, xId));
+        return row.n;
+      };
+      const before = await accessCount();
+
+      await withClient(accountToken, PROJECT_Y_SLUG, async (client) => {
+        const got = await client.callTool({ name: 'get_memory', arguments: { id: xId } });
+        expect(got.isError).not.toBe(true);
+        const body = JSON.parse(textOf(got as CallToolResult)) as { id: string; body: string };
+        expect(body.id).toBe(xId);
+        expect(body.body).toContain('pgvector/pgvector:pg18-trixie');
+      });
+      expect(await accessCount()).toBe(before + 1);
+
+      await withClient(projectYToken, undefined, async (client) => {
+        const foreign = await client.callTool({ name: 'get_memory', arguments: { id: xId } });
+        expect(foreign.isError).toBe(true);
+        expect(envelopeOf(foreign).code).toBe('not_found');
+      });
+      expect(await accessCount()).toBe(before + 1); // odrzucony odczyt niczego nie bumpuje
+    });
+
+    it('AC9: save_memory tokenem konta (nagłówek Y) z supersedes / relations na id z X -> not_found (inScope nietknięty)', async () => {
+      const xId = await pgvectorFactIdFromX();
+      await withClient(accountToken, PROJECT_Y_SLUG, async (client) => {
+        const before = await countRows();
+
+        const supersede = await client.callTool({
+          name: 'save_memory',
+          arguments: { header: 'Korekta cudzego faktu', body: 'Nie powinno powstać.', supersedes: xId },
+        });
+        expect(supersede.isError).toBe(true);
+        expect(envelopeOf(supersede).code).toBe('not_found');
+
+        const relate = await client.callTool({
+          name: 'save_memory',
+          arguments: {
+            header: 'Relacja do cudzego faktu',
+            body: 'Nie powinno powstać.',
+            relations: [{ type: 'follows', targetId: xId }],
+          },
+        });
+        expect(relate.isError).toBe(true);
+        expect(envelopeOf(relate).code).toBe('not_found');
+
+        expect(await countRows()).toEqual(before); // żaden proposal ani wpis audytu
+      });
+    });
+
+    it('AC10: wywołanie cross = jeden wiersz search_events (project=Y, token konta, cross_project=true), bez wpisu w audit_log; zwykłe -> false', async () => {
+      await withClient(accountToken, PROJECT_Y_SLUG, async (client) => {
+        const before = await countRows();
+        await searchCall(client, { all_projects: true });
+        const afterCross = await countRows();
+        expect(afterCross.searchEvents).toBe(before.searchEvents + 1);
+        expect(afterCross.audit).toBe(before.audit);
+        const crossEvent = await latestSearchEvent(accountTokenId);
+        expect(crossEvent.projectId).toBe(projectYId);
+        expect(crossEvent.tokenId).toBe(accountTokenId);
+        expect(crossEvent.crossProject).toBe(true);
+
+        await searchCall(client, {});
+        const afterNormal = await countRows();
+        expect(afterNormal.searchEvents).toBe(afterCross.searchEvents + 1);
+        expect((await latestSearchEvent(accountTokenId)).crossProject).toBe(false);
+      });
+    });
+
+    it('AC12: cross zużywa ten sam kubełek search_memory tokenId:projekt z nagłówka — po jego wyczerpaniu 429', async () => {
+      const dedicated = await app.get(ProjectsService).createAccountToken('rate-limit-cross-e2e');
+      const limiter = app.get(RateLimiterService);
+      const bucketKey = rateLimitKey(
+        {
+          tokenId: dedicated.tokenRow.id,
+          tokenLabel: dedicated.tokenRow.label,
+          tokenScope: 'account',
+          project: { status: 'resolved', context: { projectId: projectYId, projectName: 'mcp-e2e-y' } },
+        },
+        'search_memory',
+      );
+      if (!bucketKey) throw new Error('rateLimitKey zwrócił null dla rozwiązanego projektu');
+      let consumed = 0;
+      while (limiter.tryConsume(bucketKey, 'search_memory').allowed) {
+        if (++consumed > 1000) throw new Error('bucket search_memory nie wyczerpał się');
+      }
+
+      await withClient(dedicated.token, PROJECT_Y_SLUG, async (client) => {
+        await expect(searchCall(client, { all_projects: true })).rejects.toThrow();
+      });
     });
   });
 

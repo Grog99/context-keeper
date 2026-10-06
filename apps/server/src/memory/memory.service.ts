@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, arrayOverlaps, asc, desc, eq, inArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, arrayOverlaps, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { computeContentHash } from '../common/content-hash';
 import { ToolError } from '../common/errors';
@@ -7,7 +7,15 @@ import { generateId, ID_PREFIX } from '../common/ids';
 import { scanForSecrets } from '../common/secret-scanner';
 import { AppConfigService } from '../config/config.service';
 import { DB, type Database } from '../db/db.tokens';
-import { embeddings, memories, memoryRelations, proposals, stagingEmbeddings, type MemoryRow } from '../db/schema';
+import {
+  embeddings,
+  memories,
+  memoryRelations,
+  projects,
+  proposals,
+  stagingEmbeddings,
+  type MemoryRow,
+} from '../db/schema';
 import { findAnnNeighbors } from '../embeddings/ann-search';
 import { EmbeddingService, toPgVectorLiteral } from '../embeddings/embedding.service';
 import type { ProjectContext } from '../projects/projects.service';
@@ -28,6 +36,7 @@ import type {
   SeedApprovedInput,
 } from './memory.types';
 import { normalizeHeader, normalizeTags, validateBody, validateEventTime } from './validation';
+import { isReadable, readScopeCondition, type ReadScope } from './read-scope';
 import { rrfFuse } from './rrf';
 
 const DEFAULT_SEARCH_KINDS: MemoryKindFilter[] = ['fact', 'document'];
@@ -489,8 +498,22 @@ export class MemoryService {
    * WYŁĄCZNIE krawędzie, których OBA końce są już w `fusedIds` (nigdy nie wstrzykuje pamięci spoza
    * sfuzjowanego zbioru). `GRAPH_BOOST_WEIGHT<=0` pomija dodatkowe zapytanie o krawędzie całkowicie
    * (perf — zero kosztu, gdy funkcja wyłączona knobem).
+   *
+   * Tryb cross-project (roadmap v1.5, `readScope === 'all_projects'`; zakres rozstrzyga warstwa MCP
+   * z typu tokena, serwis nie zna typów tokenów): pamięć global + KAŻDEGO projektu w jednej puli RRF,
+   * z tymi samymi limitami kandydatów i `SEARCH_TOP_K`, BEZ boostu bieżącego projektu (G5). Warunek
+   * zakresu (`read-scope.ts`) budowany raz i przekazywany obu ramionom. Graph boost bierze krawędzie
+   * KAŻDEGO projektu obecnego w zbiorze wyników (G8) — krawędzie są intra-project, więc nie powstaje
+   * boost między projektami. Domyślny zestaw `kind` zależy od toggle'a BIEŻĄCEGO projektu (G7, jak
+   * dla global). Wyniki niosą `project` (slug lub `null` dla global); w trybie domyślnym pola nie
+   * ma. Jeden wiersz `search_events` z `cross_project=true` pod bieżącym projektem (G9), bez wpisu
+   * w `audit_log`.
    */
-  async search(input: SearchMemoryInput, ctx: ProjectContext): Promise<SearchResultItem[]> {
+  async search(
+    input: SearchMemoryInput,
+    ctx: ProjectContext,
+    readScope: ReadScope = 'project',
+  ): Promise<SearchResultItem[]> {
     const query = input.query?.trim();
     if (!query) {
       throw new ToolError('validation_error', 'query nie może być puste');
@@ -509,11 +532,17 @@ export class MemoryService {
       }
     }
 
+    const crossProject = readScope === 'all_projects';
+    // Jeden warunek zakresu dla OBU ramion — tryb cross nie może zostać przełączony "pół na pół".
+    const scopeCondition = readScopeCondition(readScope, ctx.projectId);
+
     const candidateLimit = this.config.get('SEARCH_VECTOR_CANDIDATES');
-    const ftsIds = await this.ftsArm(query, ctx, kinds, tags, candidateLimit);
+    const ftsIds = await this.ftsArm(query, scopeCondition, kinds, tags, candidateLimit);
 
     const qvec = await this.embedding.embedQuery(query); // null = fail-open, ramię pominięte
-    const vectorIds = qvec ? await this.vectorArm(qvec, ctx, kinds, tags, candidateLimit) : [];
+    const vectorIds = qvec
+      ? await this.vectorArm(qvec, scopeCondition, kinds, tags, candidateLimit)
+      : [];
 
     // Bez wczesnego slice(SEARCH_TOP_K) — pełny sfuzjowany zbiór (naturalnie ograniczony do
     // ~2×candidateLimit unikalnych id) idzie do age-decay + re-sort niżej, top-k dopiero po.
@@ -529,17 +558,25 @@ export class MemoryService {
           tags: memories.tags,
           kind: memories.kind,
           eventTime: memories.eventTime,
+          projectId: memories.projectId,
+          projectSlug: projects.slug,
         })
         .from(memories)
+        // LEFT: pamięć global ma `project_id IS NULL`. Slug trafia do wyniku tylko w trybie cross.
+        .leftJoin(projects, eq(projects.id, memories.projectId))
         .where(inArray(memories.id, fusedIds));
       const byId = new Map(rows.map((r) => [r.id, r]));
 
       // Graph boost (roadmap v1.2): `weight<=0` -> pomiń zapytanie o krawędzie, `boosted` zostaje
       // pusty (graphBoostFactor(false, …) === 1, no-op identyczny z dzisiejszym zachowaniem).
       const graphBoostWeight = this.config.get('GRAPH_BOOST_WEIGHT');
+      // Cross (G8): krawędzie każdego projektu obecnego w zbiorze wyników; domyślnie tylko bieżącego.
+      const edgeProjectIds = crossProject
+        ? [...new Set(rows.map((r) => r.projectId).filter((p): p is string => p !== null))]
+        : [ctx.projectId];
       const boosted =
         graphBoostWeight > 0
-          ? selectBoostedIds(fusedIds, await this.fetchInSetEdges(fusedIds, ctx.projectId))
+          ? selectBoostedIds(fusedIds, await this.fetchInSetEdges(fusedIds, edgeProjectIds))
           : new Set<string>();
 
       const now = new Date();
@@ -569,12 +606,13 @@ export class MemoryService {
           header: row.header,
           tags: row.tags,
           score: effectiveScore,
+          ...(crossProject ? { project: row.projectSlug ?? null } : {}),
           ...(excerpt !== undefined ? { excerpt } : {}),
         };
       });
     }
 
-    await this.recordSearchSafe(ctx.projectId, ctx.tokenId, results.length, qvec === null);
+    await this.recordSearchSafe(ctx.projectId, ctx.tokenId, results.length, qvec === null, crossProject);
     return results;
   }
 
@@ -585,16 +623,24 @@ export class MemoryService {
    * `db/schema/search-events.ts`. `tokenId` (roadmap v1.3, "Wiele tokenów per projekt + graceful
    * rotation") — atrybucja per-agent na `search_events`, `undefined` gdy `ctx` nie niesie tokena
    * (np. ręcznie budowany kontekst w testach) -> kolumna zostaje `NULL`, symetrycznie z resztą
-   * opcjonalnych pól `ProjectContext`.
+   * opcjonalnych pól `ProjectContext`. `crossProject` (roadmap v1.5) — wyszukiwanie z `all_projects`,
+   * zapisywane pod bieżącym projektem z flagą.
    */
   private async recordSearchSafe(
     projectId: string,
     tokenId: string | undefined,
     resultCount: number,
     degraded: boolean,
+    crossProject: boolean,
   ): Promise<void> {
     try {
-      await this.usage.recordSearch({ projectId, tokenId: tokenId ?? null, resultCount, degraded });
+      await this.usage.recordSearch({
+        projectId,
+        tokenId: tokenId ?? null,
+        resultCount,
+        degraded,
+        crossProject,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`[usage] recordSearch nie powiódł się (fail-open, wynik search() nietknięty): ${message}`);
@@ -617,7 +663,7 @@ export class MemoryService {
   /** Ramię FTS (FR-R2): `plainto_tsquery('simple', …)` + `ts_rank`, zwraca id-y w kolejności rankingu. */
   private async ftsArm(
     query: string,
-    ctx: ProjectContext,
+    scopeCondition: SQL,
     kinds: MemoryKindFilter[],
     tags: string[] | undefined,
     limit: number,
@@ -628,11 +674,6 @@ export class MemoryService {
     // (jedyna tabela w zapytaniu), więc bez kwalifikacji `memories.`.
     const tsQuery = sql`plainto_tsquery('simple', ${query})`;
     const rank = sql<number>`ts_rank(fts, ${tsQuery})`;
-
-    const scopeCondition = or(
-      eq(memories.scope, 'global'),
-      and(eq(memories.scope, 'project'), eq(memories.projectId, ctx.projectId)),
-    );
 
     const conditions = [
       eq(memories.status, 'approved'),
@@ -656,22 +697,19 @@ export class MemoryService {
   /**
    * Ramię wektorowe (FR-R2, FR-R3, FR-R5): cosine ANN (`<=>`, HNSW) na `embeddings`, collapse
    * MIN(dystans) per `memory_id`, zawężone do aktywnego `embedding_model`. Ten sam
-   * scope/status/kind/tags predicate co ramię FTS. Zapytanie ANN samo w sobie deleguje do
+   * scope/status/kind/tags predicate co ramię FTS — `scopeCondition` przychodzi z `read-scope.ts`
+   * (budowany raz w `search()`, wspólny dla obu ramion). Zapytanie ANN samo w sobie deleguje do
    * współdzielonego `findAnnNeighbors` (`embeddings/ann-search.ts`, code review finding "reuse",
    * commit d057871) — reużywanego też przez `NightlyService.findNeighborPairs` (dedup), tam z
-   * `scopeCondition` ŚCISŁYM zamiast permisywnej unii `global OR project` i `groupByMemory: false`.
+   * `scopeCondition` ŚCISŁYM zamiast unii z `read-scope.ts` i `groupByMemory: false`.
    */
   private async vectorArm(
     qvec: number[],
-    ctx: ProjectContext,
+    scopeCondition: SQL,
     kinds: MemoryKindFilter[],
     tags: string[] | undefined,
     limit: number,
   ): Promise<string[]> {
-    const scopeCondition = or(
-      eq(memories.scope, 'global'),
-      and(eq(memories.scope, 'project'), eq(memories.projectId, ctx.projectId)),
-    );
     const extraConditions: SQL[] = [inArray(memories.kind, kinds)];
     if (tags && tags.length > 0) {
       extraConditions.push(arrayOverlaps(memories.tags, tags));
@@ -694,16 +732,17 @@ export class MemoryService {
    * AND from IN(ids) AND to IN(ids)` — filtr obu końców na poziomie SQL, nie tylko w
    * `selectBoostedIds` (§graph-boost.ts), więc zapytanie samo w sobie nigdy nie zwraca krawędzi
    * wychodzącej poza sfuzjowany zbiór. Project-scoped (edges są ściśle intra-project, §db/schema/
-   * memory-relations.ts) — `ctx.projectId`, nie unia global/project jak ramiona search.
+   * memory-relations.ts), więc filtr po `projectIds` (domyślnie tylko bieżący projekt, w trybie cross
+   * wszystkie projekty obecne w wynikach) nie może stworzyć boostu między projektami.
    */
-  private async fetchInSetEdges(ids: string[], projectId: string): Promise<RelationEdge[]> {
-    if (ids.length === 0) return [];
+  private async fetchInSetEdges(ids: string[], projectIds: string[]): Promise<RelationEdge[]> {
+    if (ids.length === 0 || projectIds.length === 0) return [];
     const rows = await this.db
       .select({ fromMemoryId: memoryRelations.fromMemoryId, toMemoryId: memoryRelations.toMemoryId })
       .from(memoryRelations)
       .where(
         and(
-          eq(memoryRelations.projectId, projectId),
+          inArray(memoryRelations.projectId, projectIds),
           inArray(memoryRelations.fromMemoryId, ids),
           inArray(memoryRelations.toMemoryId, ids),
         ),
@@ -736,13 +775,16 @@ export class MemoryService {
   }
 
   /**
-   * get_memory (FR-M2, NFR-1): egzekwuje scope (projekt tokena LUB global). Poza scope lub
-   * nieistniejące → identyczne `not_found` (anty-probing IDOR — bez rozróżnienia przypadków).
-   * Bumpuje `access_count`/`last_accessed_at` bezpośrednio, z pominięciem kolejki (FR-Q5).
+   * get_memory (FR-M2, NFR-1): egzekwuje zakres odczytu (`readScope`, domyślnie projekt tokena LUB
+   * global). Poza zakresem lub nieistniejące → identyczne `not_found` (anty-probing IDOR — bez
+   * rozróżnienia przypadków). Dla tokenu konta fabryka MCP przekazuje `'all_projects'` (roadmap v1.5,
+   * G6) — pamięć dowolnego projektu. Zakres liczy `isReadable` (`read-scope.ts`), CELOWO nie
+   * `inScope` — ten zostaje wyłącznie dla gate'ów zapisu. Bump `access_count`/`last_accessed_at`
+   * bezpośrednio, z pominięciem kolejki (FR-Q5), w obu trybach (G6a).
    */
-  async get(id: string, ctx: ProjectContext): Promise<GetMemoryResult> {
+  async get(id: string, ctx: ProjectContext, readScope: ReadScope = 'project'): Promise<GetMemoryResult> {
     const [row] = await this.db.select().from(memories).where(eq(memories.id, id)).limit(1);
-    if (!row || row.status !== 'approved' || !this.inScope(row, ctx)) {
+    if (!row || row.status !== 'approved' || !isReadable(row, readScope, ctx.projectId)) {
       throw new ToolError('not_found', `Pamięć nie istnieje: ${id}`);
     }
 
@@ -768,6 +810,10 @@ export class MemoryService {
     };
   }
 
+  /**
+   * Gate ZAPISU (`supersedes`, `relations`): ściśle projekt kontekstu + global. NIE poszerzać pod
+   * odczyt cross-project — ten idzie przez `read-scope.ts` (`isReadable`).
+   */
   private inScope(row: MemoryRow, ctx: ProjectContext): boolean {
     if (row.scope === 'global') return true;
     return row.scope === 'project' && row.projectId === ctx.projectId;

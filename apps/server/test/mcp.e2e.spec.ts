@@ -163,6 +163,15 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
     });
   });
 
+  it('search_memory ma all_projects w inputSchema także dla tokenu projektowego (roadmap v1.5, G3)', async () => {
+    await withClient(token, undefined, async (client) => {
+      const tools = await client.listTools();
+      const search = tools.tools.find((t) => t.name === 'search_memory')!;
+      const props = (search.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
+      expect(Object.keys(props).sort()).toEqual(['all_projects', 'kind', 'query', 'tags']);
+    });
+  });
+
   it('save_memory {kind: "document"} -> pending, jak fact', async () => {
     await withClient(token, undefined, async (client) => {
       const saveRes = await client.callTool({
