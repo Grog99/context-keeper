@@ -86,6 +86,26 @@ describe('resolveDotenvCandidates — fallback na korzeń monorepo', () => {
   });
 });
 
+describe('envSchema — NEAR_DUPLICATE_DISTANCE (roadmap v1.6, A1)', () => {
+  it('default 0.2 gdy nieustawione (zmierzone dla bge-m3)', () => {
+    expect(envSchema.parse({ ...BASE }).NEAR_DUPLICATE_DISTANCE).toBe(0.2);
+  });
+
+  it('parsuje wartość z env (coerce)', () => {
+    expect(envSchema.parse({ ...BASE, NEAR_DUPLICATE_DISTANCE: '0.25' }).NEAR_DUPLICATE_DISTANCE).toBe(0.25);
+  });
+
+  it('odrzuca 0 i wartość > 2 (dystans kosinusowy mieści się w [0, 2])', () => {
+    expect(() => envSchema.parse({ ...BASE, NEAR_DUPLICATE_DISTANCE: '0' })).toThrow();
+    expect(() => envSchema.parse({ ...BASE, NEAR_DUPLICATE_DISTANCE: '2.5' })).toThrow();
+  });
+
+  it('jest niezależny od NIGHTLY_DEDUP_DISTANCE', () => {
+    const env = envSchema.parse({ ...BASE, NIGHTLY_DEDUP_DISTANCE: '0.001' });
+    expect(env.NEAR_DUPLICATE_DISTANCE).toBe(0.2);
+  });
+});
+
 describe('envSchema — RATE_LIMIT_CREATE_PROJECT_PER_MIN (roadmap v1.5)', () => {
   it('default 3 gdy nieustawione', () => {
     expect(envSchema.parse({ ...BASE }).RATE_LIMIT_CREATE_PROJECT_PER_MIN).toBe(3);

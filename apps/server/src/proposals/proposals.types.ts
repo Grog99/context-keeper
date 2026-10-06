@@ -166,9 +166,8 @@ export interface ProposalListSummary {
 }
 
 /** Lekki element listy kolejki — BEZ `payload`/`editedPayload`/`baseVersions` (pełny widok po
- * `GET /api/proposals/:id` -> `ProposalView`). A1 (podpowiedź prawie-duplikatu, ticket
- * near-duplicate-detection, G10) dołoży tu swój znacznik „ma podpowiedź" razem z projekcją SQL w
- * `listPendingPage` — dziś nie istnieje (G3: kto zmerguje się drugi, ten dokłada). */
+ * `GET /api/proposals/:id` -> `ProposalView`). Znacznik „ma podpowiedź" wiersza (A1, ticket
+ * near-duplicate-detection, G10) to `hasSimilar`, liczony w projekcji SQL `listPendingPage`. */
 export interface ProposalListItem {
   id: string;
   type: ProposalType;
@@ -183,6 +182,10 @@ export interface ProposalListItem {
   edited: boolean;
   /** Jak `ProposalView.stale` (display-only, bez locka). */
   stale: boolean;
+  /** A1 (G10): podpowiedź „podobne do istniejących" ma CO NAJMNIEJ jedną wciąż dostępną
+   * (`status='approved'`) pamięć — ta sama reguła co `available` w `ProposalView.similarMemories`,
+   * żeby znacznik wiersza i blok w detalu się zgadzały. `false` także dla stanu „nie policzono". */
+  hasSimilar: boolean;
 }
 
 /** Strona listy kolejki. `total` = `count(*)` z TYMI SAMYMI filtrami co lista (bez kursora) — licznik
@@ -191,6 +194,17 @@ export interface ProposalListPage {
   items: ProposalListItem[];
   nextCursor: string | null;
   total: number;
+}
+
+/** Pozycja podpowiedzi „podobne do istniejących" (A1) rozwiązana po stronie serwera: `available` =
+ * pamięć jest wciąż `approved`; zarchiwizowana / przycięta / usunięta po zapisie dostaje
+ * `available:false`, `header:null`, `scope:null` (UI pokazuje tylko dostępne — bez błędu). */
+export interface ProposalSimilarMemory {
+  id: string;
+  distance: number;
+  available: boolean;
+  header: string | null;
+  scope: MemoryScope | null;
 }
 
 /** Widok proposala do listy/podglądu (CLI dziś, dashboard w Fazie 5) — `payload`/`editedPayload`
@@ -213,6 +227,10 @@ export interface ProposalView {
    * ma teraz `memories.version` inny niż zapisany w `base_versions`, albo w ogóle zniknął. */
   stale: boolean;
   staleIds: string[];
+  /** Podpowiedź „podobne do istniejących" (A1, G1): `null` = nie policzono, `[]` = policzono, brak
+   * podobnych, lista = ≤3 pozycje rosnąco po odległości. Opisuje oryginał agenta — edit-before-approve
+   * jej nie zmienia (G2). */
+  similarMemories: ProposalSimilarMemory[] | null;
 }
 
 /** Decyzja zbiorcza (roadmap v1.3, "Bulk approve/reject w kolejce") — CZYSTA ORKIESTRACJA nad

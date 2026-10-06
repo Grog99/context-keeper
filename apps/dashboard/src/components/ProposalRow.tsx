@@ -1,4 +1,4 @@
-import { ArrowLeftRight, FolderPlus, GitMerge, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeftRight, FolderPlus, GitMerge, Plus, Sparkles, Trash2 } from 'lucide-react';
 import type { KeyboardEvent, MouseEvent } from 'react';
 import { formatRelativeTime } from '../lib/format';
 import { cn } from '../lib/utils';
@@ -35,6 +35,10 @@ const MAX_VISIBLE_TAGS = 2;
  * pamięci (§2.3/§9.2): `KindGutter` przy lewej krawędzi (ustępuje paskowi zaznaczenia) + `KindMarker`
  * obok StatusChipa. Brak `kind` (patch `update` bez zmiany kind, `delete`) → pusty slot tej samej
  * szerokości, żeby tytuły w kolumnie się nie rozjeżdżały; wiersz nie dociąga stanu pamięci.
+ *
+ * `similarHint` (roadmap v1.6, A1/G10) — propozycja ma podpowiedź „podobne do istniejących": ikona
+ * `sparkles` w kolorze `info` za tytułem (ten sam język co `DedupHint` w detalu). Sygnał dla recenzenta,
+ * który zatwierdza bez otwierania detalu — advisory, nie blokuje.
  */
 export interface ProposalRowProps {
   type: ProposalType;
@@ -47,6 +51,8 @@ export interface ProposalRowProps {
   tags: string[];
   createdAt: string;
   stale?: boolean;
+  /** A1 (G10): propozycja ma podpowiedź „podobne do istniejących" — znacznik `sparkles` przy tytule. */
+  similarHint?: boolean;
   selected?: boolean;
   onClick?: () => void;
   /** Bulk selection (roadmap v1.3) — `checked`/`onCheckedChange` mają sens wyłącznie gdy `true`.
@@ -67,6 +73,7 @@ export function ProposalRow({
   tags,
   createdAt,
   stale,
+  similarHint,
   selected,
   onClick,
   selectable,
@@ -132,6 +139,11 @@ export function ProposalRow({
           <div className="flex min-w-0 items-center gap-1.5 truncate text-[13.5px] font-medium text-foreground">
             <Icon className="size-3.5 shrink-0 text-faint" />
             <span className="truncate">{title}</span>
+            {similarHint && (
+              <span title="Podobne do istniejących pamięci (podpowiedź dedup)" className="shrink-0">
+                <Sparkles className="size-3.5 text-info" aria-label="Ma podpowiedź: podobne istniejące pamięci" />
+              </span>
+            )}
           </div>
           <div className="flex min-w-0 items-center gap-2.5">
             <OriginPath origin={origin} scope={scope} projectName={projectName} />

@@ -223,6 +223,8 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
       expect([...proposalRow!.affectedIds].sort()).toEqual([factA.id, factB.id].sort());
       expect(proposalRow!.baseVersions).toEqual({ [factA.id]: 0, [factB.id]: 0 });
       expect(proposalRow!.contentHash).toBeNull();
+      // A1: propozycje nocnego joba nie mają podpowiedzi „podobne do istniejących" (NULL = nie dotyczy).
+      expect(proposalRow!.similarMemories).toBeNull();
       expect(proposalRow!.scope).toBe('project');
       expect(proposalRow!.projectId).toBe(projectA.projectId);
       // Kanoniczny wybór: accessCount remisuje (0=0) -> dłuższy body wygrywa -> Fakt B.

@@ -47,6 +47,12 @@ Legenda: ⬜ przed nami · ⏸️ warunkowe (czeka na sygnał / decyzję)
 
 - **Tuning retrievalu na realnych danych** ⬜ — top-k, próg relevance, próg dedup, `k` RRF, chunking
   (PRD §11). Karmi się instrumentacją z Pomiarów — pomiar najpierw, dostrojenie potem.
+- **Model embeddingów żywej instancji: bge-m3 zamiast text-embedding-3-small** ⬜ — rozważyć przejście
+  na bge-m3 (albo inny model wielojęzyczny), bo text-embedding-3-small nie łapie parafraz między
+  językami EN↔PL. Zmierzone przy A1 (2026-10-07): angielskie parafrazy polskich faktów — 0–1 z 13
+  złapanych na text-embedding-3-small vs 10 z 13 na bge-m3 przy progu 0.20 (dystanse EN↔PL 0.26–0.34
+  nakładają się na różne fakty, żaden próg tego nie naprawi). Dotyczy i hintu „podobne do istniejących",
+  i samego retrievalu. Wymaga `reembed` — decyzja o presecie przy deployu. **Poza zakresem A1.**
 
 > `conflicts_report` i „lepszy prune w nocnym jobie" → [`roadmap.md`](roadmap.md), v1.6 (dzielą skan
 > i mały model, więc idą razem; przeniesione z v1.4 razem z auto mode).

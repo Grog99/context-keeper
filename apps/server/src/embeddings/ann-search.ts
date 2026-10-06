@@ -41,7 +41,9 @@ export interface AnnSearchParams {
  * predykaty, self-exclusion) wchodzą WYŁĄCZNIE przez parametry — helper niczego nie zgaduje o
  * intencji wołającego. Post-processing (mapowanie na `NeighborPair` + próg dystansu w nightly,
  * spłaszczenie do listy id w `vectorArm`) zostaje po stronie wołającego; ten helper zwraca surowe
- * pary `(memoryId, dist)`.
+ * pary `(memoryId, dist)`. Trzeci wołający (roadmap v1.6, A1): `memory/near-duplicates.ts` —
+ * podpowiedź „podobne do istniejących" przy save_memory (scope projekt + global, `groupByMemory: true`,
+ * próg z `NEAR_DUPLICATE_DISTANCE` filtrowany po stronie wołającego).
  */
 export async function findAnnNeighbors(params: AnnSearchParams): Promise<AnnNeighbor[]> {
   const { db, queryVector, embeddingModel, scopeCondition, extraConditions = [], groupByMemory, limit } =
