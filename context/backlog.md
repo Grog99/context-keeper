@@ -53,6 +53,10 @@ Legenda: ⬜ przed nami · ⏸️ warunkowe (czeka na sygnał / decyzję)
 - **Powiadomienia o kolejce** ⬜ — webhook / Slack / mail (np. dzienny digest) o oczekujących
   propozycjach. Przy wielu repo nikt nie zagląda do dashboardu bez powodu; kolejka bez recenzenta
   to pamięć, która stoi w miejscu.
+- **Filtr kolejki dla propozycji projektów** ⬜ — propozycja `create_project` (v1.5) ma
+  `project_id=NULL, scope='global'`, więc w przełączniku kontekstu wisi pod „Global” obok pamięci
+  globalnych. Osobny filtr / widok propozycji projektów. Odłożone z v1.5 (2026-10-05): na start
+  wystarcza istniejący filtr typu.
 
 > Auto mode per projekt → [`roadmap.md`](roadmap.md), v1.6 (zastąpił dawne „Auto-allow po N
 > spójnych decyzjach", patrz „Wycięte").

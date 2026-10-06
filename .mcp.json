@@ -4,7 +4,8 @@
       "type": "http",
       "url": "${CONTEXT_KEEPER_URL:-http://localhost:3000}/mcp",
       "headers": {
-        "Authorization": "Bearer ${CONTEXT_KEEPER_TOKEN}"
+        "Authorization": "Bearer ${CONTEXT_KEEPER_TOKEN}",
+        "X-Context-Keeper-Project": "context-keeper"
       }
     }
   }

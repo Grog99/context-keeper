@@ -164,12 +164,16 @@ MCP `context-keeper` (config w commitowanym [`.mcp.json`](.mcp.json)). Jak agenc
 korzystać (proaktywne `search_memory`, human-gated `save_memory`, higiena zapisów) opisuje
 [`AGENTS.md`](AGENTS.md) — Claude Code zaciąga go przez [`CLAUDE.md`](CLAUDE.md) (`@AGENTS.md`).
 
-Żeby włączyć pamięć na swojej maszynie: `.mcp.json` jedzie z repo, ale adres instancji i token
-trzymasz lokalnie w zmiennych środowiskowych (nie ma ich w repo):
+Żeby włączyć pamięć na swojej maszynie: `.mcp.json` jedzie z repo i wskazuje projekt nagłówkiem
+`X-Context-Keeper-Project: context-keeper`, a adres instancji i token trzymasz lokalnie w zmiennych
+środowiskowych (nie ma ich w repo):
 
 - `CONTEXT_KEEPER_URL` — bazowy adres Twojej instancji, bez `/mcp` (domyślnie
   `http://localhost:3000`, czyli lokalny `docker compose` / `pnpm dev`),
-- `CONTEXT_KEEPER_TOKEN` — token `ck_` projektu z dashboardu.
+- `CONTEXT_KEEPER_TOKEN` — **token konta** z dashboardu (*Projekty* → *Tokeny konta*). Token
+  projektowy projektu o slugu `context-keeper` też zadziała — nagłówek wskazuje jego własny projekt.
+
+Na Twojej instancji musi istnieć projekt o slugu `context-keeper` (slug ustawisz w *Projekty*).
 
 ```powershell
 setx CONTEXT_KEEPER_URL "https://twoja-instancja.example.com"   # Windows (user env)
