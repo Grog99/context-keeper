@@ -96,3 +96,21 @@ describe('envSchema — RATE_LIMIT_CREATE_PROJECT_PER_MIN (roadmap v1.5)', () =>
     expect(() => envSchema.parse({ ...BASE, RATE_LIMIT_CREATE_PROJECT_PER_MIN: '0' })).toThrow();
   });
 });
+
+describe('envSchema — pusty string w opcjonalnych polach z formatem = nieustawione', () => {
+  // `X=` z `.env.example` (process.loadEnvFile) i `${X:-}` w compose dają `''`, nie brak klucza.
+  it('PUBLIC_MCP_URL="" -> undefined (zamiast "Invalid URL")', () => {
+    expect(envSchema.parse({ ...BASE, PUBLIC_MCP_URL: '' }).PUBLIC_MCP_URL).toBeUndefined();
+  });
+
+  it('EMBEDDING_PRESET="" -> undefined (zamiast błędu enuma)', () => {
+    expect(envSchema.parse({ ...BASE, EMBEDDING_PRESET: '' }).EMBEDDING_PRESET).toBeUndefined();
+  });
+
+  it('niepusty PUBLIC_MCP_URL nadal jest walidowany i normalizowany', () => {
+    expect(envSchema.parse({ ...BASE, PUBLIC_MCP_URL: 'https://ck.example.com/mcp/' }).PUBLIC_MCP_URL).toBe(
+      'https://ck.example.com',
+    );
+    expect(() => envSchema.parse({ ...BASE, PUBLIC_MCP_URL: 'nie-url' })).toThrow();
+  });
+});

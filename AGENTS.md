@@ -68,6 +68,10 @@ Zebrane z audytu transkryptów sesji ([`agent-patterns-report.md`](context/agent
   jest blokowany z podpowiedzią.
 - **Nowy `git worktree`:** `pnpm install` w nowym katalogu uruchamia się automatycznie po
   `git worktree add` (hook `.claude/hooks/worktree-install.mjs`) — nie trzeba pamiętać ręcznie.
+- **Nowa zmienna env:** dopisz ją w `apps/server/src/config/env.ts`, `.env.example` **i**
+  `services.app.environment` wszystkich trzech plików compose (`docker-compose.yml`,
+  `deploy/docker-compose.coolify*.yml`) z tym samym defaultem — kontener widzi tylko tę listę.
+  Pilnuje tego `apps/server/test/compose-env-parity.spec.ts`.
 
 ---
 

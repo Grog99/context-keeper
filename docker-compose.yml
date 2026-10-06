@@ -54,8 +54,35 @@ services:
       EMBEDDING_API_URL: ${EMBEDDING_API_URL:-}
       EMBEDDING_SAVE_TIMEOUT_MS: ${EMBEDDING_SAVE_TIMEOUT_MS:-1500}
       EMBEDDING_QUERY_TIMEOUT_MS: ${EMBEDDING_QUERY_TIMEOUT_MS:-800}
+      EMBEDDING_PRESET: ${EMBEDDING_PRESET:-}
+      # Obraz NIE zawiera `.env` (.dockerignore), a ten serwis nie ma `env_file` — do kontenera trafia
+      # WYŁĄCZNIE ta lista. Każda zmienna czytana przez appkę (apps/server/src/config/env.ts) musi tu
+      # być, z tym samym defaultem co w schemacie; pilnuje tego test/compose-env-parity.spec.ts.
+      RRF_K: ${RRF_K:-60}
+      SEARCH_TOP_K: ${SEARCH_TOP_K:-10}
+      SEARCH_VECTOR_CANDIDATES: ${SEARCH_VECTOR_CANDIDATES:-50}
+      EVENT_DECAY_HALFLIFE_DAYS: ${EVENT_DECAY_HALFLIFE_DAYS:-30}
+      GRAPH_BOOST_WEIGHT: ${GRAPH_BOOST_WEIGHT:-0.1}
+      BODY_MAX_FACT: ${BODY_MAX_FACT:-8192}
+      BODY_MAX_DOCUMENT: ${BODY_MAX_DOCUMENT:-262144}
+      BODY_MAX_EVENT: ${BODY_MAX_EVENT:-8192}
+      TAGS_MAX: ${TAGS_MAX:-10}
+      TAG_MAX_LEN: ${TAG_MAX_LEN:-40}
+      TOKEN_GRACE_PERIOD_HOURS: ${TOKEN_GRACE_PERIOD_HOURS:-72}
+      RATE_LIMIT_SAVE_PER_MIN: ${RATE_LIMIT_SAVE_PER_MIN:-20}
+      RATE_LIMIT_SEARCH_PER_MIN: ${RATE_LIMIT_SEARCH_PER_MIN:-120}
+      RATE_LIMIT_GET_PER_MIN: ${RATE_LIMIT_GET_PER_MIN:-240}
+      RATE_LIMIT_CREATE_PROJECT_PER_MIN: ${RATE_LIMIT_CREATE_PROJECT_PER_MIN:-3}
+      RATE_LIMIT_MCP_IP_PER_MIN: ${RATE_LIMIT_MCP_IP_PER_MIN:-300}
       SESSION_SECRET: ${SESSION_SECRET:-}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      DASHBOARD_COOKIE_NAME: ${DASHBOARD_COOKIE_NAME:-ck_session}
+      # Publiczny adres /mcp w `.mcp.json` (list_projects/create_project, ekran Onboarding).
+      # ACME_DOMAIN to fallback dla trybu A — tu BEZ defaultu `:80` z serwisu `proxy`, żeby pusta
+      # wartość dawała placeholder, a nie `https://:80`.
+      PUBLIC_MCP_URL: ${PUBLIC_MCP_URL:-}
+      ACME_DOMAIN: ${ACME_DOMAIN:-}
       NIGHTLY_CRON: ${NIGHTLY_CRON:-0 3 * * *}
       NIGHTLY_TZ: ${NIGHTLY_TZ:-Europe/Warsaw}
       NIGHTLY_DEDUP_DISTANCE: ${NIGHTLY_DEDUP_DISTANCE:-0.05}
@@ -65,6 +92,7 @@ services:
       NIGHTLY_PRUNE_STALE_DAYS: ${NIGHTLY_PRUNE_STALE_DAYS:-90}
       NIGHTLY_PRUNE_MAX_ACCESS: ${NIGHTLY_PRUNE_MAX_ACCESS:-0}
       NIGHTLY_MAX_PROPOSALS_PER_RUN: ${NIGHTLY_MAX_PROPOSALS_PER_RUN:-200}
+      SEARCH_EVENTS_RETENTION_DAYS: ${SEARCH_EVENTS_RETENTION_DAYS:-90}
     ports:
       # Bind TYLKO do 127.0.0.1 (nie 0.0.0.0) — review bezpieczeństwa E2: w trybie `edge-proxy`
       # Caddy sięga `app:3000/3001` po sieci compose (host-publish zbędny); w trybie bring-your-own-proxy
