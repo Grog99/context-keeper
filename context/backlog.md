@@ -3,8 +3,11 @@
 Rzeczy świadomie odłożone poza bieżącą wersję. Nie są porzucone — czekają na decyzję albo na sygnał
 z danych (część jest **warunkowa**). Aktywny plan i to, co robimy teraz → [`roadmap.md`](roadmap.md).
 
-**Aktualizacja:** 2026-10-03 · sesja planowania v1.5–v1.6: lepszy prune i `conflicts_report` przeszły
-w [`roadmap.md`](roadmap.md) z v1.4 do v1.6 (razem z auto mode); „Auto-allow po N spójnych decyzjach"
+**Aktualizacja:** 2026-10-06 · domknięcie v1.5: trzy pozycje długu testowego 🟠 (Vitest w
+`apps/dashboard`, test throttlingu logowania, test `surface.middleware`) przeszły do
+[`roadmap.md`](roadmap.md), v1.7 („Luki w testach z przeglądu technicznego"); doszedł filtr kolejki
+dla propozycji projektów (odłożony z v1.5). 2026-10-03 — sesja planowania v1.5–v1.6: lepszy prune
+i `conflicts_report` przeszły w [`roadmap.md`](roadmap.md) z v1.4 do v1.6 (razem z auto mode); „Auto-allow po N spójnych decyzjach"
 zastąpione przez auto mode per projekt (v1.6) → „Wycięte"; per-user auth zostaje tu jako następny krok
 po tokenie konta z v1.5; dług 🟠 #5 (`GET /api/proposals` bez `LIMIT`) i #7 (audyt per projekt)
 poszły do v1.6 („Nocny job na skali"); doszły token tylko do odczytu i powiadomienia o kolejce.
@@ -87,7 +90,8 @@ Z przeglądu technicznego 2026-07-29 → [`tech-review.md`](tech-review.md) (tam
 `plik:linia`, tu jednolinijkowce). Wagi: 🟠 będzie boleć · 🟢 higiena.
 
 > Wszystkie cztery pozycje 🔴 („boli teraz") → zrobione w v1.4. `GET /api/proposals` bez `LIMIT` (#5)
-> i audyt per projekt (#7) → [`roadmap.md`](roadmap.md), v1.6 („Nocny job na skali").
+> i audyt per projekt (#7) → [`roadmap.md`](roadmap.md), v1.6 („Nocny job na skali"). Vitest w
+> dashboardzie, test throttlingu logowania i test `surface.middleware` → v1.7 („Luki w testach").
 
 - **⌘K: debounce + indeks `memories(updated_at)`** ⬜ 🟠 — request na każdy klawisz, `ILIKE '%q%'` i
   sort po nieindeksowanej kolumnie. Koszt M.
@@ -97,12 +101,6 @@ Z przeglądu technicznego 2026-07-29 → [`tech-review.md`](tech-review.md) (tam
   Koszt M.
 - **Parytet enumów SPA ↔ serwer** ⬜ 🟠 — `types/domain.ts` nie zna `'withdrawn'`; potrzebny test
   wymuszający, nie tylko jednorazowa poprawka. Koszt S.
-- **Vitest w `apps/dashboard`** ⬜ 🟠 — brak skryptu `test` czyni `pnpm verify` server-only; bez
-  pokrycia zostaje `computeInlineWordDiff` z czterema progami. Koszt M.
-- **Test throttlingu logowania** ⬜ 🟠 — jedyna bariera przed brute-force współdzielonego hasła,
-  nietestowana (fallback IP, kolejność throttle vs sprawdzenie hasła). Koszt S.
-- **Test `surface.middleware`** ⬜ 🟠 — granica portów MCP/dashboard bez ani jednego testu; regresja
-  wystawia `/api/*` na publicznym porcie. Koszt S.
 - **`pnpm audit` jako bramka** ⬜ 🟢 — advisory react-router jest u nas niewykorzystywalne (SPA bez
   RSC), ale blokuje wpięcie audytu do `verify`; wyciszyć z uzasadnieniem. Koszt S.
 - **Porządek w devDeps dashboardu** ⬜ 🟢 — pluginy ESLint zadeklarowane bez `eslint`; usunięcie

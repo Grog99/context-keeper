@@ -8,15 +8,17 @@ kontekstu i **proponują** zapisy — ale nic nie trafia do pamięci bez zatwier
 
 Specyfikacja: [`context/prd.md`](context/prd.md) · [`context/tech-stack.md`](context/tech-stack.md) · [`context/design-system.md`](context/design-system.md) · [`context/roadmap.md`](context/roadmap.md)
 
-> **Status:** v1.4 (dług techniczny i UI) domknięte, dogfooding live. W toku: v1.5 (wiele repo
-> bez konfiguracji per projekt) — patrz [`context/roadmap.md`](context/roadmap.md).
+> **Status:** v1.5 (wiele repo bez konfiguracji per projekt) domknięte, dogfooding live. Następne:
+> v1.6 (auto mode i nadzór nad skalą) — patrz [`context/roadmap.md`](context/roadmap.md).
 
 ## Najważniejsze funkcje
 
 - **Human-gate** — każdy zapis (agenta i nocnego joba) ląduje w kolejce akceptacji; do pamięci
   trafia dopiero po zatwierdzeniu przez człowieka. To główna obrona przed memory-poisoning, nie tylko proces.
-- **Remote MCP** — narzędzia `search_memory` / `get_memory` / `save_memory`; podłączasz dowolnego
-  klienta MCP przez `.mcp.json` + bearer token.
+- **Remote MCP** — narzędzia pamięci `search_memory` / `get_memory` / `save_memory`; podłączasz
+  dowolnego klienta MCP przez `.mcp.json` + bearer token. Jeden **token konta** obsługuje wszystkie
+  repo (projekt wskazuje nagłówek `X-Context-Keeper-Project`), a z nim agent dostaje też
+  `list_projects` / `create_project` i prompt `onboard` do podpięcia nowego repo.
 - **Hybrid retrieval** — wektor (pgvector) + full-text (tsvector) łączone przez RRF; wielojęzyczne
   embeddingi (bge-m3, PL+EN) domyślnie.
 - **Skaner sekretów** — propozycje z tokenami/kluczami są odrzucane na wejściu, nie zapisywane.
