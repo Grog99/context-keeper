@@ -4,6 +4,7 @@ import { Test } from '@nestjs/testing';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AuditService } from '../src/audit/audit.service';
+import { encodeKeysetCursor } from '../src/common/keyset-cursor';
 import { AppConfigService } from '../src/config/config.service';
 import { AccountTokensController } from '../src/dashboard/account-tokens.controller';
 import { AuditController } from '../src/dashboard/audit.controller';
@@ -37,6 +38,10 @@ function track(name: string) {
   calls.push(name);
 }
 
+/** Ostatnie argumenty przekazane do fake'ów list (audyt/propozycje) — dowód, co faktycznie dotarło do serwisu. */
+let lastAuditFilter: unknown;
+let lastProposalsPageFilter: unknown;
+
 function fakeMemoryAdmin(): MemoryAdminService {
   return {
     listMemories: async () => (track('memoryAdmin.listMemories'), []),
@@ -62,7 +67,11 @@ function fakePurge(): PurgeService {
 
 function fakeAudit(): AuditService {
   return {
-    query: async () => (track('audit.query'), []),
+    query: async (filter: unknown) => (
+      track('audit.query'),
+      (lastAuditFilter = filter),
+      { items: [], nextCursor: null }
+    ),
     log: async () => track('audit.log'),
     countSince: async () => 0,
     latestByEventType: async () => null,
@@ -72,6 +81,11 @@ function fakeAudit(): AuditService {
 function fakeProposals(): ProposalsService {
   return {
     listPending: async () => (track('proposals.listPending'), []),
+    listPendingPage: async (filter: unknown) => (
+      track('proposals.listPendingPage'),
+      (lastProposalsPageFilter = filter),
+      { items: [], nextCursor: null, total: 0 }
+    ),
     getProposal: async () => (track('proposals.getProposal'), { id: 'prop_1' }),
     approve: async () => (track('proposals.approve'), { proposalId: 'prop_1', archivedIds: [], embedding: 'vectorless' }),
     reject: async () => track('proposals.reject'),
@@ -225,6 +239,52 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
       expect(calls).toEqual([]);
     });
 
+    it('GET /api/proposals?limit=501 (powyżej maksimum)', async () => {
+      const { status, json } = await req('GET', '/api/proposals?limit=501');
+      expect(status).toBe(400);
+      expect(json).toMatchObject({ code: 'validation_error' });
+      expect(json.message).toContain('limit');
+      expect(calls).toEqual([]);
+    });
+
+    it('GET /api/proposals?limit=abc (niecyfrowy limit)', async () => {
+      const { status, json } = await req('GET', '/api/proposals?limit=abc');
+      expect(status).toBe(400);
+      expect(json.message).toContain('limit');
+      expect(calls).toEqual([]);
+    });
+
+    it('GET /api/proposals?cursor=garbage (nie jest kursorem keyset)', async () => {
+      const { status, json } = await req('GET', '/api/proposals?cursor=garbage');
+      expect(status).toBe(400);
+      expect(json.message).toContain('cursor');
+      expect(calls).toEqual([]);
+    });
+
+    it('GET /api/audit?cursor=<ISO> (stary format kursora) -> 400', async () => {
+      const { status, json } = await req('GET', '/api/audit?cursor=2026-01-02T00%3A00%3A00.000Z');
+      expect(status).toBe(400);
+      expect(json.message).toContain('cursor');
+      expect(calls).toEqual([]);
+    });
+
+    // Kształt zgodny z regexem, ale data kalendarzowo niepoprawna — bez walidacji Postgres rzuciłby 22008
+    // na `::timestamptz` (500 zamiast 400).
+    const calendarInvalidCursor = Buffer.from(
+      JSON.stringify(['2026-13-45T25:61:61.000000Z', 'abc']),
+    ).toString('base64url');
+
+    it.each(['/api/audit', '/api/proposals'])(
+      'GET %s?cursor=<kalendarzowo niepoprawny ts> -> 400 validation_error',
+      async (path) => {
+        const { status, json } = await req('GET', `${path}?cursor=${calendarInvalidCursor}`);
+        expect(status).toBe(400);
+        expect(json).toMatchObject({ code: 'validation_error' });
+        expect(json.message).toContain('cursor');
+        expect(calls).toEqual([]);
+      },
+    );
+
     it('GET /api/proposals?foo=1 (nieznany klucz query)', async () => {
       const { status, json } = await req('GET', '/api/proposals?foo=1');
       expect(status).toBe(400);
@@ -370,13 +430,28 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
       expect(calls).toEqual(['memoryAdmin.listMemories']);
     });
 
-    it('GET /api/audit?from=<iso>&cursor=<iso> -> fake dostaje from jako Date, cursor jako string', async () => {
-      const { status } = await req(
+    it('GET /api/audit?from=<iso>&cursor=<keyset> -> fake dostaje from jako Date, cursor jako { ts, id }', async () => {
+      const pos = { ts: '2026-01-02T00:00:00.123456Z', id: 'evt_abc123' };
+      const { status, json } = await req(
         'GET',
-        '/api/audit?from=2026-01-01T00%3A00%3A00.000Z&cursor=2026-01-02T00%3A00%3A00.000Z',
+        `/api/audit?from=2026-01-01T00%3A00%3A00.000Z&cursor=${encodeKeysetCursor(pos)}`,
       );
       expect(status).toBe(200);
+      expect(json).toEqual({ items: [], nextCursor: null });
       expect(calls).toEqual(['audit.query']);
+      expect(lastAuditFilter).toMatchObject({ from: new Date('2026-01-01T00:00:00.000Z'), cursor: pos });
+    });
+
+    it('GET /api/proposals?limit=50&type=merge&scope=global&cursor=<keyset> -> listPendingPage dostaje sparsowane filtry', async () => {
+      const pos = { ts: '2026-01-02T00:00:00.123456Z', id: 'prop_abc123' };
+      const { status, json } = await req(
+        'GET',
+        `/api/proposals?limit=50&type=merge&scope=global&cursor=${encodeKeysetCursor(pos)}`,
+      );
+      expect(status).toBe(200);
+      expect(json).toEqual({ items: [], nextCursor: null, total: 0 });
+      expect(calls).toEqual(['proposals.listPendingPage']);
+      expect(lastProposalsPageFilter).toMatchObject({ limit: 50, type: 'merge', scope: 'global', cursor: pos });
     });
 
     it('POST /api/proposals/p1/approve bez body -> nie 400 (domyślny status Nesta dla POST to 201)', async () => {

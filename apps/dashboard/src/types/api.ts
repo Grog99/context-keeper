@@ -56,6 +56,45 @@ export interface ProposalView {
   staleIds: string[];
 }
 
+/** Pola wiersza kolejki wyprowadzone SERWEROWO z efektywnego payloadu (`coalesce(edited_payload,
+ * payload)`) — lustro `ProposalListSummary` (`apps/server/src/proposals/proposals.types.ts`). Pola
+ * nieobecne w payloadzie danego typu są `null`. */
+export interface ProposalListSummary {
+  header: string | null;
+  kind: MemoryKind | null;
+  tags: string[];
+  memoryId: string | null;
+  name: string | null;
+  slug: string | null;
+}
+
+/** Lekki element listy kolejki (`GET /api/proposals`) — lustro `ProposalListItem`; celowo BEZ
+ * `payload`/`editedPayload`/`baseVersions`/`affectedIds` (pełny widok: `GET /api/proposals/:id` ->
+ * `ProposalView`). Znacznik podpowiedzi prawie-duplikatu (A1) dojdzie tu razem z projekcją SQL. */
+export interface ProposalListItem {
+  id: string;
+  type: ProposalType;
+  origin: ProposalOrigin;
+  status: ProposalStatus;
+  scope: MemoryScope;
+  projectId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  summary: ProposalListSummary;
+  /** `edited_payload IS NOT NULL`. */
+  edited: boolean;
+  stale: boolean;
+}
+
+/** Strona `GET /api/proposals` — lustro `ProposalListPage`. `total` liczone z TYMI SAMYMI filtrami co
+ * lista (bez kursora); `nextCursor` = `null` na ostatniej stronie. Kolejka używa jednej strony i `total`
+ * ("N z M"), nie doładowuje. */
+export interface ProposalListPage {
+  items: ProposalListItem[];
+  nextCursor: string | null;
+  total: number;
+}
+
 export interface ApproveResult {
   proposalId: string;
   materializedId?: string;
@@ -217,6 +256,13 @@ export interface AuditLogRowApi {
   revisionId: string | null;
   metadata: Record<string, unknown> | null;
   createdAt: string;
+}
+
+/** Strona `GET /api/audit` — lustro `AuditPage` (`apps/server/src/audit/audit.service.ts`). `nextCursor`
+ * to OPAQUE string (nie ISO `createdAt`) — przekazywany z powrotem bez interpretacji; `null` = ostatnia strona. */
+export interface AuditPage {
+  items: AuditLogRowApi[];
+  nextCursor: string | null;
 }
 
 export interface DashboardMetrics {

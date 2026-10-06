@@ -6,6 +6,7 @@ import type {
   ProposalType,
   RelationType,
 } from '../db/schema/enums';
+import type { KeysetPosition } from '../common/keyset-cursor';
 import type { ProposalErrorCode } from './proposals.errors';
 
 /** Krawędź attach-on-save, niesiona w `payload.relations` (§memory.types.ts `SaveRelationInput`,
@@ -136,6 +137,60 @@ export interface ListProposalsFilter {
   status?: ProposalStatus;
   origin?: ProposalOrigin;
   projectId?: string;
+  /** Typ propozycji — filtr w SQL (nightly-scale, ustalenie 6). */
+  type?: ProposalType;
+  /** `'global'` = tylko propozycje o `scope='global'` (druga forma kontekstu przełącznika, FR-D6, obok
+   * `projectId`); pominięte = bez filtra zakresu. */
+  scope?: MemoryScope;
+}
+
+/** Filtr lekkiej, stronicowanej listy kolejki (`ProposalsService.listPendingPage`). */
+export interface ListProposalsPageFilter extends ListProposalsFilter {
+  /** Domyślnie `PROPOSALS_LIST_DEFAULT_LIMIT`, max `PROPOSALS_LIST_MAX_LIMIT`. */
+  limit?: number;
+  /** Keyset `(created_at, id)` ASC — pozycja ostatniego wiersza poprzedniej strony. */
+  cursor?: KeysetPosition;
+}
+
+/** Pola wiersza kolejki wyprowadzone z EFEKTYWNEGO payloadu (`coalesce(edited_payload, payload)`) —
+ * liczone w SQL, więc sam jsonb nigdy nie opuszcza Postgresa przy liście (nightly-scale G3; payload do
+ * 256 KB × strona × polling co 15 s to był koszt z tech-review #5). Pola nieobecne w payloadzie
+ * danego typu (np. `header` w `delete`, `name`/`slug` poza `create_project`) są `null`. */
+export interface ProposalListSummary {
+  header: string | null;
+  kind: MemoryKind | null;
+  tags: string[];
+  memoryId: string | null;
+  name: string | null;
+  slug: string | null;
+}
+
+/** Lekki element listy kolejki — BEZ `payload`/`editedPayload`/`baseVersions` (pełny widok po
+ * `GET /api/proposals/:id` -> `ProposalView`). A1 (podpowiedź prawie-duplikatu, ticket
+ * near-duplicate-detection, G10) dołoży tu swój znacznik „ma podpowiedź" razem z projekcją SQL w
+ * `listPendingPage` — dziś nie istnieje (G3: kto zmerguje się drugi, ten dokłada). */
+export interface ProposalListItem {
+  id: string;
+  type: ProposalType;
+  origin: ProposalOrigin;
+  status: ProposalStatus;
+  scope: MemoryScope;
+  projectId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  summary: ProposalListSummary;
+  /** `edited_payload IS NOT NULL` — recenzent poprawił treść (FR-Q6). */
+  edited: boolean;
+  /** Jak `ProposalView.stale` (display-only, bez locka). */
+  stale: boolean;
+}
+
+/** Strona listy kolejki. `total` = `count(*)` z TYMI SAMYMI filtrami co lista (bez kursora) — licznik
+ * „N z M" w dashboardzie (G4); `nextCursor` = `null` na ostatniej stronie. */
+export interface ProposalListPage {
+  items: ProposalListItem[];
+  nextCursor: string | null;
+  total: number;
 }
 
 /** Widok proposala do listy/podglądu (CLI dziś, dashboard w Fazie 5) — `payload`/`editedPayload`

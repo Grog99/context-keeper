@@ -28,7 +28,7 @@ import { api } from '../lib/api';
 import { formatAbsoluteTime } from '../lib/format';
 import { queryKeys } from '../lib/query';
 import { toQueryString } from '../lib/query-string';
-import type { AuditLogRowApi, ProjectListItem } from '../types/api';
+import type { AuditLogRowApi, AuditPage, ProjectListItem } from '../types/api';
 import type { AuditEventType } from '../types/domain';
 
 type EventFilter = 'all' | AuditEventType;
@@ -115,10 +115,10 @@ export function AuditScreen() {
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: queryKeys.audit({ ...filterParams, cursor }),
-    queryFn: () => api.get<AuditLogRowApi[]>(`/audit${toQueryString({ ...filterParams, cursor })}`),
+    queryFn: () => api.get<AuditPage>(`/audit${toQueryString({ ...filterParams, cursor })}`),
   });
 
-  const allRows = cursor ? [...rows, ...(data ?? [])] : (data ?? []);
+  const allRows = cursor ? [...rows, ...(data?.items ?? [])] : (data?.items ?? []);
 
   function resetAndFilter<T>(setter: (value: T) => void, value: T): void {
     setCursor(undefined);
@@ -127,9 +127,11 @@ export function AuditScreen() {
   }
 
   function loadMore(): void {
-    if (!data || data.length === 0) return;
+    // Kursor jest OPAQUE (serwer: keyset `(created_at, id)` w pełnej precyzji) — przekazujemy go bez
+    // interpretacji; `null` = ostatnia strona (zamiast zgadywania po liczbie wierszy).
+    if (!data?.nextCursor) return;
     setRows(allRows);
-    setCursor(data[data.length - 1].createdAt);
+    setCursor(data.nextCursor);
   }
 
   return (
@@ -249,7 +251,7 @@ export function AuditScreen() {
               </tbody>
             </table>
           </div>
-          {data && data.length >= 100 && (
+          {data?.nextCursor && (
             <button
               type="button"
               onClick={loadMore}

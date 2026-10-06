@@ -22,7 +22,8 @@ export interface AnnSearchParams {
    * `undefined` dozwolone tak jak wszędzie w Drizzle `and()`/`or()` — po prostu pomijane. */
   scopeCondition: SQL | undefined;
   /** Dodatkowe predykaty specyficzne dla wołającego (retrieval: `kind`/tag filter; nightly:
-   * `kind='fact'`, zawężenie do snapshotu id-ów, wykluczenie samego siebie). */
+   * `kind='fact'`, wykluczenie samego siebie; członkostwo w snapshocie sprawdza nightly w JS, nie listą
+   * id w SQL — stała liczba bind-parametrów). */
   extraConditions?: (SQL | undefined)[];
   /** `true` = kolapsuj multi-chunk dokumenty do `MIN(dist)` per `memoryId` (`vectorArm` — dokumenty
    * mają wiele chunków, FR-R3). `false` = jeden wiersz na embedding, bez agregacji (nightly — fakty

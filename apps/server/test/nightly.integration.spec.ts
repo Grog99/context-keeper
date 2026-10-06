@@ -5,7 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AuditService } from '../src/audit/audit.service';
 import { generateId, ID_PREFIX } from '../src/common/ids';
 import { AppConfigService } from '../src/config/config.service';
@@ -610,6 +610,97 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
 
       const [after] = await db.select().from(proposals).where(eq(proposals.id, humanProposal.id));
       expect(after.status).toBe('pending'); // nietknięty — nightly nigdy nie dotyka proposali innego origin
+    });
+  });
+
+  describe('G2 — stała liczba parametrów ANN (nightly-scale)', () => {
+    /** Wektor jednostkowy wzdłuż osi `axis` — wzajemnie ortogonalne (dystans ~1, poza progiem dedup),
+     * więc kolejne fakty testu nigdy nie tworzą klastra ani propozycji. Osie 0/1 zajmują NEAR/DISTINCT. */
+    function axisVector(axis: number): number[] {
+      const v = new Array(EMBEDDING_DIM).fill(0);
+      v[axis] = 1;
+      return v;
+    }
+
+    /** `NightlyService` na `db` z loggerem — zbiera (query, params) każdego zapytania ANN (`<=>`). */
+    function buildLoggingNightly(captured: Array<{ query: string; params: unknown[] }>): NightlyService {
+      const loggingDb = drizzle(pool, {
+        schema,
+        logger: { logQuery: (query, params) => captured.push({ query, params }) },
+      });
+      const config = new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' }));
+      const embeddingService = new EmbeddingService(new StubEmbeddingProvider(ACTIVE_MODEL), config);
+      return new NightlyService(
+        loggingDb,
+        pool,
+        config,
+        audit,
+        embeddingService,
+        new RecencyPruneScorer(),
+        new UsageService(loggingDb),
+      );
+    }
+
+    const annParamCounts = (captured: Array<{ query: string; params: unknown[] }>): number[] =>
+      captured.filter((c) => c.query.includes('<=>')).map((c) => c.params.length);
+
+    it('liczba bind-parametrów zapytania ANN nie zależy od liczby zatwierdzonych faktów (N vs 2N)', async () => {
+      const created = await projects.createProject('nightly-ann-params');
+      const projectId = created.project.id;
+      let axis = 10;
+      const seedDistinct = async (n: number): Promise<void> => {
+        for (let i = 0; i < n; i++) {
+          await seedFactWithVector(projectId, { header: `ANN param ${axis}`, body: 'T.' }, axisVector(axis));
+          axis += 1;
+        }
+      };
+
+      await seedDistinct(4);
+      const first: Array<{ query: string; params: unknown[] }> = [];
+      await buildLoggingNightly(first).run({ actor: 'tester' });
+      const firstCounts = annParamCounts(first);
+      expect(firstCounts.length).toBeGreaterThanOrEqual(4);
+
+      await seedDistinct(4); // 2N faktów w tym projekcie (i tyle samo więcej w snapshocie całej instancji)
+      const second: Array<{ query: string; params: unknown[] }> = [];
+      await buildLoggingNightly(second).run({ actor: 'tester' });
+      const secondCounts = annParamCounts(second);
+      expect(secondCounts.length).toBeGreaterThan(firstCounts.length);
+
+      // Jedna wartość w obrębie obu przebiegów — dawne `id IN (snapshot)` dawało N + stała, rosnące z N.
+      const distinct = new Set([...firstCounts, ...secondCounts]);
+      expect(distinct.size).toBe(1);
+    });
+
+    it('fakt zatwierdzony PO snapshocie nie wywraca przebiegu i nie trafia do żadnej propozycji', async () => {
+      const created = await projects.createProject('nightly-ann-concurrent');
+      const projectId = created.project.id;
+      const factX = await seedFactWithVector(projectId, { header: 'Konkurencja X', body: 'Tresc X.' }, NEAR);
+      const factY = await seedFactWithVector(projectId, { header: 'Konkurencja Y', body: 'Tresc Y dluzsza.' }, NEAR);
+
+      const { nightly } = buildServices();
+      const internals = nightly as unknown as {
+        loadApprovedFacts: (model: string) => Promise<unknown>;
+      };
+      const original = internals.loadApprovedFacts.bind(nightly);
+      let lateFactId: string | undefined;
+      const spy = vi.spyOn(internals, 'loadApprovedFacts').mockImplementation(async (model: string) => {
+        const snapshot = await original(model);
+        // Snapshot już zrobiony — teraz „współbieżnie" wchodzi near-identyczny zatwierdzony fakt.
+        const late = await seedFactWithVector(projectId, { header: 'Spozniony Z', body: 'Tresc Z.' }, NEAR);
+        lateFactId = late.id;
+        return snapshot;
+      });
+
+      const result = await nightly.run({ actor: 'tester' });
+      spy.mockRestore();
+
+      expect(result.status).toBe('success');
+      expect(lateFactId).toBeDefined();
+      const mine = await db.select().from(proposals).where(eq(proposals.projectId, projectId));
+      expect(mine.some((p) => p.affectedIds.includes(lateFactId as string))).toBe(false);
+      const merge = await findNightlyProposal('merge', [factX.id, factY.id]);
+      expect(merge).toBeDefined();
     });
   });
 });

@@ -1,10 +1,12 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, asc, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { ToolError } from '../common/errors';
 import { generateId, ID_PREFIX } from '../common/ids';
+import { keysetAfter, keysetTs, pageByKeyset } from '../common/keyset-cursor';
 import { isUniqueViolation } from '../common/pg-errors';
 import { scanForSecrets } from '../common/secret-scanner';
+import { idsAny } from '../common/sql-helpers';
 import { AppConfigService } from '../config/config.service';
 import { DB, type Database, type Tx } from '../db/db.tokens';
 import {
@@ -44,7 +46,10 @@ import type {
   EditResult,
   EmbeddingDisposition,
   ListProposalsFilter,
+  ListProposalsPageFilter,
   MergePayload,
+  ProposalListItem,
+  ProposalListPage,
   ProposalPayload,
   ProposalView,
   RelationPayloadEntry,
@@ -114,6 +119,12 @@ export function computeStaleIds(
  * paginacji: bulk jest sekwencyjny (patrz `runBulk`), a każdy item może zrobić sieciowy embedding —
  * bez capu jeden klik mógłby trzymać request minutami. */
 export const BULK_MAX_IDS = 100;
+
+/** Domyślny/maks. `limit` listy kolejki `GET /api/proposals` (nightly-scale, dług #5). Jedno źródło
+ * prawdy dla kontrolera (`ZodValidationPipe`, `dashboard.schemas.ts`) i tego serwisu — jak
+ * `AUDIT_QUERY_*_LIMIT`. CLI (`listPending`) limitu nie ma (G5). */
+export const PROPOSALS_LIST_DEFAULT_LIMIT = 100;
+export const PROPOSALS_LIST_MAX_LIMIT = 500;
 
 /** Walidacja + deduplikacja koperty bulku. Bierze `unknown`, bo body z kontrolera to czysta asercja
  * typu TS (brak globalnego `ValidationPipe` w `main.ts`). Duplikaty kolapsują cicho (drugie wystąpienie
@@ -193,18 +204,105 @@ export class ProposalsService {
     private readonly embedding: EmbeddingService,
   ) {}
 
-  /** Lista do przeglądu (CLI dziś, dashboard w Fazie 5) — `stale` liczone BEZ locka (display-only). */
-  async listPending(filter: ListProposalsFilter = {}): Promise<ProposalView[]> {
-    const conditions = [eq(proposals.status, filter.status ?? 'pending')];
+  /** Warunki WHERE wspólne dla pełnej listy (CLI) i lekkiej strony (dashboard) — jedno miejsce, żeby
+   * `total` strony liczył DOKŁADNIE ten sam zbiór co jej wiersze. */
+  private listConditions(filter: ListProposalsFilter): SQL[] {
+    const conditions: SQL[] = [eq(proposals.status, filter.status ?? 'pending')];
     if (filter.origin) conditions.push(eq(proposals.origin, filter.origin));
     if (filter.projectId) conditions.push(eq(proposals.projectId, filter.projectId));
+    if (filter.type) conditions.push(eq(proposals.type, filter.type));
+    if (filter.scope) conditions.push(eq(proposals.scope, filter.scope));
+    return conditions;
+  }
 
+  /** Pełna lista do przeglądu (CLI `list-proposals`, G5 — bez limitu) — `stale` liczone BEZ locka
+   * (display-only). Dashboard używa lekkiej, stronicowanej `listPendingPage`. */
+  async listPending(filter: ListProposalsFilter = {}): Promise<ProposalView[]> {
     const rows = await this.db
       .select()
       .from(proposals)
-      .where(and(...conditions))
-      .orderBy(asc(proposals.createdAt));
+      .where(and(...this.listConditions(filter)))
+      .orderBy(asc(proposals.createdAt), asc(proposals.id));
     return this.toViews(rows);
+  }
+
+  /**
+   * Lekka, stronicowana lista kolejki dla dashboardu (nightly-scale #5, G3/G4). FIFO (`created_at ASC,
+   * id ASC`, ustalenie 8) z kursorem keyset w pełnej precyzji; `limit + 1` wierszy wykrywa kolejną
+   * stronę. Projekcja pól wiersza idzie z `coalesce(edited_payload, payload)` W SQL — jsonb payloadu
+   * (do 256 KB) nie opuszcza Postgresa. `total` = `count(*)` z identycznymi filtrami bez kursora,
+   * liczony równolegle (może minimalnie rozjechać się z `items` przy współbieżnym approve — kosmetyka,
+   * leczy się przy następnym pollu). Pełny widok pojedynczej propozycji: `getProposal`.
+   */
+  async listPendingPage(filter: ListProposalsPageFilter = {}): Promise<ProposalListPage> {
+    const limit = filter.limit ?? PROPOSALS_LIST_DEFAULT_LIMIT;
+    const conditions = this.listConditions(filter);
+    const pageConditions = filter.cursor
+      ? [...conditions, keysetAfter(proposals, filter.cursor, 'asc')]
+      : conditions;
+    // Efektywny payload (recenzent wygrywa, jak `pickEffectivePayload`) — pola wiersza z jsonb po stronie bazy.
+    const eff = sql`coalesce(${proposals.editedPayload}, ${proposals.payload})`;
+
+    const [rows, [totalRow]] = await Promise.all([
+      this.db
+        .select({
+          id: proposals.id,
+          type: proposals.type,
+          origin: proposals.origin,
+          status: proposals.status,
+          scope: proposals.scope,
+          projectId: proposals.projectId,
+          createdAt: proposals.createdAt,
+          updatedAt: proposals.updatedAt,
+          affectedIds: proposals.affectedIds,
+          baseVersions: proposals.baseVersions,
+          header: sql<string | null>`${eff} ->> 'header'`,
+          kind: sql<MemoryKind | null>`${eff} ->> 'kind'`,
+          tags: sql<string[] | null>`${eff} -> 'tags'`,
+          memoryId: sql<string | null>`${eff} ->> 'memoryId'`,
+          name: sql<string | null>`${eff} ->> 'name'`,
+          slug: sql<string | null>`${eff} ->> 'slug'`,
+          edited: sql<boolean>`${proposals.editedPayload} is not null`,
+          cursorTs: keysetTs(proposals.createdAt),
+        })
+        .from(proposals)
+        .where(and(...pageConditions))
+        .orderBy(asc(proposals.createdAt), asc(proposals.id))
+        .limit(limit + 1),
+      this.db
+        .select({ total: sql<number>`count(*)::int` })
+        .from(proposals)
+        .where(and(...conditions)),
+    ]);
+
+    const page = pageByKeyset(rows, limit);
+    const versionMap = await this.loadVersionMap(
+      Array.from(new Set(rows.slice(0, limit).flatMap((r) => r.affectedIds))),
+    );
+    const items: ProposalListItem[] = page.items.map((row) => {
+      const baseVersions = (row.baseVersions ?? {}) as Record<string, number>;
+      return {
+        id: row.id,
+        type: row.type,
+        origin: row.origin,
+        status: row.status,
+        scope: row.scope,
+        projectId: row.projectId,
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+        summary: {
+          header: row.header,
+          kind: row.kind,
+          tags: row.tags ?? [],
+          memoryId: row.memoryId,
+          name: row.name,
+          slug: row.slug,
+        },
+        edited: row.edited,
+        stale: computeStaleIds(versionMap, baseVersions, row.affectedIds).length > 0,
+      };
+    });
+    return { items, nextCursor: page.nextCursor, total: totalRow?.total ?? 0 };
   }
 
   async getProposal(id: string): Promise<ProposalView> {
@@ -702,16 +800,21 @@ export class ProposalsService {
 
   // ---- private helpers ------------------------------------------------
 
+  /** Aktualne `memories.version` dla podanych id (display-only, bez locka) — wspólne dla `toViews` i
+   * lekkiej listy. `idsAny`: jeden parametr bind zamiast N (lista może nieść setki affected ids). */
+  private async loadVersionMap(ids: string[]): Promise<Map<string, number>> {
+    if (ids.length === 0) return new Map();
+    const versionRows = await this.db
+      .select({ id: memories.id, version: memories.version })
+      .from(memories)
+      .where(idsAny(memories.id, ids));
+    return new Map(versionRows.map((r) => [r.id, r.version]));
+  }
+
   private async toViews(rows: ProposalRow[]): Promise<ProposalView[]> {
-    const allAffectedIds = Array.from(new Set(rows.flatMap((r) => r.affectedIds)));
-    const versionRows =
-      allAffectedIds.length > 0
-        ? await this.db
-            .select({ id: memories.id, version: memories.version })
-            .from(memories)
-            .where(inArray(memories.id, allAffectedIds))
-        : [];
-    const versionMap = new Map(versionRows.map((r) => [r.id, r.version]));
+    const versionMap = await this.loadVersionMap(
+      Array.from(new Set(rows.flatMap((r) => r.affectedIds))),
+    );
 
     return rows.map((row) => {
       const baseVersions = (row.baseVersions ?? {}) as Record<string, number>;
