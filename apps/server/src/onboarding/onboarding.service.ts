@@ -7,6 +7,7 @@ import {
   CLAUDE_MD_BLOCK,
   MCP_SERVER_NAME,
   MCP_URL_PLACEHOLDER,
+  ONBOARDING_SETUP_STEPS,
   renderMcpJson,
   type OnboardingProject,
 } from './onboarding-templates';
@@ -89,18 +90,18 @@ export class OnboardingService {
       name: p.name,
       mcpJson: renderMcpJson(url, p.slug),
     }));
-    const base =
+    // Krótkie otwarcie per sytuacja + wspólne kroki zapisu (jedno źródło z `next` i promptem `onboard`).
+    const lead =
       projects.length === 0
-        ? 'No projects yet — propose one with create_project({name, slug}); a human approves it in the dashboard.'
-        : "Copy the mcpJson of this repo's project to the repo's .mcp.json and commit it (the token stays in " +
-          'the CONTEXT_KEEPER_TOKEN environment variable, never in the file). Add agentsMd to AGENTS.md and ' +
-          "claudeMd to CLAUDE.md. If this repo's project is not listed, propose it with create_project({name, slug}).";
+        ? 'No projects yet — propose one with create_project({name, slug}) (suggest the repo or directory name as the slug and confirm it with the user); a human approves it in the dashboard. Then set up the repo with the blocks from its result:'
+        : "Pick the project that matches this repo and confirm the slug with the user; if it is not listed, propose it with create_project({name, slug}) instead. Then set up the repo with that project's mcpJson and the agentsMd / claudeMd of this result:";
+    const base = `${lead}\n${ONBOARDING_SETUP_STEPS}`;
     return {
       projects,
       agentsMd: AGENTS_MD_BLOCK,
       claudeMd: CLAUDE_MD_BLOCK,
       mcpUrlConfigured: configured,
-      hint: configured ? base : `${base} ${URL_NOT_CONFIGURED_HINT}`,
+      hint: configured ? base : `${base}\n${URL_NOT_CONFIGURED_HINT}`,
     };
   }
 

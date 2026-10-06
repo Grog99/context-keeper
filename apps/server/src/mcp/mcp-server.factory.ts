@@ -6,6 +6,12 @@ import { memoryKind, relationType } from '../db/schema/enums';
 import { MemoryService } from '../memory/memory.service';
 import type { McpAuthContext } from '../projects/project-scope';
 import type { OnboardingService } from '../onboarding/onboarding.service';
+import {
+  ONBOARD_PROMPT_DESCRIPTION,
+  ONBOARD_PROMPT_NAME,
+  ONBOARD_PROMPT_TEXT,
+  ONBOARD_PROMPT_TITLE,
+} from '../onboarding/onboarding-templates';
 import type { ProjectProposalService } from '../onboarding/project-proposal.service';
 import type { ProjectSlugService } from '../projects/project-slug.service';
 import type { ProjectContext } from '../projects/projects.service';
@@ -50,7 +56,8 @@ async function runTool(fn: () => Promise<CallToolResult>): Promise<CallToolResul
  *
  * Zestaw narzędzi zależy WYŁĄCZNIE od typu tokena (`auth.tokenScope`), nigdy od nagłówka ani stanu bazy
  * (ticket #13): tokenowi konta dochodzą `list_projects`/`create_project` (z nagłówkiem i bez), tokenowi
- * projektowemu nie — `tools/list` zostaje wolne od zapytań do bazy.
+ * projektowemu nie — `tools/list` zostaje wolne od zapytań do bazy. Prompt `onboard` idzie tą samą regułą
+ * (tylko `tokenScope`): tokenowi konta dochodzi capability `prompts`, projektowemu nie.
  *
  * Zakres odczytu (`ReadScope`, roadmap v1.5) jest rozstrzygany TU z typu tokena (`read-scope-policy.ts`) —
  * `MemoryService` nie zna typów tokenów.
@@ -107,6 +114,14 @@ export function createMcpServer(
             ),
           ),
         ),
+    );
+
+    // Prompt `onboard` (ticket mcp-onboard-prompt G2/G3): statyczny tekst, callback nie dotyka `deps` ani
+    // bazy; pierwsza rejestracja ogłasza capability `prompts` — token projektowy jej nie dostaje.
+    server.registerPrompt(
+      ONBOARD_PROMPT_NAME,
+      { title: ONBOARD_PROMPT_TITLE, description: ONBOARD_PROMPT_DESCRIPTION },
+      () => ({ messages: [{ role: 'user', content: { type: 'text', text: ONBOARD_PROMPT_TEXT } }] }),
     );
   }
 
