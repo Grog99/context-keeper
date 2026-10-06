@@ -8,6 +8,7 @@ import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AuditService } from '../src/audit/audit.service';
 import { generateId, ID_PREFIX } from '../src/common/ids';
+import { decodeKeysetCursor } from '../src/common/keyset-cursor';
 import { isUniqueViolation } from '../src/common/pg-errors';
 import { AppConfigService } from '../src/config/config.service';
 import { envSchema } from '../src/config/env';
@@ -32,6 +33,7 @@ import { EmbeddingService } from '../src/embeddings/embedding.service';
 import { MemoryService } from '../src/memory/memory.service';
 import { ProjectSlugService } from '../src/projects/project-slug.service';
 import { ProposalsService } from '../src/proposals/proposals.service';
+import type { ProposalListPage } from '../src/proposals/proposals.types';
 import type { ProjectContext } from '../src/projects/projects.service';
 import type { ProjectsService } from '../src/projects/projects.service';
 import { UsageService } from '../src/usage/usage.service';
@@ -1647,6 +1649,187 @@ describe('ProposalsService (integration, testcontainers) — kolejka akceptacji 
       await expect(proposalsService.getProposal('prop_doesnotexist0')).rejects.toMatchObject({
         code: 'not_found',
       });
+    });
+  });
+
+  describe('listPendingPage — lekka, stronicowana lista kolejki (nightly-scale #5, G3/G4)', () => {
+    async function freshProject(slug: string): Promise<string> {
+      return (await projects.createProject(slug)).project.id;
+    }
+
+    /** Masowy seed jednym INSERT … SELECT (szybciej niż setki round-tripów). */
+    async function bulkSeed(projectId: string, type: 'create' | 'merge', count: number): Promise<void> {
+      const tag = generateId('b'); // unikalny prefiks id w obrębie testu
+      await pool.query(
+        `INSERT INTO proposals (id, type, origin, status, payload, scope, project_id)
+         SELECT $1 || '_' || g, $2::proposal_type, 'agent', 'pending',
+                jsonb_build_object('memoryId', 'mem_' || g, 'header', 'h' || g, 'body', 'b', 'tags', '[]'::jsonb, 'kind', 'fact'),
+                'project', $3
+           FROM generate_series(1, $4::int) g`,
+        [tag, type, projectId, count],
+      );
+    }
+
+    it('domyślny limit 100: >100 pending -> 100 wierszy, nextCursor niepusty, total = wszystkie', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('page-default-model'));
+      const projectId = await freshProject('page-default');
+      await bulkSeed(projectId, 'create', 101);
+
+      const page = await proposalsService.listPendingPage({ projectId });
+      expect(page.items).toHaveLength(100);
+      expect(page.nextCursor).not.toBeNull();
+      expect(page.total).toBe(101);
+    });
+
+    it('identyczne created_at + różnice tylko w mikrosekundach: każdy wiersz dokładnie raz, last nextCursor = null, total stały', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('page-ts-model'));
+      const projectId = await freshProject('page-ts');
+      const ids: string[] = [];
+      const insert = async (id: string, createdAt: string): Promise<void> => {
+        ids.push(id);
+        await pool.query(
+          `INSERT INTO proposals (id, type, origin, status, payload, scope, project_id, created_at)
+           VALUES ($1, 'create', 'agent', 'pending', '{"memoryId":"mem_x","header":"h"}', 'project', $2, $3::timestamptz)`,
+          [id, projectId, createdAt],
+        );
+      };
+      for (let i = 0; i < 5; i++) await insert(`prop_ts_same_${i}`, '2001-01-01T00:00:00.000000Z');
+      await insert('prop_ts_us_a', '2001-01-01T00:00:00.123456Z');
+      await insert('prop_ts_us_b', '2001-01-01T00:00:00.123457Z');
+
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      do {
+        const page: ProposalListPage = await proposalsService.listPendingPage({
+          projectId,
+          limit: 2,
+          cursor: cursor ? (decodeKeysetCursor(cursor) ?? undefined) : undefined,
+        });
+        expect(page.total).toBe(7); // total NIE zależy od kursora
+        seen.push(...page.items.map((p) => p.id));
+        cursor = page.nextCursor;
+        pages += 1;
+        expect(pages).toBeLessThan(10);
+      } while (cursor);
+
+      expect(pages).toBe(4); // 2 + 2 + 2 + 1
+      expect([...seen].sort()).toEqual([...ids].sort());
+      expect(new Set(seen).size).toBe(7);
+      // FIFO: pięć identycznych (po id rosnąco), potem .123456, potem .123457.
+      expect(seen).toEqual([
+        'prop_ts_same_0',
+        'prop_ts_same_1',
+        'prop_ts_same_2',
+        'prop_ts_same_3',
+        'prop_ts_same_4',
+        'prop_ts_us_a',
+        'prop_ts_us_b',
+      ]);
+    });
+
+    it('filtr type w SQL: 150 merge + 150 create, type=merge limit=100 -> 100 merge, total 150', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('page-type-model'));
+      const projectId = await freshProject('page-type');
+      await bulkSeed(projectId, 'merge', 150);
+      await bulkSeed(projectId, 'create', 150);
+
+      const page = await proposalsService.listPendingPage({ projectId, type: 'merge', limit: 100 });
+      expect(page.items).toHaveLength(100);
+      expect(page.items.every((p) => p.type === 'merge')).toBe(true);
+      expect(page.total).toBe(150);
+      expect(page.nextCursor).not.toBeNull();
+    });
+
+    it("scope='global' w SQL: tylko propozycje globalne, nie projektowe", async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('page-scope-model'));
+      const projectId = await freshProject('page-scope');
+      const globals = [
+        await seedProposal({ type: 'create', payload: { memoryId: 'mem_g1', header: 'G1' }, scope: 'global', projectId: null }),
+        await seedProposal({ type: 'create', payload: { memoryId: 'mem_g2', header: 'G2' }, scope: 'global', projectId: null }),
+      ];
+      const proj = await seedProposal({ type: 'create', payload: { memoryId: 'mem_p1', header: 'P1' }, projectId });
+
+      const page = await proposalsService.listPendingPage({ scope: 'global', limit: 500 });
+      expect(page.items.every((p) => p.scope === 'global')).toBe(true);
+      const ids = page.items.map((p) => p.id);
+      for (const g of globals) expect(ids).toContain(g.id);
+      expect(ids).not.toContain(proj.id);
+      expect(page.total).toBeGreaterThanOrEqual(globals.length);
+
+      const inProject = await proposalsService.listPendingPage({ projectId, scope: 'global' });
+      expect(inProject).toEqual({ items: [], nextCursor: null, total: 0 });
+    });
+
+    it('projekcja: brak payload/editedPayload/baseVersions w elemencie; summary preferuje edited_payload', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('page-projection-model'));
+      const projectId = await freshProject('page-projection');
+      const created = await seedProposal({
+        type: 'create',
+        payload: { memoryId: 'mem_pr1', header: 'Oryginał', body: 'B', tags: ['a'], kind: 'fact' },
+        projectId,
+      });
+      await pool.query(
+        `UPDATE proposals SET edited_payload = $2::jsonb WHERE id = $1`,
+        [created.id, JSON.stringify({ memoryId: 'mem_pr1', header: 'Po edycji', body: 'B2', tags: ['x', 'y'], kind: 'document' })],
+      );
+      const del = await seedProposal({ type: 'delete', payload: { memoryId: 'mem_pr2' }, projectId });
+
+      const page = await proposalsService.listPendingPage({ projectId });
+      const createdItem = page.items.find((p) => p.id === created.id)!;
+      const delItem = page.items.find((p) => p.id === del.id)!;
+
+      for (const item of page.items) {
+        expect(item).not.toHaveProperty('payload');
+        expect(item).not.toHaveProperty('editedPayload');
+        expect(item).not.toHaveProperty('baseVersions');
+        expect(item).not.toHaveProperty('cursorTs');
+      }
+      expect(createdItem.edited).toBe(true);
+      expect(createdItem.summary).toEqual({
+        header: 'Po edycji',
+        kind: 'document',
+        tags: ['x', 'y'],
+        memoryId: 'mem_pr1',
+        name: null,
+        slug: null,
+      });
+      expect(delItem.edited).toBe(false);
+      expect(delItem.summary).toEqual({ header: null, kind: null, tags: [], memoryId: 'mem_pr2', name: null, slug: null });
+    });
+
+    it('stale liczone jak w widoku pełnym (bump wersji affected memory)', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('page-stale-model'));
+      const projectId = await freshProject('page-stale');
+      const mem = await seedApprovedMemory({ header: 'Stale M', body: 'B', projectId });
+      const row = await seedProposal({
+        type: 'update',
+        payload: { memoryId: mem.id, header: 'Nowy' },
+        affectedIds: [mem.id],
+        baseVersions: { [mem.id]: 0 },
+        projectId,
+      });
+
+      const before = await proposalsService.listPendingPage({ projectId });
+      expect(before.items.find((p) => p.id === row.id)?.stale).toBe(false);
+
+      await db.update(memories).set({ version: 1 }).where(eq(memories.id, mem.id));
+      const after = await proposalsService.listPendingPage({ projectId });
+      expect(after.items.find((p) => p.id === row.id)?.stale).toBe(true);
+    });
+
+    it('getProposal dalej zwraca pełny widok z payloadem; listPending (CLI) zwraca pełne widoki bez limitu', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('page-full-model'));
+      const projectId = await freshProject('page-full');
+      await bulkSeed(projectId, 'create', 120);
+      const one = await seedProposal({ type: 'create', payload: { memoryId: 'mem_full', header: 'Pełny' }, projectId });
+
+      const view = await proposalsService.getProposal(one.id);
+      expect(view.payload).toEqual({ memoryId: 'mem_full', header: 'Pełny' });
+
+      const all = await proposalsService.listPending({ projectId });
+      expect(all).toHaveLength(121); // brak limitu (G5)
+      expect(all[0]).toHaveProperty('payload');
     });
   });
 });

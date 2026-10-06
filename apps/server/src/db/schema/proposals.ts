@@ -48,6 +48,8 @@ export const proposals = pgTable(
   },
   (t) => [
     index('proposals_status_idx').on(t.status),
+    // Keyset listy kolejki (nightly-scale #5): `WHERE status = … ORDER BY created_at, id` bez sortowania.
+    index('proposals_status_created_id_idx').on(t.status, t.createdAt, t.id),
     index('proposals_origin_idx').on(t.origin),
     index('proposals_project_idx').on(t.projectId),
     index('proposals_content_hash_idx').on(t.contentHash),

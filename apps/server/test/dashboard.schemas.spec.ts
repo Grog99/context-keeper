@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { encodeKeysetCursor } from '../src/common/keyset-cursor';
 import {
   approveBody,
   auditListQuery,
@@ -42,18 +43,25 @@ describe('dashboard.schemas — happy paths kształtowane dokładnie jak SPA wys
     expect(memoriesListQuery.parse({})).toEqual({});
   });
 
-  it('auditListQuery: from/to/cursor ISO, limit cyfrowy -> Date/number', () => {
+  it('auditListQuery: from/to ISO, cursor keyset, limit cyfrowy -> Date/{ts,id}/number', () => {
+    const pos = { ts: '2026-01-15T00:00:00.123456Z', id: 'evt_a1b2c3d4e5f6' };
     const result = auditListQuery.parse({
       eventType: 'human_edit',
       from: '2026-01-01T00:00:00.000Z',
       to: '2026-02-01T00:00:00.000Z',
-      cursor: '2026-01-15T00:00:00.000Z',
+      cursor: encodeKeysetCursor(pos),
       limit: '250',
     });
     expect(result.from).toBeInstanceOf(Date);
     expect(result.to).toBeInstanceOf(Date);
     expect(result.limit).toBe(250);
-    expect(typeof result.cursor).toBe('string'); // cursor ZOSTAJE stringiem (serwis re-parsuje)
+    expect(result.cursor).toEqual(pos); // cursor docieka do serwisu zdekodowany
+  });
+
+  it('auditListQuery.cursor: stary ISO i śmieci -> invalid (nightly-scale G6)', () => {
+    for (const cursor of ['2026-01-15T00:00:00.000Z', 'garbage', 'A'.repeat(300)]) {
+      expect(auditListQuery.safeParse({ cursor }).success).toBe(false);
+    }
   });
 
   it('usageQuery: bucket=hour, from/to ISO', () => {
@@ -65,6 +73,13 @@ describe('dashboard.schemas — happy paths kształtowane dokładnie jak SPA wys
   it('proposalsListQuery: status/origin/type/scope=global', () => {
     const result = proposalsListQuery.parse({ status: 'pending', origin: 'agent', type: 'create', scope: 'global' });
     expect(result).toEqual({ status: 'pending', origin: 'agent', type: 'create', scope: 'global' });
+  });
+
+  it('proposalsListQuery: limit (cyfrowy 1..500) i cursor keyset', () => {
+    const pos = { ts: '2026-01-15T00:00:00.123456Z', id: 'prop_a1b2c3d4e5f6' };
+    const result = proposalsListQuery.parse({ limit: '100', cursor: encodeKeysetCursor(pos) });
+    expect(result).toEqual({ limit: 100, cursor: pos });
+    expect(proposalsListQuery.safeParse({ limit: '500' }).success).toBe(true);
   });
 
   it('createRelationBody: {toId, type} jak wysyła RelationsPanel/MemoryBrowserScreen', () => {
@@ -174,6 +189,20 @@ describe('dashboard.schemas — limitQuery (via auditListQuery.limit)', () => {
     expect(auditListQuery.safeParse({ limit: '500' }).success).toBe(true);
     expect(auditListQuery.safeParse({ limit: '1' }).success).toBe(true);
   });
+});
+
+describe('dashboard.schemas — proposalsListQuery.limit/cursor złe -> 400', () => {
+  for (const limit of ['abc', '0', '501', '5.5', '1e2', '']) {
+    it(`limit="${limit}" -> invalid`, () => {
+      expect(proposalsListQuery.safeParse({ limit }).success).toBe(false);
+    });
+  }
+
+  for (const cursor of ['garbage', '2026-01-15T00:00:00.000Z', '']) {
+    it(`cursor="${cursor}" -> invalid`, () => {
+      expect(proposalsListQuery.safeParse({ cursor }).success).toBe(false);
+    });
+  }
 });
 
 describe('dashboard.schemas — daty złe -> 400', () => {

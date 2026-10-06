@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, asc, eq, gt, inArray, ne } from 'drizzle-orm';
+import { and, asc, eq, gt, ne } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { generateId, ID_PREFIX } from '../common/ids';
+import { idsAny } from '../common/sql-helpers';
 import { AppConfigService } from '../config/config.service';
 import { DB, PG_POOL, type Database, type PgPool } from '../db/db.tokens';
 import { embeddings, memories, proposals, stagingEmbeddings } from '../db/schema';
@@ -173,13 +174,16 @@ export class NightlyService {
     const activeModel = this.embedding.model;
     const facts = await this.loadApprovedFacts(activeModel);
     const factById = new Map(facts.map((f) => [f.id, f]));
-    // Snapshot id set (Fix 1, code review commit d057871): ANN musi być zawężone do TYCH SAMYCH
-    // faktów co `factById`, inaczej fakt zatwierdzony współbieżnie w trakcie przebiegu może wrócić
-    // jako sąsiad, mimo że nie ma go w snapshotcie -> `buildMergeCondition` rzucałby na
-    // `factById.get(id)` i wywalał CAŁY przebieg. Restrykcja na poziomie zapytania czyni ten crash
-    // strukturalnie niemożliwym (taki fakt po prostu nie zostanie rozważony w TYM biegu — złapie go
-    // kolejny stateless re-scan).
-    const snapshotIds = Array.from(factById.keys());
+    // Snapshot (Fix 1, code review commit d057871; przeniesiony do JS w nightly-scale G2): sąsiedzi ANN
+    // muszą pochodzić z TYCH SAMYCH faktów co `factById`, inaczej fakt zatwierdzony współbieżnie w
+    // trakcie przebiegu mógłby wrócić jako sąsiad, mimo że nie ma go w snapshotcie ->
+    // `buildMergeCondition` rzucałby na `factById.get(id)` i wywalał CAŁY przebieg. Członkostwo
+    // sprawdza `findNeighborPairs` w JS (`factById.has`), NIE w SQL: dawne `id IN (snapshot)` niosło
+    // wszystkie id jako osobne parametry KAŻDEGO zapytania ANN (O(N²) bajtów, twardy sufit 65 535
+    // parametrów Postgresa), a liczba bind-parametrów ma być stała, niezależna od liczby faktów.
+    // Fakt spoza snapshotu może zająć slot w top-k, ale JS go odrzuca; wypiera realnego sąsiada tylko
+    // jeśli sam jest bliskim duplikatem (klaster i tak już nieaktualny) — para i tak powstaje z obu
+    // końców, a kolejny stateless re-scan koryguje resztę.
 
     const dedupDistance = this.config.get('NIGHTLY_DEDUP_DISTANCE');
     const annNeighbors = this.config.get('NIGHTLY_ANN_NEIGHBORS');
@@ -192,7 +196,7 @@ export class NightlyService {
       const chunk = facts.slice(i, i + NEIGHBOR_SCAN_CONCURRENCY);
       const results = await Promise.all(
         chunk.map((fact) =>
-          this.findNeighborPairs(fact, snapshotIds, activeModel, annNeighbors, dedupDistance),
+          this.findNeighborPairs(fact, factById, activeModel, annNeighbors, dedupDistance),
         ),
       );
       for (const found of results) pairs.push(...found);
@@ -361,13 +365,14 @@ export class NightlyService {
    * LEFT JOIN w `loadApprovedFacts`, bez osobnego zapytania per fakt (eliminacja jednego z dwóch N+1
    * round-tripów tej pętli).
    *
-   * `snapshotIds` (Fix 1, code review commit d057871), przekazane przez `extraConditions`, zawęża
-   * wynik ANN do id-ów ze snapshotu przekazanego do `runLocked` — fakt zatwierdzony współbieżnie PO
-   * snapshotcie nigdy nie wróci jako sąsiad, mimo że jego embedding mógłby być blisko. Bez tego
-   * `buildMergeCondition` (który indeksuje WYŁĄCZNIE po snapshotcie przez `factById`) rzucałby na
-   * brakujący klucz i wywalał cały przebieg (TOCTOU) — taki fakt po prostu poczeka na kolejny
-   * stateless re-scan. `ne(memories.id, fact.id)` (też w `extraConditions`) wyklucza sam fakt z
-   * własnego wyniku ANN.
+   * Snapshot (Fix 1, code review commit d057871; nightly-scale G2): wiersze ANN spoza `factById`
+   * (fakt zatwierdzony współbieżnie PO snapshotcie) są odrzucane W JS, przed filtrem dystansu — bez
+   * tego `buildMergeCondition` (który indeksuje WYŁĄCZNIE po snapshotcie przez `factById`) rzucałby
+   * na brakujący klucz i wywalał cały przebieg (TOCTOU); taki fakt poczeka na kolejny stateless
+   * re-scan. Członkostwa NIE ma w SQL (dawne `inArray(memories.id, snapshotIds)`): liczba
+   * bind-parametrów zapytania ANN jest stała (wektor, model, status, scope 1–2, kind, id faktu,
+   * limit), niezależna od liczby zatwierdzonych faktów. `ne(memories.id, fact.id)` (w
+   * `extraConditions`) wyklucza sam fakt z własnego wyniku ANN.
    *
    * `eq(memories.kind, fact.kind)` (roadmap v1.3 "Dedup kind-aware", defense-in-depth): partycja ANN
    * jest ścisła też po `kind`, symetrycznie ze `scope`/`projectId` wyżej — klaster nigdy nie miesza
@@ -376,7 +381,7 @@ export class NightlyService {
    */
   private async findNeighborPairs(
     fact: FactRow,
-    snapshotIds: string[],
+    factById: Map<string, FactRow>,
     activeModel: string,
     annNeighbors: number,
     dedupDistance: number,
@@ -395,7 +400,6 @@ export class NightlyService {
       scopeCondition,
       extraConditions: [
         eq(memories.kind, fact.kind),
-        inArray(memories.id, snapshotIds),
         ne(memories.id, fact.id),
       ],
       groupByMemory: false, // fakty mają dokładnie jeden wektor — bez kolapsowania multi-chunk
@@ -403,7 +407,7 @@ export class NightlyService {
     });
 
     return rows
-      .filter((r) => r.dist <= dedupDistance)
+      .filter((r) => factById.has(r.memoryId) && r.dist <= dedupDistance)
       .map((r) => ({ a: fact.id, b: r.memoryId, dist: r.dist }));
   }
 
@@ -501,7 +505,7 @@ export class NightlyService {
         ? await this.db
             .select({ id: memories.id, version: memories.version })
             .from(memories)
-            .where(inArray(memories.id, allIds))
+            .where(idsAny(memories.id, allIds))
         : [];
     const versionMap = new Map(versionRows.map((r) => [r.id, r.version]));
 

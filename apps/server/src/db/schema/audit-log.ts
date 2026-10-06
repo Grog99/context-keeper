@@ -21,6 +21,11 @@ export const auditLog = pgTable(
     index('audit_event_type_idx').on(t.eventType),
     index('audit_created_at_idx').on(t.createdAt),
     index('audit_actor_idx').on(t.actor),
+    // GIN pod filtr projektu w `AuditService.query` (`affected_ids && ARRAY(…)`, nightly-scale #7) —
+    // domyślne `array_ops`; bez niego `&&` na kolumnie tablicowej to skan sekwencyjny.
+    // `fastupdate = off`: wpisy trafiają od razu do drzewa GIN, bez pending list — koszt indeksu w
+    // planerze nie zależy od aktualnej długości kolejki (stabilny plan), a wolumen zapisów audytu jest mały.
+    index('audit_affected_ids_idx').using('gin', t.affectedIds).with({ fastupdate: false }),
   ],
 );
 

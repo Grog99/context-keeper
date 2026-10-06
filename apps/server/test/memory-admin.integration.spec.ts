@@ -6,7 +6,8 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { AuditService } from '../src/audit/audit.service';
+import { AuditService, buildAuditQuery, type AuditPage } from '../src/audit/audit.service';
+import { decodeKeysetCursor } from '../src/common/keyset-cursor';
 import { ToolError } from '../src/common/errors';
 import { generateId, ID_PREFIX } from '../src/common/ids';
 import { AppConfigService } from '../src/config/config.service';
@@ -791,7 +792,7 @@ describe('MemoryAdminService (integration, testcontainers) — przeglądarka pam
       const { admin } = buildAdmin(new StubEmbeddingProvider('audit-query-model'));
       await admin.humanCreate({ kind: 'fact', header: 'Audit query test', body: 'T.', scope: 'project', projectId: projectA.projectId });
 
-      const rows = await audit.query({ eventType: 'human_edit', limit: 5 });
+      const { items: rows } = await audit.query({ eventType: 'human_edit', limit: 5 });
       expect(rows.length).toBeGreaterThan(0);
       expect(rows.length).toBeLessThanOrEqual(5);
       expect(rows.every((r) => r.eventType === 'human_edit')).toBe(true);
@@ -799,8 +800,8 @@ describe('MemoryAdminService (integration, testcontainers) — przeglądarka pam
 
     it('filtruje po from/to (zakres czasu)', async () => {
       const future = new Date(Date.now() + 60_000);
-      const rows = await audit.query({ from: future });
-      expect(rows).toEqual([]);
+      const page = await audit.query({ from: future });
+      expect(page).toEqual({ items: [], nextCursor: null });
     });
 
     it('filtruje po projectId (heurystyka actor=agent:<id> ∪ affected_ids ∩ pamięci projektu)', async () => {
@@ -813,8 +814,188 @@ describe('MemoryAdminService (integration, testcontainers) — przeglądarka pam
         projectId: projectB.projectId,
       });
 
-      const rows = await audit.query({ projectId: projectB.projectId, eventType: 'human_edit' });
+      const { items: rows } = await audit.query({ projectId: projectB.projectId, eventType: 'human_edit' });
       expect(rows.some((r) => r.affectedIds.includes(created.id))).toBe(true);
+    });
+  });
+
+  describe('AuditService.query — filtr projektu jako jedno zapytanie + keyset (nightly-scale #7, G6)', () => {
+    /** Dawny algorytm (round-trip id pamięci do Node + `arrayOverlaps`) policzony inline na surowych
+     * wierszach — wzorzec odniesienia dla testu parytetu. */
+    async function expectedProjectEventIds(projectId: string): Promise<string[]> {
+      const memIds = new Set(
+        (await db.select({ id: memories.id }).from(memories).where(eq(memories.projectId, projectId))).map(
+          (m) => m.id,
+        ),
+      );
+      const all = await db.select().from(auditLog);
+      return all
+        .filter((r) => r.actor === `agent:${projectId}` || r.affectedIds.some((id) => memIds.has(id)))
+        .map((r) => r.id)
+        .sort();
+    }
+
+    async function insertAudit(id: string, actor: string, affectedIds: string[], createdAt?: string): Promise<void> {
+      await pool.query(
+        `INSERT INTO audit_log (id, event_type, actor, affected_ids, created_at)
+         VALUES ($1, 'human_edit', $2, $3::text[], COALESCE($4::timestamptz, now()))`,
+        [id, actor, affectedIds, createdAt ?? null],
+      );
+    }
+
+    it('parytet z dawnym algorytmem: actor agent:<id>, pamięci approved/archived/purged, projekt B, mieszane, puste ids', async () => {
+      const a = (await projects.createProject('audit-parity-a')).project.id;
+      const b = (await projects.createProject('audit-parity-b')).project.id;
+      const memA = await seedApprovedMemory({ projectId: a });
+      const memAArchived = await seedApprovedMemory({ projectId: a, status: 'archived' });
+      const memAPurged = await seedApprovedMemory({ projectId: a, status: 'purged' });
+      const memB = await seedApprovedMemory({ projectId: b });
+
+      await insertAudit('evt_par_actor', `agent:${a}`, []);
+      await insertAudit('evt_par_human_appr', 'human-dashboard', [memA.id]);
+      await insertAudit('evt_par_human_arch', 'human-dashboard', [memAArchived.id]);
+      await insertAudit('evt_par_human_purg', 'human-dashboard', [memAPurged.id]);
+      await insertAudit('evt_par_only_b', 'human-dashboard', [memB.id]);
+      await insertAudit('evt_par_mixed', 'human-dashboard', [memB.id, memA.id]);
+      await insertAudit('evt_par_empty', 'human-dashboard', []);
+
+      for (const projectId of [a, b]) {
+        const expected = await expectedProjectEventIds(projectId);
+        const { items } = await audit.query({ projectId, limit: 500 });
+        expect(items.map((r) => r.id).sort()).toEqual(expected);
+      }
+      const { items: itemsA } = await audit.query({ projectId: a, limit: 500 });
+      const idsA = itemsA.map((r) => r.id);
+      expect(idsA).toEqual(
+        expect.arrayContaining([
+          'evt_par_actor',
+          'evt_par_human_appr',
+          'evt_par_human_arch',
+          'evt_par_human_purg',
+          'evt_par_mixed',
+        ]),
+      );
+      expect(idsA).not.toContain('evt_par_only_b');
+      expect(idsA).not.toContain('evt_par_empty');
+    });
+
+    it('projekt bez pamięci i bez wpisów actor -> pusta strona (pusty zbiór ids -> `&&` fałszywe)', async () => {
+      const empty = (await projects.createProject('audit-parity-empty')).project.id;
+      const page = await audit.query({ projectId: empty });
+      expect(page).toEqual({ items: [], nextCursor: null });
+    });
+
+    it('keyset (G6): identyczne created_at przez granicę strony — brak dziur i duplikatów, ostatni nextCursor = null', async () => {
+      const same = '2001-01-01T00:00:00.000000Z';
+      const ids = ['evt_ks_a', 'evt_ks_b', 'evt_ks_c', 'evt_ks_d', 'evt_ks_e'];
+      for (const id of ids) await insertAudit(id, 'ks-test', [], same);
+      // Różnią się TYLKO mikrosekundami — `Date` (ms) by je zlał z sąsiadami.
+      await insertAudit('evt_ks_us1', 'ks-test', [], '2001-01-01T00:00:00.123456Z');
+      await insertAudit('evt_ks_us2', 'ks-test', [], '2001-01-01T00:00:00.123457Z');
+
+      const window = { from: new Date('2000-12-31T00:00:00Z'), to: new Date('2001-01-02T00:00:00Z'), limit: 2 };
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      do {
+        const page: AuditPage = await audit.query({
+          ...window,
+          cursor: cursor ? (decodeKeysetCursor(cursor) ?? undefined) : undefined,
+        });
+        seen.push(...page.items.map((r) => r.id));
+        cursor = page.nextCursor;
+        pages += 1;
+        expect(pages).toBeLessThan(10);
+      } while (cursor);
+
+      expect(pages).toBe(4); // 2 + 2 + 2 + 1
+      expect(seen).toHaveLength(7);
+      expect(new Set(seen).size).toBe(7);
+      // `created_at DESC, id DESC`: najpierw .123457, .123456, potem pięć identycznych po id malejąco.
+      expect(seen).toEqual(['evt_ks_us2', 'evt_ks_us1', 'evt_ks_e', 'evt_ks_d', 'evt_ks_c', 'evt_ks_b', 'evt_ks_a']);
+    });
+
+    it('keyset + filtr projektu: strony po 2 przez nextCursor (kursor poza podzapytaniem) składają się na wynik limit: 500', async () => {
+      const proj = (await projects.createProject('audit-project-paging')).project.id;
+      const mem = await seedApprovedMemory({ projectId: proj });
+      const same = '2002-02-02T00:00:00.000000Z';
+      // Identyczne created_at (tie-break po id) + dwa różniące się tylko mikrosekundami, mieszane źródła dopasowania.
+      for (const id of ['evt_pp_a', 'evt_pp_b', 'evt_pp_c']) await insertAudit(id, 'human-dashboard', [mem.id], same);
+      await insertAudit('evt_pp_d', `agent:${proj}`, [], same);
+      await insertAudit('evt_pp_us1', 'human-dashboard', [mem.id], '2002-02-02T00:00:00.123456Z');
+      await insertAudit('evt_pp_us2', `agent:${proj}`, [], '2002-02-02T00:00:00.123457Z');
+
+      const all = (await audit.query({ projectId: proj, limit: 500 })).items.map((r) => r.id);
+      expect(all).toEqual(['evt_pp_us2', 'evt_pp_us1', 'evt_pp_d', 'evt_pp_c', 'evt_pp_b', 'evt_pp_a']);
+
+      const paged: string[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      do {
+        const page: AuditPage = await audit.query({
+          projectId: proj,
+          limit: 2,
+          cursor: cursor ? (decodeKeysetCursor(cursor) ?? undefined) : undefined,
+        });
+        paged.push(...page.items.map((r) => r.id));
+        cursor = page.nextCursor;
+        pages += 1;
+        expect(pages).toBeLessThan(10);
+      } while (cursor);
+      expect(pages).toBe(3);
+      expect(paged).toEqual(all);
+    });
+
+    it('EXPLAIN (bez wymuszania planera): filtr projektu używa GIN audit_affected_ids_idx, nie chodzi po audit_created_at_idx', async () => {
+      const proj = (await projects.createProject('audit-explain')).project.id;
+      const mem = await seedApprovedMemory({ projectId: proj });
+      // Jedyny pasujący wpis jest NAJSTARSZY, a 10k niepowiązanych wierszy jest nowszych — bez płotka
+      // `OFFSET 0` planner przy `LIMIT 2` wybiera `audit_created_at_idx` wstecz + filtr (regresja D5).
+      // Żadnych `SET enable_seqscan` — test pilnuje planu, który planner wybiera sam.
+      await insertAudit('evt_ex_match', 'human-dashboard', [mem.id], '1999-01-01T00:00:00.000000Z');
+      try {
+        await pool.query(
+          `INSERT INTO audit_log (id, event_type, actor, affected_ids, created_at)
+           SELECT 'evt_ex_' || g, 'human_edit', 'human-dashboard', ARRAY['mem_unrelated_' || g],
+                  now() - g * interval '1 second'
+             FROM generate_series(1, 10000) g`,
+        );
+        await pool.query('ANALYZE audit_log');
+
+        const collectIndexNames = (plan: unknown): string[] => {
+          const names: string[] = [];
+          const walk = (node: unknown): void => {
+            if (Array.isArray(node)) return node.forEach(walk);
+            if (node && typeof node === 'object') {
+              const obj = node as Record<string, unknown>;
+              if (typeof obj['Index Name'] === 'string') names.push(obj['Index Name']);
+              Object.values(obj).forEach(walk);
+            }
+          };
+          walk(plan);
+          return names;
+        };
+
+        const filters = [
+          { projectId: proj, limit: 2 },
+          { projectId: proj, limit: 2, cursor: { ts: '2999-01-01T00:00:00.000000Z', id: 'zzz' } },
+          { projectId: proj },
+        ];
+        for (const f of filters) {
+          const { sql: text, params } = buildAuditQuery(db, f).toSQL();
+          const res = await pool.query<{ 'QUERY PLAN': unknown }>(`EXPLAIN (FORMAT JSON) ${text}`, params);
+          const indexNames = collectIndexNames(res.rows[0]['QUERY PLAN']);
+          expect(indexNames, JSON.stringify(f)).toContain('audit_affected_ids_idx');
+          expect(indexNames, JSON.stringify(f)).not.toContain('audit_created_at_idx');
+        }
+
+        const page = await audit.query({ projectId: proj, limit: 2 });
+        expect(page.items.map((r) => r.id)).toEqual(['evt_ex_match']);
+        expect(page.nextCursor).toBeNull();
+      } finally {
+        // Sprzątanie: 10k wierszy nie może wpływać na inne testy w tym pliku.
+        await pool.query("DELETE FROM audit_log WHERE id LIKE 'evt_ex_%'");
+      }
     });
   });
 });

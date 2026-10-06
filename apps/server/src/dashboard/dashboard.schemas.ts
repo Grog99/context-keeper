@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import { auditEventType, memoryKind, memoryScope, memoryStatus, proposalOrigin, proposalStatus, proposalType, relationType } from '../db/schema/enums';
 import { AUDIT_QUERY_MAX_LIMIT } from '../audit/audit.service';
+import { decodeKeysetCursor } from '../common/keyset-cursor';
 import { HEADER_MAX_LEN } from '../memory/validation';
 import { LIST_SCOPES } from '../memory/memory-admin.service';
+import { PROPOSALS_LIST_MAX_LIMIT } from '../proposals/proposals.service';
 import { USAGE_BUCKETS } from '../usage/usage.service';
 
 /**
@@ -27,9 +29,24 @@ export const opaqueId = z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/);
  * strefy, dla klientów spoza SPA (curl, przyszły automation). */
 export const isoDateTime = z.iso.datetime({ offset: true });
 /** Wersja transformowana do `Date` — dla pól, które serwis przyjmuje już jako `Date`
- * (`AuditService.query({from,to})`, `UsageService.searchSeries({from,to})`). `cursor` audytu
- * ZOSTAJE stringiem (serwis sam go re-parsuje, §Risks planu — defensywnie, nietknięte). */
+ * (`AuditService.query({from,to})`, `UsageService.searchSeries({from,to})`). `cursor` list (audyt,
+ * propozycje) to NIE ISO, tylko opaque kursor keyset — patrz `keysetCursorQuery`. */
 export const isoDateQuery = isoDateTime.transform((s) => new Date(s));
+
+/** Opaque kursor keyset `(created_at, id)` (nightly-scale G6) — wspólny dla `GET /api/audit` i
+ * `GET /api/proposals`. Dociera do serwisu już zdekodowany do `{ ts, id }`; dowolny input, który nie
+ * jest dokładnie kursorem z `encodeKeysetCursor` (w tym stare ISO `createdAt`), -> 400. */
+export const keysetCursorQuery = z
+  .string()
+  .max(256)
+  .transform((s, ctx) => {
+    const pos = decodeKeysetCursor(s);
+    if (!pos) {
+      ctx.addIssue({ code: 'custom', message: 'Invalid cursor' });
+      return z.NEVER;
+    }
+    return pos;
+  });
 
 /** Regex (NIE `z.coerce.number()`) — odrzuca `1e2`, `0x10`, `5.5`, wiodące zera po prostu jako
  * inny string, `abc`; tylko czyste cyfry ASCII przechodzą do `Number`. */
@@ -129,7 +146,7 @@ export const auditListQuery = z.strictObject({
   to: isoDateQuery.optional(),
   projectId: opaqueId.optional(),
   limit: limitQuery(AUDIT_QUERY_MAX_LIMIT).optional(),
-  cursor: isoDateTime.optional(),
+  cursor: keysetCursorQuery.optional(),
 });
 export type AuditListQuery = z.output<typeof auditListQuery>;
 
@@ -141,6 +158,8 @@ export const proposalsListQuery = z.strictObject({
   type: z.enum(proposalType.enumValues).optional(),
   projectId: opaqueId.optional(),
   scope: z.enum(LIST_SCOPES).optional(),
+  limit: limitQuery(PROPOSALS_LIST_MAX_LIMIT).optional(),
+  cursor: keysetCursorQuery.optional(),
 });
 export type ProposalsListQuery = z.output<typeof proposalsListQuery>;
 

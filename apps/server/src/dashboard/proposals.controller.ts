@@ -3,6 +3,7 @@ import type {
   ApproveResult,
   BulkDecisionResult,
   EditResult,
+  ProposalListPage,
   ProposalView,
 } from '../proposals/proposals.types';
 import { ProposalsService } from '../proposals/proposals.service';
@@ -29,9 +30,10 @@ import {
 } from './dashboard.schemas';
 
 /**
- * FR-D1 Kolejka akceptacji. Wprost na `ProposalsService` (rdzeń Fazy 4, CELOWO nietknięty — §Ryzyka
- * planu) — jedyny dodatek to filtr `type`/`scope=global`, zastosowany TUTAJ (na już pobranej liście),
- * nie w `listPending` (który zostaje dokładnie taki, jaki był).
+ * FR-D1 Kolejka akceptacji. Wprost na `ProposalsService` (rdzeń Fazy 4 — approve/reject/edit
+ * nietknięte). Lista (`GET /api/proposals`) to lekka, stronicowana `listPendingPage`: wszystkie
+ * filtry (`status`/`origin`/`projectId`/`type`/`scope=global`) schodzą do SQL, odpowiedź to
+ * `{ items, nextCursor, total }` bez `payload`; pełny widok propozycji — `GET :id`.
  *
  * Walidacja query/param/body (tech-review #3, roadmap v1.4) — `ZodValidationPipe` per-argument,
  * schematy w `dashboard.schemas.ts`.
@@ -45,18 +47,18 @@ export class ProposalsController {
   @Get()
   async list(
     @Query(new ZodValidationPipe(proposalsListQuery)) query: ProposalsListQuery,
-  ): Promise<ProposalView[]> {
-    const views = await this.proposals.listPending({
+  ): Promise<ProposalListPage> {
+    return this.proposals.listPendingPage({
       status: query.status,
       origin: query.origin,
       projectId: query.projectId,
+      type: query.type,
+      // `scope=global` — druga forma kontekstu przełącznika (§FR-D6), obok `projectId`. Bez
+      // `projectId` ani `scope` -> "Wszystkie" (brak filtra); inna wartość `LIST_SCOPES` nie filtruje.
+      scope: query.scope === 'global' ? 'global' : undefined,
+      limit: query.limit,
+      cursor: query.cursor,
     });
-    let filtered = views;
-    if (query.type) filtered = filtered.filter((v) => v.type === query.type);
-    // `scope=global` — druga forma kontekstu przełącznika (§FR-D6), obok `projectId` (już wspierane
-    // natywnie przez `listPending`). Bez `projectId` ani `scope` -> "Wszystkie" (brak filtra).
-    if (query.scope === 'global') filtered = filtered.filter((v) => v.scope === 'global');
-    return filtered;
   }
 
   // Literalne trasy `bulk-*` PRZED `:id` (konwencja repo, patrz `MemoriesController` — segmentowo

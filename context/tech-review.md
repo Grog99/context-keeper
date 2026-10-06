@@ -68,6 +68,15 @@ Legenda: 🔴 boli teraz · 🟠 będzie boleć · 🟢 higiena · ✅ zrobione
 | **Fix**      | GIN na `affected_ids` + podzapytanie `EXISTS` zamiast round-tripu przez Node; docelowo denormalizowany `project_id` na `audit_log`.         |
 | **Koszt**    | M                                                                                                                                           |
 
+> **Wdrożone (nightly-scale, v1.6):** GIN `audit_affected_ids_idx` (`fastupdate = off`) + `affected_ids &&
+> ARRAY(SELECT id FROM memories WHERE project_id = …)` w JEDNYM zapytaniu, z predykatem projektu schowanym w
+> podzapytaniu `OFFSET 0` (`projectScopedAuditLog` w `audit.service.ts`). Płotek jest konieczny: `&&` na wyniku
+> InitPlanu dostaje domyślną selektywność ~1%, więc przy `ORDER BY created_at DESC LIMIT n` planner chodzi
+> `audit_created_at_idx` wstecz z filtrem O(liczba pamięci) na wiersz (zmierzone: 17 s przy 1,14 mln wierszy).
+> **Zaakceptowany koszt:** O(pamięci projektu × wiersze audytu projektu) na stronę, niezależnie od rozmiaru
+> `audit_log` (≈0,1 s przy 2000 pamięci, ≈0,7 s przy 5000). **Próg:** powyżej ~2000 pamięci na projekt
+> potrzebny jest zdenormalizowany `project_id` na `audit_log` — to zostaje otwartym wariantem docelowym.
+
 ### 8. Dwie implementacje archiwizacji, już rozjechane 🟠
 
 | Pole         | Treść                                                                                                                                              |

@@ -4,7 +4,13 @@ import { describe, expect, it } from 'vitest';
 import { DASHBOARD_ACTOR } from '../src/dashboard/dashboard.constants';
 import { ProposalsController } from '../src/dashboard/proposals.controller';
 import type { ProposalsService } from '../src/proposals/proposals.service';
-import type { BulkApproveOptions, BulkDecisionResult, BulkRejectOptions } from '../src/proposals/proposals.types';
+import type {
+  BulkApproveOptions,
+  BulkDecisionResult,
+  BulkRejectOptions,
+  ListProposalsPageFilter,
+  ProposalListPage,
+} from '../src/proposals/proposals.types';
 
 const RESULT: BulkDecisionResult = { succeeded: ['prop_1', 'prop_2'], failed: [] };
 
@@ -16,8 +22,10 @@ const RESULT: BulkDecisionResult = { succeeded: ['prop_1', 'prop_2'], failed: []
 function fakeProposalsService(opts: {
   bulkApprove?: (ids: unknown, options: BulkApproveOptions) => Promise<BulkDecisionResult>;
   bulkReject?: (ids: unknown, options: BulkRejectOptions) => Promise<BulkDecisionResult>;
+  listPendingPage?: (filter: ListProposalsPageFilter) => Promise<ProposalListPage>;
 }): ProposalsService {
   return {
+    listPendingPage: opts.listPendingPage ?? (async () => ({ items: [], nextCursor: null, total: 0 })),
     bulkApprove: opts.bulkApprove ?? (async () => RESULT),
     bulkReject: opts.bulkReject ?? (async () => RESULT),
   } as unknown as ProposalsService;
@@ -85,5 +93,40 @@ describe('ProposalsController — bulk approve/reject (roadmap v1.3, "Bulk appro
 
     expect(Reflect.getMetadata(PATH_METADATA, ProposalsController.prototype.bulkReject)).toBe('bulk-reject');
     expect(Reflect.getMetadata(METHOD_METADATA, ProposalsController.prototype.bulkReject)).toBe(1); // POST
+  });
+});
+
+describe('ProposalsController — lista kolejki (nightly-scale #5)', () => {
+  it('list() mapuje query na listPendingPage; scope przekazany tylko dla "global"; zwraca stronę bez transformacji', async () => {
+    const page: ProposalListPage = { items: [], nextCursor: 'abc', total: 7 };
+    const captured: ListProposalsPageFilter[] = [];
+    const controller = new ProposalsController(
+      fakeProposalsService({
+        listPendingPage: async (filter) => {
+          captured.push(filter);
+          return page;
+        },
+      }),
+    );
+    const cursor = { ts: '2026-01-01T00:00:00.000001Z', id: 'prop_1' };
+
+    const result = await controller.list({ type: 'merge', scope: 'global', projectId: 'proj_1', limit: 50, cursor });
+    await controller.list({ scope: 'project' });
+    await controller.list({ scope: 'all' });
+    await controller.list({});
+
+    expect(result).toBe(page);
+    expect(captured[0]).toEqual({
+      status: undefined,
+      origin: undefined,
+      projectId: 'proj_1',
+      type: 'merge',
+      scope: 'global',
+      limit: 50,
+      cursor,
+    });
+    expect(captured[1].scope).toBeUndefined();
+    expect(captured[2].scope).toBeUndefined();
+    expect(captured[3].scope).toBeUndefined();
   });
 });
