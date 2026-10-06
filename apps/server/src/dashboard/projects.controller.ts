@@ -92,7 +92,7 @@ export class ProjectsController {
     @Body(new ZodValidationPipe(createProjectBody)) body: CreateProjectBody,
     @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never>,
   ): Promise<CreatedProject> {
-    const created = await this.projects.createProject(body.name, body.tokenLabel);
+    const created = await this.projects.createProject(body.name, { label: body.tokenLabel });
     await this.audit.log({
       eventType: 'token_created',
       actor: DASHBOARD_ACTOR,

@@ -1,19 +1,16 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { and, asc, desc, eq, gt, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
-import { ToolError, type ProjectSummary } from '../common/errors';
+import { and, desc, eq, gt, isNotNull, isNull, ne, or, sql } from 'drizzle-orm';
+import { ToolError } from '../common/errors';
 import { generateId, ID_PREFIX } from '../common/ids';
+import { isUniqueViolation } from '../common/pg-errors';
 import { generateToken, hashToken, isValidTokenFormat } from '../common/tokens';
 import { AppConfigService } from '../config/config.service';
 import { DB, type Database, type Tx } from '../db/db.tokens';
-import { memories, projectTokens, projects, proposals, type ProjectRow, type ProjectTokenRow } from '../db/schema';
-import { resolveProjectScope, tokenScopeOf, type ProjectResolution, type TokenScope } from './project-scope';
-import {
-  assertValidProjectSlug,
-  fallbackSlug,
-  normalizeProjectSlugInput,
-  slugifyProjectName,
-  withCollisionSuffix,
-} from './slug';
+import { memories, projectTokens, projects, type ProjectRow, type ProjectTokenRow } from '../db/schema';
+import { tokenScopeOf, type TokenScope } from './project-scope';
+import { insertProject } from './project-rows';
+import { ProjectSlugService } from './project-slug.service';
+import { assertValidProjectSlug, normalizeProjectSlugInput } from './slug';
 import { normalizeTokenLabel } from './token-status';
 
 /** Etykieta pierwszego tokena gdy operator nie poda własnej (`createProject`/CLI/dashboard "Nowy projekt"). */
@@ -106,37 +103,6 @@ export interface TokenLookup {
 /** Ile razy `createProject` powtarza całą transakcję po wyścigu o slug (23505 na `projects_slug_key`). */
 const SLUG_RETRY_ATTEMPTS = 5;
 
-/** Kształt błędu `pg` (`DatabaseError`) + `cause` — to, czego szukamy w łańcuchu przyczyn. */
-interface PgErrorLike {
-  code?: unknown;
-  constraint?: unknown;
-  cause?: unknown;
-}
-
-/** Ile poziomów `cause` sprawdzamy (drizzle owija błąd drivera raz; zapas na kolejne owinięcia). */
-const MAX_CAUSE_DEPTH = 4;
-
-/** Postgres `unique_violation` (23505) — fallback dla race na partial unique index
- * `project_tokens_project_label_active_key` gdy dwa równoległe requesty przechodzą pre-check
- * jednocześnie (§createToken/rotateToken/updateTokenLabel). `constraint` (opcjonalnie) zawęża do
- * konkretnego indeksu — np. `projects_slug_key` przy wyścigu o slug.
- *
- * drizzle-orm 0.45 rethrowuje KAŻDY błąd drivera jako `DrizzleQueryError` (tylko `query`/`params`/
- * `cause`, bez `code`/`constraint`), więc oryginalny błąd `pg` siedzi w `err.cause` — stąd przejście
- * po łańcuchu `cause` zamiast czytania `err.code` wprost. */
-function isUniqueViolation(err: unknown, constraint?: string): boolean {
-  let current: unknown = err;
-  for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth++) {
-    if (typeof current !== 'object' || current === null) return false;
-    const pgErr = current as PgErrorLike;
-    if (pgErr.code === '23505' && (constraint === undefined || pgErr.constraint === constraint)) {
-      return true;
-    }
-    current = pgErr.cause;
-  }
-  return false;
-}
-
 /** Nazwa partial unique indexu etykiety aktywnych tokenów dla danego scope'u — `23505` na innym
  * indeksie (np. `project_tokens_token_hash_key`) NIE jest kolizją etykiety i ma propagować. */
 function labelIndexFor(scope: TokenScope): string {
@@ -151,6 +117,7 @@ export class ProjectsService {
   constructor(
     @Inject(DB) private readonly db: Database,
     private readonly config: AppConfigService,
+    private readonly slugs: ProjectSlugService,
   ) {}
 
   /**
@@ -167,8 +134,11 @@ export class ProjectsService {
   }
 
   /**
-   * Projekt + pierwszy token, jedna transakcja (atomowe — nigdy projekt bez tokena; zniesienie tego
-   * niezmiennika dla propozycji `create_project` to osobny krok, ticket #15).
+   * Projekt + pierwszy token, jedna transakcja (ręczne "Nowy projekt" z dashboardu/CLI dalej mintuje
+   * pierwszy token). Projekt BEZ tokena powstaje wyłącznie przy approve propozycji `create_project`
+   * (`insertProject` w `project-rows.ts`, ticket #15) — tamtejszy agent z tokenem konta tokena projektu nie potrzebuje.
+   *
+   * Etykieta pierwszego tokena: `opts.label` (domyślnie `DEFAULT_TOKEN_LABEL`).
    *
    * Slug (roadmap v1.5): bez `opts.slug` wyprowadzany z nazwy (`slugifyProjectName`, fallback
    * `project-<końcówka id>`) i pierwszy wolny kandydat `-2`, `-3`… (zajęty = istniejący projekt ALBO
@@ -177,26 +147,22 @@ export class ProjectsService {
    * `projects_slug_key`) powtarza całą transakcję (po błędzie jest już przerwana), max
    * `SLUG_RETRY_ATTEMPTS` razy.
    */
-  async createProject(
-    name: string,
-    label: string = DEFAULT_TOKEN_LABEL,
-    opts?: { slug?: string },
-  ): Promise<CreatedProject> {
-    const normalizedLabel = normalizeTokenLabel(label);
+  async createProject(name: string, opts?: { label?: string; slug?: string }): Promise<CreatedProject> {
+    const normalizedLabel = normalizeTokenLabel(opts?.label ?? DEFAULT_TOKEN_LABEL);
     const projectId = generateId(ID_PREFIX.project);
     let explicitSlug: string | undefined;
     if (opts?.slug !== undefined) {
       explicitSlug = normalizeProjectSlugInput(opts.slug);
       assertValidProjectSlug(explicitSlug);
-      await this.assertSlugAvailable(explicitSlug);
+      await this.slugs.assertSlugAvailable(explicitSlug);
     }
 
     for (let attempt = 1; ; attempt++) {
-      const slug = explicitSlug ?? (await this.pickFreeSlug(name, projectId));
+      const slug = explicitSlug ?? (await this.slugs.pickFreeSlug(name, projectId));
       const token = generateToken();
       try {
         return await this.db.transaction(async (tx) => {
-          const [project] = await tx.insert(projects).values({ id: projectId, name, slug }).returning();
+          const project = await insertProject(tx, { id: projectId, name, slug });
           const [tokenRow] = await tx
             .insert(projectTokens)
             .values({
@@ -548,90 +514,6 @@ export class ProjectsService {
     const found = await this.lookupToken(token);
     if (!found || found.project === null) return null;
     return { project: found.project, token: found.token };
-  }
-
-  async findBySlug(slug: string): Promise<ProjectRow | null> {
-    const [row] = await this.db.select().from(projects).where(eq(projects.slug, slug)).limit(1);
-    return row ?? null;
-  }
-
-  /**
-   * Czy slug czeka w oczekującej propozycji `create_project` (scope B). Porównanie `type::text`, a
-   * nie `type = 'create_project'`: zapytanie jest poprawne zarówno PRZED migracją B (wartość enuma
-   * jeszcze nie istnieje — rzutowanie na text nie rzuca na nieznanej etykiecie, w odróżnieniu od
-   * porównania z enumem), jak i po niej. B może przejść na typowane `eq` i partial unique index na
-   * `payload->>'slug'`. B MUSI zapisywać w payloadzie slug ZNORMALIZOWANY (trim + lowercase).
-   */
-  async isSlugPending(slug: string): Promise<boolean> {
-    const [row] = await this.db
-      .select({ id: proposals.id })
-      .from(proposals)
-      .where(
-        and(
-          sql`${proposals.type}::text = 'create_project'`,
-          eq(proposals.status, 'pending'),
-          sql`${proposals.payload}->>'slug' = ${slug}`,
-        ),
-      )
-      .limit(1);
-    return row !== undefined;
-  }
-
-  /**
-   * Slug wolny = nie trzyma go istniejący projekt (poza `excludeProjectId` — edycja własnego slugu)
-   * ani oczekująca propozycja `create_project` (ticket #14, otwarty punkt: domyślnie blokujemy).
-   * Wspólny check dla `createProject`, `create_project` (B) i edycji slugu (C) — `validation_error`.
-   */
-  async assertSlugAvailable(slug: string, opts?: { excludeProjectId?: string }): Promise<void> {
-    const conditions = [eq(projects.slug, slug)];
-    if (opts?.excludeProjectId) conditions.push(ne(projects.id, opts.excludeProjectId));
-    const [existing] = await this.db
-      .select({ id: projects.id })
-      .from(projects)
-      .where(and(...conditions))
-      .limit(1);
-    if (existing) {
-      throw new ToolError('validation_error', `Slug "${slug}" jest już zajęty przez istniejący projekt.`);
-    }
-    if (await this.isSlugPending(slug)) {
-      throw new ToolError(
-        'validation_error',
-        `Slug "${slug}" jest zarezerwowany przez oczekującą propozycję create_project.`,
-      );
-    }
-  }
-
-  /** `[{slug, name}]` wszystkich projektów instancji (posortowane po slugu) — `details.projects` w
-   * błędach `project_required`/`project_not_found` (wyłącznie dla tokenu konta). */
-  async listProjectSummaries(): Promise<ProjectSummary[]> {
-    return this.db.select({ slug: projects.slug, name: projects.name }).from(projects).orderBy(asc(projects.slug));
-  }
-
-  /** Rozwiązanie scope'u projektu dla żądania MCP (patrz `project-scope.ts`). `slug` = wartość
-   * nagłówka już po `readProjectHeader` (trim + lowercase, pusty → `undefined`). */
-  async resolveProjectScope(lookup: TokenLookup, slug: string | undefined): Promise<ProjectResolution> {
-    return resolveProjectScope(
-      { token: lookup.token, tokenProject: lookup.project, slug },
-      {
-        findBySlug: (s) => this.findBySlug(s),
-        isSlugPending: (s) => this.isSlugPending(s),
-      },
-    );
-  }
-
-  /** Pierwszy wolny slug dla nowego projektu: baza z nazwy (albo `project-<końcówka id>`), potem
-   * `-2`, `-3`… — pre-check; ostateczną gwarancją jest unikalny indeks (retry w `createProject`). */
-  private async pickFreeSlug(name: string, projectId: string): Promise<string> {
-    const base = slugifyProjectName(name) || fallbackSlug(projectId);
-    let candidate = base;
-    for (let n = 2; await this.isSlugTaken(candidate); n++) {
-      candidate = withCollisionSuffix(base, n);
-    }
-    return candidate;
-  }
-
-  private async isSlugTaken(slug: string): Promise<boolean> {
-    return (await this.findBySlug(slug)) !== null || (await this.isSlugPending(slug));
   }
 
   /** Kolizja etykiety wśród aktywnych tokenów projektu (albo tokenów konta) — komunikat dzielony

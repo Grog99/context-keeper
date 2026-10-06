@@ -92,6 +92,13 @@
       "when": 1791228467442,
       "tag": "0012_account_tokens_project_slug",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791272392069,
+      "tag": "0013_create_project_proposals",
+      "breakpoints": true
     }
   ]
 }

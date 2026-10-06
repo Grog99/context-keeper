@@ -1,4 +1,4 @@
-import { ArrowLeftRight, GitMerge, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeftRight, FolderPlus, GitMerge, Plus, Trash2 } from 'lucide-react';
 import type { KeyboardEvent, MouseEvent } from 'react';
 import { formatRelativeTime } from '../lib/format';
 import { cn } from '../lib/utils';
@@ -13,6 +13,7 @@ const TYPE_ICON: Record<ProposalType, typeof Plus> = {
   update: ArrowLeftRight,
   merge: GitMerge,
   delete: Trash2,
+  create_project: FolderPlus,
 };
 
 const MAX_VISIBLE_TAGS = 2;

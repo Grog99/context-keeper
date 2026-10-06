@@ -35,6 +35,7 @@ import { api } from '../lib/api';
 import { useActiveContext, contextQueryParams } from '../lib/context';
 import { describeApiError, describeBulkFailures } from '../lib/errors';
 import { formatAbsoluteTime, formatRelativeTime, pluralProposals } from '../lib/format';
+import { PROPOSAL_CAPABILITIES } from '../lib/proposals';
 import { queryKeys } from '../lib/query';
 import { toQueryString } from '../lib/query-string';
 import { cn } from '../lib/utils';
@@ -52,8 +53,14 @@ import type { ProposalOrigin, ProposalType, RelationType } from '../types/domain
 type OriginFilter = 'all' | ProposalOrigin;
 type TypeFilter = 'all' | ProposalType;
 
+/** Tytuł propozycji `create_project` (roadmap v1.5) — wiersz kolejki i nagłówek detalu. */
+function projectProposalTitle(effective: ProposalView['payload']): string {
+  return `Nowy projekt: ${effective.name ?? '?'} (${effective.slug ?? '?'})`;
+}
+
 function rowTitle(p: ProposalView): string {
   const effective = p.editedPayload ?? p.payload;
+  if (p.type === 'create_project') return projectProposalTitle(effective);
   if (effective.header) return effective.header;
   if (p.type === 'delete') return `Archiwizacja pamięci ${effective.memoryId ?? ''}`.trim();
   if (p.type === 'update') return `Aktualizacja pamięci ${effective.memoryId ?? ''}`.trim();
@@ -221,6 +228,9 @@ export function QueueScreen() {
     // też pojedynczych mutacji approve/reject/edit powyżej/niżej: `approve()` materializuje/aktualizuje
     // `memories`, ale przeglądarka pamięci (`MemoriesScreen`) nie wiedziała o tym bez ręcznego refetcha.
     queryClient.invalidateQueries({ queryKey: ['memories'] });
+    // `create_project` (roadmap v1.5): approve tworzy PROJEKT — selektor kontekstu (ContextSwitcher) i
+    // ekran Projekty muszą go zobaczyć bez ręcznego odświeżenia.
+    queryClient.invalidateQueries({ queryKey: queryKeys.projects() });
   }
 
   /** Podsumowanie po `bulk-approve`/`bulk-reject` (roadmap v1.3): sukcesy znikają z zaznaczenia
@@ -261,8 +271,8 @@ export function QueueScreen() {
   const approveMutation = useMutation({
     mutationFn: (vars: { id: string; supersedes?: string }) =>
       api.post<ApproveResult>(`/proposals/${vars.id}/approve`, vars.supersedes ? { supersedes: vars.supersedes } : {}),
-    onSuccess: () => {
-      toast.success('Zatwierdzono — pamięć zmaterializowana');
+    onSuccess: (result) => {
+      toast.success(result.projectId ? 'Zatwierdzono — projekt utworzony' : 'Zatwierdzono — pamięć zmaterializowana');
       invalidateAfterMutation();
     },
     onError: (err) => toast.error(describeApiError(err)),
@@ -332,6 +342,7 @@ export function QueueScreen() {
 
   function handleApproveAsReplacement(targetId: string): void {
     if (!selected) return;
+    if (!PROPOSAL_CAPABILITIES[selected.type].supersede) return; // np. create_project — brak akcji (skrót S)
     if (selected.type !== 'create') {
       toast.error('Zamiennik dostępny tylko dla propozycji typu create.');
       return;
@@ -351,6 +362,7 @@ export function QueueScreen() {
 
   function handleEdit(): void {
     if (!selected) return;
+    if (!PROPOSAL_CAPABILITIES[selected.type].edit) return; // np. create_project — skrót E nic nie robi
     setEditingForId(selected.id);
     setTab('diff');
   }
@@ -423,6 +435,7 @@ export function QueueScreen() {
               <SelectItem value="update">update</SelectItem>
               <SelectItem value="merge">merge</SelectItem>
               <SelectItem value="delete">delete</SelectItem>
+              <SelectItem value="create_project">create_project</SelectItem>
             </SelectContent>
           </Select>
           <button
@@ -668,10 +681,13 @@ function ProposalDetail({
   position,
 }: ProposalDetailProps) {
   const effective = proposal.editedPayload ?? proposal.payload;
+  const capabilities = PROPOSAL_CAPABILITIES[proposal.type];
   const title =
-    proposal.type === 'delete'
-      ? (beforeMemory?.header ?? effective.memoryId ?? proposal.id)
-      : (effective.header ?? beforeMemory?.header ?? `(propozycja ${proposal.id})`);
+    proposal.type === 'create_project'
+      ? projectProposalTitle(effective)
+      : proposal.type === 'delete'
+        ? (beforeMemory?.header ?? effective.memoryId ?? proposal.id)
+        : (effective.header ?? beforeMemory?.header ?? `(propozycja ${proposal.id})`);
   const tags = effective.tags ?? beforeMemory?.tags ?? [];
   // Patch `update` bez zmiany kind i `delete` nie niosą `kind` — wtedy kind pamięci, której dotyczą.
   const kind = effective.kind ?? beforeMemory?.kind;
@@ -746,7 +762,9 @@ function ProposalDetail({
           </TabsContent>
           <TabsContent value="revisions" className="pt-4">
             <p className="text-xs text-faint">
-              Rewizje powstają po zatwierdzeniu — ta propozycja jeszcze nie jest zmaterializowana.
+              {proposal.type === 'create_project'
+                ? 'Nie dotyczy — propozycja projektu nie tworzy rewizji pamięci.'
+                : 'Rewizje powstają po zatwierdzeniu — ta propozycja jeszcze nie jest zmaterializowana.'}
             </p>
           </TabsContent>
         </Tabs>
@@ -762,6 +780,8 @@ function ProposalDetail({
           staleReason={proposal.stale ? `Zmienione od utworzenia propozycji: ${proposal.staleIds.join(', ')}.` : undefined}
           busy={busy}
           position={position}
+          canEdit={capabilities.edit}
+          canSupersede={capabilities.supersede}
         />
       </div>
     </>
@@ -782,6 +802,11 @@ function ProposalDiff({
   mergeLoading: boolean;
 }) {
   const effective = proposal.editedPayload ?? proposal.payload;
+
+  // PRZED fallbackiem na `delete` niżej: nieznany typ wpadłby tam i wisiał na skeletonie (brak `memoryId`).
+  if (proposal.type === 'create_project') {
+    return <ProjectProposalPreview name={effective.name ?? ''} slug={effective.slug ?? ''} />;
+  }
 
   if (proposal.type === 'create') {
     return (
@@ -829,6 +854,30 @@ function ProposalDiff({
       type="delete"
       data={{ memoryId: effective.memoryId ?? beforeMemory.id, header: beforeMemory.header, body: beforeMemory.body }}
     />
+  );
+}
+
+/** Podgląd propozycji `create_project` (roadmap v1.5, onboarding przez MCP) — nazwa, slug i dokładnie to,
+ * co approve zrobi: utworzy projekt BEZ tokena. Agent z tokenem konta i nagłówkiem z tym slugiem działa
+ * od razu; token projektowy (np. CI) można wydać później na ekranie Projekty. */
+function ProjectProposalPreview({ name, slug }: { name: string; slug: string }) {
+  return (
+    <div className="flex flex-col gap-4">
+      <dl className="grid grid-cols-[auto_1fr] gap-x-5 gap-y-2.5 text-sm">
+        <dt className="text-muted-foreground">Nazwa</dt>
+        <dd className="font-medium">{name || '—'}</dd>
+        <dt className="text-muted-foreground">Slug</dt>
+        <dd className="font-mono text-xs">{slug || '—'}</dd>
+        <dt className="text-muted-foreground">Nagłówek MCP</dt>
+        <dd className="font-mono text-xs">X-Context-Keeper-Project: {slug || '<slug>'}</dd>
+      </dl>
+      <div className="rounded-md border border-border bg-muted px-3 py-2.5 text-xs text-muted-foreground">
+        Zatwierdzenie utworzy projekt <b className="font-semibold text-foreground">bez tokena</b>. Agenci z tokenem
+        konta i tym nagłówkiem w <span className="font-mono">.mcp.json</span> zaczną w nim pracować od razu, bez
+        zmiany konfiguracji. Token projektowy (np. dla CI) możesz wydać później na ekranie Projekty. Odrzucenie
+        zwalnia slug.
+      </div>
+    </div>
   );
 }
 

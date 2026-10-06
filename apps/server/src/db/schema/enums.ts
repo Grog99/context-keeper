@@ -17,7 +17,10 @@ export const memorySource = pgEnum('memory_source', ['agent', 'human', 'nightly'
 // bezpośrednio (tech-review #3, roadmap v1.4, Q4) — nie ma już ręcznego literału do synchronizacji.
 export const relationType = pgEnum('relation_type', ['caused_by', 'follows', 'context_for']);
 
-export const proposalType = pgEnum('proposal_type', ['create', 'update', 'merge', 'delete']);
+// `create_project` (roadmap v1.5, scope B — onboarding przez MCP): propozycja ZAŁOŻENIA PROJEKTU, nie
+// treści pamięci. Payload `{name, slug}`, scope='global', project_id=NULL; wiersz `projects` powstaje
+// dopiero w `ProposalsService.approve()`. Pozostałe typy to mutacje pamięci (`isMemoryProposalType`).
+export const proposalType = pgEnum('proposal_type', ['create', 'update', 'merge', 'delete', 'create_project']);
 export const proposalOrigin = pgEnum('proposal_origin', ['agent', 'human', 'nightly']);
 // `withdrawn` = samo-wycofanie maszynowe (nocny job, Faza 6) — odróżnione od `rejected` (decyzja
 // human) mimo podobnego skutku (zamknięcie bez materializacji), bo audyt ma pokazywać KTO zdecydował.

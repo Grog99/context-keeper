@@ -7,6 +7,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { memoryScope, proposalOrigin, proposalStatus, proposalType } from './enums';
 import { projects } from './projects';
@@ -50,6 +51,19 @@ export const proposals = pgTable(
     index('proposals_origin_idx').on(t.origin),
     index('proposals_project_idx').on(t.projectId),
     index('proposals_content_hash_idx').on(t.contentHash),
+    // Unikalność slugu wśród OCZEKUJĄCYCH propozycji `create_project` (roadmap v1.5, ticket #14).
+    // Predykat celowo NIE używa `type = 'create_project'`: drizzle stosuje wszystkie oczekujące
+    // migracje w JEDNEJ transakcji, a Postgres zabrania użycia nowej wartości enuma w transakcji,
+    // która ją dodała (55P04 "unsafe use of new value") — indeks z literałem enuma przechodzi na
+    // świeżej bazie (enum tworzony w tej samej transakcji), ale wywala realny upgrade z 0012.
+    // `type::text = …` odpada (`enum_out` jest STABLE, nie IMMUTABLE — niedozwolone w predykacie
+    // indeksu). Niezmiennik: WYŁĄCZNIE payload `create_project` ma klucz `slug` na najwyższym
+    // poziomie (payloady pamięci — create/update/merge/delete — go nie mają). Przyszły typ
+    // propozycji z kluczem `slug` wszedłby po cichu do tego indeksu. Chroni to
+    // `proposals-create-project.migration.spec.ts` (upgrade 0012 → 0013).
+    uniqueIndex('proposals_create_project_slug_pending_key')
+      .on(sql`(${t.payload} ->> 'slug')`)
+      .where(sql`${t.status} = 'pending' AND (${t.payload} ->> 'slug') IS NOT NULL`),
   ],
 );
 

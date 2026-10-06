@@ -29,9 +29,10 @@ import type { EmbeddingProvider } from '../src/embeddings/embedding-provider';
 import { EmbeddingService } from '../src/embeddings/embedding.service';
 import { ProposalsService } from '../src/proposals/proposals.service';
 import type { ProjectContext } from '../src/projects/projects.service';
-import { ProjectsService } from '../src/projects/projects.service';
+import type { ProjectsService } from '../src/projects/projects.service';
 import { PurgeError } from '../src/purge/purge.errors';
 import { PurgeService } from '../src/purge/purge.service';
+import { buildProjectsService } from './helpers/services';
 
 /** Jak w `proposals.integration.spec.ts` — stub providera, jeden stały wektor na wszystkie chunki
  * (mechanika, nie ranking). Potrzebny wyłącznie do skonstruowania `ProposalsService` dla testu
@@ -142,7 +143,7 @@ describe('PurgeService (integration, testcontainers) — hard-purge FR-S3', () =
     db = drizzle(pool, { schema });
     await migrate(db, { migrationsFolder: resolve(process.cwd(), 'src/db/migrations') });
 
-    projects = new ProjectsService(db, new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' })));
+    projects = buildProjectsService(db, new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' })));
     audit = new AuditService(db);
     purge = new PurgeService(db, audit);
     const created = await projects.createProject('purge-test');
@@ -197,6 +198,28 @@ describe('PurgeService (integration, testcontainers) — hard-purge FR-S3', () =
 
     it('nieistniejąca pamięć -> not_found', async () => {
       await expect(purge.preview('mem_doesnotexist0')).rejects.toMatchObject({ code: 'not_found' });
+    });
+
+    it('propozycja create_project nie jest "powiązaną propozycją" i purge nie rusza jej payloadu (roadmap v1.5)', async () => {
+      const seeded = await seedApprovedMemory({ header: 'Obok create_project', projectId: projectA.projectId });
+      // Celowo patologiczna: create_project z kluczem `memoryId` i `affected_ids` wskazującymi na pamięć —
+      // gdyby wyjątek `ne(type, 'create_project')` zniknął, ta propozycja zostałaby policzona/zredagowana.
+      const projectProposal = await seedProposal({
+        type: 'create_project',
+        origin: 'agent',
+        payload: { name: 'Projekt obok purge', slug: 'purge-neighbour', memoryId: seeded.id },
+        affectedIds: [seeded.id],
+        scope: 'global',
+        projectId: null,
+      });
+
+      const preview = await purge.preview(seeded.id);
+      expect(preview.relatedProposalsCount).toBe(0);
+
+      await purge.purge(seeded.id, { reason: 'test create_project', actor: 'tester' });
+      const [after] = await db.select().from(proposals).where(eq(proposals.id, projectProposal.id));
+      expect(after.status).toBe('pending');
+      expect(after.payload).toEqual({ name: 'Projekt obok purge', slug: 'purge-neighbour', memoryId: seeded.id });
     });
   });
 

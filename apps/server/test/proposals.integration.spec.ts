@@ -8,6 +8,7 @@ import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AuditService } from '../src/audit/audit.service';
 import { generateId, ID_PREFIX } from '../src/common/ids';
+import { isUniqueViolation } from '../src/common/pg-errors';
 import { AppConfigService } from '../src/config/config.service';
 import { envSchema } from '../src/config/env';
 import type { Database } from '../src/db/db.tokens';
@@ -18,6 +19,7 @@ import {
   embeddings,
   memories,
   memoryRelations,
+  projects as projectsTable,
   proposals,
   revisions,
   stagingEmbeddings,
@@ -28,10 +30,12 @@ import {
 import type { EmbeddingProvider } from '../src/embeddings/embedding-provider';
 import { EmbeddingService } from '../src/embeddings/embedding.service';
 import { MemoryService } from '../src/memory/memory.service';
+import { ProjectSlugService } from '../src/projects/project-slug.service';
 import { ProposalsService } from '../src/proposals/proposals.service';
 import type { ProjectContext } from '../src/projects/projects.service';
-import { ProjectsService } from '../src/projects/projects.service';
+import type { ProjectsService } from '../src/projects/projects.service';
 import { UsageService } from '../src/usage/usage.service';
+import { buildProjectsService } from './helpers/services';
 
 /** Jak w `memory.integration.spec.ts` — testcontainers nie odpala prawdziwego sidecara TEI.
  * Tutaj nie interesuje nas RANKING (żadnych testów search-ranking), więc jeden stały wektor
@@ -141,7 +145,7 @@ describe('ProposalsService (integration, testcontainers) — kolejka akceptacji 
     db = drizzle(pool, { schema });
     await migrate(db, { migrationsFolder: resolve(process.cwd(), 'src/db/migrations') });
 
-    projects = new ProjectsService(db, new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' })));
+    projects = buildProjectsService(db, new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' })));
     audit = new AuditService(db);
     const created = await projects.createProject('proposals-test');
     projectA = { projectId: created.project.id, projectName: created.project.name };
@@ -1460,6 +1464,154 @@ describe('ProposalsService (integration, testcontainers) — kolejka akceptacji 
       const rows = await db.select().from(memoryRelations).where(eq(memoryRelations.fromMemoryId, target.id));
       expect(rows).toHaveLength(1); // wciąż dokładnie jedna — onConflictDoNothing nie zduplikował
       expect(rows[0].source).toBe('human'); // oryginalny (ręczny) wiersz nietknięty, insert po prostu nic nie zrobił
+    });
+  });
+
+  describe('approve — type=create_project (roadmap v1.5, scope B)', () => {
+    const seedProjectProposal = (slug: string, name = `Projekt ${slug}`) =>
+      seedProposal({
+        type: 'create_project',
+        origin: 'agent',
+        payload: { name, slug },
+        scope: 'global',
+        projectId: null,
+      });
+
+    it('approve tworzy wiersz projects BEZ tokena; wynik niesie projectId, nie materializedId; audyt OK', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('cp-approve-model'));
+      const proposal = await seedProjectProposal('cp-approve', 'CP Approve');
+
+      const res = await proposalsService.approve(proposal.id, { actor: 'human-dashboard' });
+
+      expect(res).toEqual({
+        proposalId: proposal.id,
+        projectId: expect.any(String),
+        materializedId: undefined,
+        archivedIds: [],
+        embedding: 'vectorless',
+      });
+      const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, res.projectId!));
+      expect(project).toMatchObject({ slug: 'cp-approve', name: 'CP Approve' });
+      expect(await projects.listTokens(project.id)).toEqual([]);
+
+      const [after] = await db.select().from(proposals).where(eq(proposals.id, proposal.id));
+      expect(after.status).toBe('approved');
+      const auditRows = await db.select().from(auditLog).where(eq(auditLog.eventType, 'proposal_approved'));
+      const entry = auditRows.find((a) => (a.metadata as { proposalId?: string })?.proposalId === proposal.id);
+      expect(entry).toMatchObject({
+        actor: 'human-dashboard',
+        affectedIds: [project.id],
+        metadata: { type: 'create_project', projectId: project.id, slug: 'cp-approve', name: 'CP Approve' },
+      });
+    });
+
+    it('slug zajęty przez istniejący projekt (insert z pominięciem checków) -> ProposalError validation_error, proposal zostaje pending, brak nowego wiersza', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('cp-collision-model'));
+      const proposal = await seedProjectProposal('cp-collision');
+      // Projekt założony równolegle (ręcznie), po utworzeniu propozycji — omija `assertSlugAvailable`.
+      await db
+        .insert(projectsTable)
+        .values({ id: generateId(ID_PREFIX.project), name: 'Ręczny', slug: 'cp-collision' });
+
+      await expect(proposalsService.approve(proposal.id, { actor: 'tester' })).rejects.toMatchObject({
+        code: 'validation_error',
+        message: expect.stringContaining('cp-collision'),
+      });
+
+      const [after] = await db.select().from(proposals).where(eq(proposals.id, proposal.id));
+      expect(after.status).toBe('pending');
+      const rows = await db.select().from(projectsTable).where(eq(projectsTable.slug, 'cp-collision'));
+      expect(rows).toHaveLength(1);
+      expect(rows[0].name).toBe('Ręczny');
+    });
+
+    it('edit -> validation_error (brak treści do edycji)', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('cp-edit-model'));
+      const proposal = await seedProjectProposal('cp-edit');
+      await expect(
+        proposalsService.edit(proposal.id, { header: 'x' }, { actor: 'tester' }),
+      ).rejects.toMatchObject({
+        code: 'validation_error',
+        message: expect.stringContaining('create_project'),
+      });
+      const [after] = await db.select().from(proposals).where(eq(proposals.id, proposal.id));
+      expect(after.editedPayload).toBeNull();
+    });
+
+    it('approve({supersedes}) -> validation_error (supersedes tylko dla create)', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('cp-supersedes-model'));
+      const proposal = await seedProjectProposal('cp-supersedes');
+      await expect(
+        proposalsService.approve(proposal.id, { actor: 'tester', supersedes: 'mem_whatever0000' }),
+      ).rejects.toMatchObject({ code: 'validation_error' });
+      const [after] = await db.select().from(proposals).where(eq(proposals.id, proposal.id));
+      expect(after.status).toBe('pending');
+    });
+
+    it('reject zwalnia slug: status=rejected, isSlugPending=false, nowa propozycja z tym slugiem przechodzi', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('cp-reject-model'));
+      const slugs = new ProjectSlugService(db);
+      const proposal = await seedProjectProposal('cp-reject');
+      expect(await slugs.isSlugPending('cp-reject')).toBe(true);
+
+      await proposalsService.reject(proposal.id, { actor: 'tester', reason: 'nie ten projekt' });
+
+      const [after] = await db.select().from(proposals).where(eq(proposals.id, proposal.id));
+      expect(after.status).toBe('rejected');
+      expect(await slugs.isSlugPending('cp-reject')).toBe(false);
+      await expect(seedProjectProposal('cp-reject')).resolves.toMatchObject({ status: 'pending' });
+    });
+
+    it('bulkApprove([create, create_project]) -> oba w succeeded; bulkReject([create_project]) -> ok', async () => {
+      const { memoryService, proposalsService } = buildServices(new StubEmbeddingProvider('cp-bulk-model'));
+      const saveRes = await memoryService.save({ header: 'Bulk CP memory', body: 'Treść.' }, projectA);
+      const memProposal = await findProposalForMemory(saveRes.id, projectA.projectId);
+      const cp1 = await seedProjectProposal('cp-bulk-a');
+      const cp2 = await seedProjectProposal('cp-bulk-b');
+
+      const approved = await proposalsService.bulkApprove([memProposal.id, cp1.id], { actor: 'tester' });
+      expect(approved).toEqual({ succeeded: [memProposal.id, cp1.id], failed: [] });
+      expect(await db.select().from(projectsTable).where(eq(projectsTable.slug, 'cp-bulk-a'))).toHaveLength(1);
+
+      const rejected = await proposalsService.bulkReject([cp2.id], { actor: 'tester', reason: 'bulk' });
+      expect(rejected).toEqual({ succeeded: [cp2.id], failed: [] });
+    });
+
+    it('bulkApprove: kolizja slugu raportowana jako validation_error, nie "unknown"', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('cp-bulk-collision-model'));
+      const cp = await seedProjectProposal('cp-bulk-coll');
+      await db
+        .insert(projectsTable)
+        .values({ id: generateId(ID_PREFIX.project), name: 'Zajęty', slug: 'cp-bulk-coll' });
+
+      const res = await proposalsService.bulkApprove([cp.id], { actor: 'tester' });
+      expect(res.succeeded).toEqual([]);
+      expect(res.failed).toHaveLength(1);
+      expect(res.failed[0]).toMatchObject({ id: cp.id, code: 'validation_error' });
+    });
+
+    it('partial unique index: drugi PENDING z tym samym slugiem -> 23505 na proposals_create_project_slug_pending_key; rejected/approved nie blokują', async () => {
+      const { proposalsService } = buildServices(new StubEmbeddingProvider('cp-index-model'));
+      const first = await seedProjectProposal('cp-index');
+      let caught: unknown;
+      try {
+        await seedProjectProposal('cp-index');
+      } catch (err) {
+        caught = err;
+      }
+      expect(isUniqueViolation(caught, 'proposals_create_project_slug_pending_key')).toBe(true);
+
+      await proposalsService.reject(first.id, { actor: 'tester' });
+      const second = await seedProjectProposal('cp-index'); // rejected nie blokuje
+      await proposalsService.approve(second.id, { actor: 'tester' });
+      // approved też nie blokuje indeksu proposals (slug blokuje już `projects_slug_key`).
+      await expect(seedProjectProposal('cp-index')).resolves.toMatchObject({ status: 'pending' });
+    });
+
+    it('payloady pamięci (bez klucza slug) nie wchodzą do indeksu: wiele pending bez slug obok siebie', async () => {
+      const a = await seedProposal({ type: 'delete', payload: { memoryId: 'mem_idx_a' }, projectId: projectA.projectId });
+      const b = await seedProposal({ type: 'delete', payload: { memoryId: 'mem_idx_b' }, projectId: projectA.projectId });
+      expect(a.id).not.toBe(b.id);
     });
   });
 

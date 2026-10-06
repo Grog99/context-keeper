@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, arrayOverlaps, eq, inArray, isNotNull, or, sql, type SQL } from 'drizzle-orm';
+import { and, arrayOverlaps, eq, inArray, isNotNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { DB, type Database, type Tx } from '../db/db.tokens';
 import { embeddings, memories, memoryRelations, proposals, revisions, stagingEmbeddings } from '../db/schema';
@@ -41,10 +41,15 @@ export interface PurgeResult {
  * `payload.memoryId`/`edited_payload.memoryId` (create/merge trzymają docelowe id WYŁĄCZNIE w
  * payloadzie, nigdy w affected_ids, patrz `ProposalsService.materializeMemory`). */
 function relatedProposalsCondition(memoryId: string): SQL {
-  return or(
-    arrayOverlaps(proposals.affectedIds, [memoryId]),
-    sql`${proposals.payload} ->> 'memoryId' = ${memoryId}`,
-    sql`${proposals.editedPayload} ->> 'memoryId' = ${memoryId}`,
+  // `create_project` (roadmap v1.5) nie ma treści pamięci ani `memoryId` — wyłączone jawnie, żeby
+  // przyszła zmiana warunków nigdy nie zredagowała payloadu `{name, slug}` jako "treści pamięci".
+  return and(
+    ne(proposals.type, 'create_project'),
+    or(
+      arrayOverlaps(proposals.affectedIds, [memoryId]),
+      sql`${proposals.payload} ->> 'memoryId' = ${memoryId}`,
+      sql`${proposals.editedPayload} ->> 'memoryId' = ${memoryId}`,
+    ),
   )!;
 }
 

@@ -7,13 +7,16 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ToolError } from '../src/common/errors';
+import { generateId, ID_PREFIX } from '../src/common/ids';
 import { hashToken } from '../src/common/tokens';
 import { AppConfigService } from '../src/config/config.service';
 import { envSchema } from '../src/config/env';
 import type { Database } from '../src/db/db.tokens';
 import * as schema from '../src/db/schema';
-import { projectTokens } from '../src/db/schema';
-import { DEFAULT_TOKEN_LABEL, ProjectsService, type CreatedProject } from '../src/projects/projects.service';
+import { projectTokens, proposals } from '../src/db/schema';
+import { readProjectHeader, resolveProjectScope } from '../src/projects/project-scope';
+import { ProjectSlugService } from '../src/projects/project-slug.service';
+import { DEFAULT_TOKEN_LABEL, ProjectsService, type CreatedProject, type TokenLookup } from '../src/projects/projects.service';
 import { effectiveTokenStatus } from '../src/projects/token-status';
 
 function sleep(ms: number): Promise<void> {
@@ -25,6 +28,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
   let pool: Pool;
   let db: Database;
   let service: ProjectsService;
+  let slugs: ProjectSlugService;
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('pgvector/pgvector:pg18-trixie').start();
@@ -32,7 +36,8 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
     db = drizzle(pool, { schema });
     await migrate(db, { migrationsFolder: resolve(process.cwd(), 'src/db/migrations') });
     const config = new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' }));
-    service = new ProjectsService(db, config);
+    slugs = new ProjectSlugService(db);
+    service = new ProjectsService(db, config, slugs);
   });
 
   afterAll(async () => {
@@ -132,8 +137,8 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
       expect(row.projectId).toBe(project.id);
     });
 
-    it('createProject(name, label) honoruje etykietę niestandardową', async () => {
-      const { tokenRow } = await service.createProject('acme-custom-label', 'ci-runner');
+    it('createProject(name, { label }) honoruje etykietę niestandardową', async () => {
+      const { tokenRow } = await service.createProject('acme-custom-label', { label: 'ci-runner' });
       expect(tokenRow.label).toBe('ci-runner');
     });
   });
@@ -149,7 +154,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
     });
 
     it('createToken: dwa tokeny aktywne jednocześnie, oba resolvują do tego samego projektu', async () => {
-      const { project, token: firstToken } = await service.createProject('gamma', 'agent-one');
+      const { project, token: firstToken } = await service.createProject('gamma', { label: 'agent-one' });
       const { token: secondToken, tokenRow } = await service.createToken(project.id, 'agent-two');
       expect(tokenRow.label).toBe('agent-two');
 
@@ -190,7 +195,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
     });
 
     it('duplikat etykiety WŚRÓD AKTYWNYCH -> validation_error', async () => {
-      const { project } = await service.createProject('delta-label-dup', 'agent-a');
+      const { project } = await service.createProject('delta-label-dup', { label: 'agent-a' });
       await expect(service.createToken(project.id, 'agent-a')).rejects.toMatchObject({ code: 'validation_error' });
     });
 
@@ -199,15 +204,12 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
       // wciąż zajęta przez zamiennik, nie zwalnia się. Żeby faktycznie zwolnić etykietę, zamiennik
       // musi dostać inną (`opts.label`) — dopiero wtedy STARY wiersz (teraz grace, wciąż "agent-a")
       // jest jedynym posiadaczem etykiety, ale grace nie jest objęty partial index -> wolna.
-      const { project, tokenRow: original } = await service.createProject('delta-label-reuse-rotate', 'agent-a');
+      const { project, tokenRow: original } = await service.createProject('delta-label-reuse-rotate', { label: 'agent-a' });
       await service.rotateToken(original.id, { label: 'agent-a-replacement' });
       const created = await service.createToken(project.id, 'agent-a');
       expect(created.tokenRow.label).toBe('agent-a');
 
-      const { project: project2, tokenRow: original2 } = await service.createProject(
-        'delta-label-reuse-revoke',
-        'agent-b',
-      );
+      const { project: project2, tokenRow: original2 } = await service.createProject('delta-label-reuse-revoke', { label: 'agent-b' });
       await service.revokeToken(original2.id);
       const created2 = await service.createToken(project2.id, 'agent-b');
       expect(created2.tokenRow.label).toBe('agent-b');
@@ -216,7 +218,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
 
   describe('graceful rotation', () => {
     it('stary token resolvuje podczas grace, nowy też, oba ten sam projekt', async () => {
-      const { project, token: oldToken, tokenRow: oldRow } = await service.createProject('epsilon', 'agent-a');
+      const { project, token: oldToken, tokenRow: oldRow } = await service.createProject('epsilon', { label: 'agent-a' });
       const rotated = await service.rotateToken(oldRow.id);
 
       expect(rotated.previousTokenRow.status).toBe('grace');
@@ -233,21 +235,21 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
     });
 
     it('rotateToken(opts.label) pozwala zmienić etykietę zamiennika', async () => {
-      const { tokenRow } = await service.createProject('epsilon-relabel', 'old-label');
+      const { tokenRow } = await service.createProject('epsilon-relabel', { label: 'old-label' });
       const rotated = await service.rotateToken(tokenRow.id, { label: 'new-label' });
       expect(rotated.tokenRow.label).toBe('new-label');
       expect(rotated.previousTokenRow.label).toBe('old-label'); // stary wiersz nietknięty
     });
 
     it('rotate token już w grace -> validation_error (guard); rotacja NOWEGO tokena wciąż działa', async () => {
-      const { tokenRow } = await service.createProject('epsilon-guard-grace', 'agent-a');
+      const { tokenRow } = await service.createProject('epsilon-guard-grace', { label: 'agent-a' });
       const rotated = await service.rotateToken(tokenRow.id);
       await expect(service.rotateToken(tokenRow.id)).rejects.toMatchObject({ code: 'validation_error' });
       await expect(service.rotateToken(rotated.tokenRow.id)).resolves.toBeDefined();
     });
 
     it('rotate token revoked -> validation_error (guard)', async () => {
-      const { tokenRow } = await service.createProject('epsilon-guard-revoked', 'agent-a');
+      const { tokenRow } = await service.createProject('epsilon-guard-revoked', { label: 'agent-a' });
       await service.revokeToken(tokenRow.id);
       await expect(service.rotateToken(tokenRow.id)).rejects.toMatchObject({ code: 'validation_error' });
     });
@@ -257,7 +259,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
     });
 
     it('concurrent double-rotate na tym samym tokenie -> dokładnie JEDEN zamiennik powstaje', async () => {
-      const { project, tokenRow } = await service.createProject('epsilon-concurrent', 'agent-a');
+      const { project, tokenRow } = await service.createProject('epsilon-concurrent', { label: 'agent-a' });
       const results = await Promise.allSettled([
         service.rotateToken(tokenRow.id),
         service.rotateToken(tokenRow.id),
@@ -275,7 +277,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
 
   describe('expiry — lazy, bez nocnego sweepu', () => {
     it('grace token z expires_at w przeszłości przestaje resolvować (bez udziału żadnego joba)', async () => {
-      const { tokenRow: oldRow, token: oldPlaintext } = await service.createProject('zeta-expiry', 'agent-a');
+      const { tokenRow: oldRow, token: oldPlaintext } = await service.createProject('zeta-expiry', { label: 'agent-a' });
       const rotated = await service.rotateToken(oldRow.id);
       expect((await service.resolveByToken(oldPlaintext))?.token.id).toBe(oldRow.id); // wciąż w grace, usable
 
@@ -296,7 +298,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
 
   describe('boundary agreement — usableTokenCondition() (SQL) vs effectiveTokenStatus() (TS)', () => {
     it('expires_at tuż w przyszłości -> grace usable po obu stronach; tuż w przeszłości -> expired/unusable po obu', async () => {
-      const { tokenRow } = await service.createProject('eta-boundary', 'agent-a');
+      const { tokenRow } = await service.createProject('eta-boundary', { label: 'agent-a' });
       const rotated = await service.rotateToken(tokenRow.id);
 
       await db
@@ -327,7 +329,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
 
   describe('revokeToken — natychmiastowe, idempotentne', () => {
     it('unieważnia token active -> przestaje resolvować natychmiast', async () => {
-      const { token, tokenRow } = await service.createProject('theta-revoke-active', 'agent-a');
+      const { token, tokenRow } = await service.createProject('theta-revoke-active', { label: 'agent-a' });
       expect((await service.resolveByToken(token))?.token.id).toBe(tokenRow.id);
 
       const revoked = await service.revokeToken(tokenRow.id);
@@ -337,7 +339,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
     });
 
     it('unieważnia token w grace -> przestaje resolvować natychmiast', async () => {
-      const { tokenRow, token: oldPlaintext } = await service.createProject('theta-revoke-grace', 'agent-a');
+      const { tokenRow, token: oldPlaintext } = await service.createProject('theta-revoke-grace', { label: 'agent-a' });
       const rotated = await service.rotateToken(tokenRow.id);
       expect((await service.resolveByToken(oldPlaintext))?.token.id).toBe(tokenRow.id); // grace, wciąż usable
 
@@ -349,7 +351,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
     });
 
     it('idempotentny: unieważnienie już-revoked zwraca istniejący wiersz, nie rzuca', async () => {
-      const { tokenRow } = await service.createProject('theta-idempotent', 'agent-a');
+      const { tokenRow } = await service.createProject('theta-idempotent', { label: 'agent-a' });
       const first = await service.revokeToken(tokenRow.id);
       const second = await service.revokeToken(tokenRow.id);
       expect(second.id).toBe(first.id);
@@ -363,7 +365,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
 
   describe('updateTokenLabel — rename, dowolny status, kolizja tylko wśród aktywnych', () => {
     it('rename działa dla active, grace i revoked', async () => {
-      const { project, tokenRow: activeRow } = await service.createProject('iota-rename', 'orig-active');
+      const { project, tokenRow: activeRow } = await service.createProject('iota-rename', { label: 'orig-active' });
       const updatedActive = await service.updateTokenLabel(activeRow.id, 'renamed-active');
       expect(updatedActive.label).toBe('renamed-active');
 
@@ -379,7 +381,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
     });
 
     it('rename nie wpływa na usability (usableTokenCondition nietknięty)', async () => {
-      const { project, token, tokenRow } = await service.createProject('iota-rename-usability', 'before');
+      const { project, token, tokenRow } = await service.createProject('iota-rename-usability', { label: 'before' });
       await service.updateTokenLabel(tokenRow.id, 'after');
       const resolved = await service.resolveByToken(token);
       expect(resolved?.project.id).toBe(project.id);
@@ -395,7 +397,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
     });
 
     it('rename tokena AKTYWNEGO na etykietę już zajętą przez inny AKTYWNY -> validation_error', async () => {
-      const { project } = await service.createProject('iota-rename-collision', 'label-a');
+      const { project } = await service.createProject('iota-rename-collision', { label: 'label-a' });
       const { tokenRow: tokenB } = await service.createToken(project.id, 'label-b');
       await expect(service.updateTokenLabel(tokenB.id, 'label-a')).rejects.toMatchObject({
         code: 'validation_error',
@@ -403,7 +405,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
     });
 
     it('rename tokena w grace na etykietę zajętą przez aktywny -> DOZWOLONE (nie jest objęty partial index)', async () => {
-      const { project } = await service.createProject('iota-rename-freebie', 'label-active');
+      const { project } = await service.createProject('iota-rename-freebie', { label: 'label-active' });
       const { tokenRow: graceSeed } = await service.createToken(project.id, 'label-grace-seed');
       const rotated = await service.rotateToken(graceSeed.id); // graceSeed teraz w grace
 
@@ -437,7 +439,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
 
   describe('countTokensByProject', () => {
     it('grupuje active/grace/revoked poprawnie, grace filtrowany LIVE expires_at', async () => {
-      const { project } = await service.createProject('lambda-counts', 'a');
+      const { project } = await service.createProject('lambda-counts', { label: 'a' });
       const { tokenRow: tokenB } = await service.createToken(project.id, 'b');
       const { tokenRow: tokenC } = await service.createToken(project.id, 'c');
 
@@ -452,7 +454,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
     });
 
     it('grace z expires_at w przeszłości NIE liczy się jako grace (already-expired)', async () => {
-      const { project, tokenRow } = await service.createProject('lambda-counts-expired', 'a');
+      const { project, tokenRow } = await service.createProject('lambda-counts-expired', { label: 'a' });
       const rotated = await service.rotateToken(tokenRow.id);
       await db
         .update(projectTokens)
@@ -522,11 +524,11 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
     });
   });
 
-  describe('slug projektu (roadmap v1.5) — createProject, findBySlug, listProjectSummaries', () => {
+  describe('slug projektu (roadmap v1.5) — createProject, ProjectSlugService (findBySlug, listProjectSummaries)', () => {
     it('slug wyprowadzany z nazwy (polskie znaki), zapisany w kolumnie', async () => {
       const { project } = await service.createProject('Zażółć Gęślą Jaźń');
       expect(project.slug).toBe('zazolc-gesla-jazn');
-      expect((await service.findBySlug('zazolc-gesla-jazn'))?.id).toBe(project.id);
+      expect((await slugs.findBySlug('zazolc-gesla-jazn'))?.id).toBe(project.id);
     });
 
     it('duplikat nazwy dostaje sufiks -2, -3', async () => {
@@ -545,16 +547,16 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
     });
 
     it('jawny slug jest normalizowany (trim + lowercase) i zapisany bez sufiksu', async () => {
-      const { project } = await service.createProject('Explicit Slug Project', DEFAULT_TOKEN_LABEL, { slug: ' Explicit-Slug ' });
+      const { project } = await service.createProject('Explicit Slug Project', { slug: ' Explicit-Slug ' });
       expect(project.slug).toBe('explicit-slug');
     });
 
     it('jawny slug: zły format -> validation_error; zajęty -> validation_error (bez sufiksu)', async () => {
-      await expect(service.createProject('x1', DEFAULT_TOKEN_LABEL, { slug: 'Bad Slug' })).rejects.toMatchObject({
+      await expect(service.createProject('x1', { slug: 'Bad Slug' })).rejects.toMatchObject({
         code: 'validation_error',
       });
-      await service.createProject('Taken Slug Owner', DEFAULT_TOKEN_LABEL, { slug: 'taken-slug' });
-      await expect(service.createProject('x2', DEFAULT_TOKEN_LABEL, { slug: 'TAKEN-SLUG ' })).rejects.toMatchObject({
+      await service.createProject('Taken Slug Owner', { slug: 'taken-slug' });
+      await expect(service.createProject('x2', { slug: 'TAKEN-SLUG ' })).rejects.toMatchObject({
         code: 'validation_error',
       });
     });
@@ -599,7 +601,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
       const slug = 'explicit-slug-race';
       const results = await Promise.allSettled(
         Array.from({ length: 5 }, (_, i) =>
-          service.createProject(`Explicit Race ${i}`, DEFAULT_TOKEN_LABEL, { slug }),
+          service.createProject(`Explicit Race ${i}`, { slug }),
         ),
       );
       const fulfilled = results.filter((r): r is PromiseFulfilledResult<CreatedProject> => r.status === 'fulfilled');
@@ -614,15 +616,15 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
     });
 
     it('findBySlug zwraca null dla nieznanego slugu', async () => {
-      expect(await service.findBySlug('no-such-slug-at-all')).toBeNull();
+      expect(await slugs.findBySlug('no-such-slug-at-all')).toBeNull();
     });
 
     it('listProjectSummaries: {slug, name} posortowane po slugu', async () => {
       const { project } = await service.createProject('Summaries Probe');
-      const summaries = await service.listProjectSummaries();
+      const summaries = await slugs.listProjectSummaries();
       expect(summaries.find((s) => s.slug === project.slug)).toEqual({ slug: 'summaries-probe', name: 'Summaries Probe' });
-      const slugs = summaries.map((s) => s.slug);
-      expect(slugs).toEqual([...slugs].sort());
+      const sorted = summaries.map((s) => s.slug);
+      expect(sorted).toEqual([...sorted].sort());
       for (const s of summaries) expect(Object.keys(s).sort()).toEqual(['name', 'slug']);
     });
 
@@ -638,16 +640,60 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
     });
   });
 
-  describe('isSlugPending / assertSlugAvailable (roadmap v1.5)', () => {
-    it('isSlugPending: zapytanie z ::text działa przed migracją B i zwraca false bez propozycji', async () => {
-      expect(await service.isSlugPending('nobody-holds-this')).toBe(false);
+  describe('ProjectSlugService — isSlugPending / assertSlugAvailable (roadmap v1.5)', () => {
+    /** Wstawia propozycję `create_project` wprost (producent to `ProjectProposalService`). */
+    async function seedProjectProposal(slug: string, status: 'pending' | 'approved' | 'rejected') {
+      await db.insert(proposals).values({
+        id: generateId(ID_PREFIX.proposal),
+        type: 'create_project',
+        origin: 'agent',
+        status,
+        payload: { name: `Projekt ${slug}`, slug },
+        scope: 'global',
+        projectId: null,
+      });
+    }
+
+    it('isSlugPending: false bez propozycji; true dla pending create_project; false dla approved/rejected', async () => {
+      expect(await slugs.isSlugPending('nobody-holds-this')).toBe(false);
+
+      await seedProjectProposal('pend-slug-pending', 'pending');
+      await seedProjectProposal('pend-slug-approved', 'approved');
+      await seedProjectProposal('pend-slug-rejected', 'rejected');
+      expect(await slugs.isSlugPending('pend-slug-pending')).toBe(true);
+      expect(await slugs.isSlugPending('pend-slug-approved')).toBe(false);
+      expect(await slugs.isSlugPending('pend-slug-rejected')).toBe(false);
+    });
+
+    it('isSlugPending ignoruje pending propozycje innych typów (nawet z `slug` w payloadzie)', async () => {
+      await db.insert(proposals).values({
+        id: generateId(ID_PREFIX.proposal),
+        type: 'delete',
+        origin: 'human',
+        status: 'pending',
+        payload: { memoryId: 'mem_x', slug: 'pend-slug-other-type' },
+        scope: 'global',
+      });
+      expect(await slugs.isSlugPending('pend-slug-other-type')).toBe(false);
+    });
+
+    it('assertSlugAvailable: slug oczekującej propozycji -> validation_error', async () => {
+      await seedProjectProposal('pend-slug-assert', 'pending');
+      await expect(slugs.assertSlugAvailable('pend-slug-assert')).rejects.toMatchObject({
+        code: 'validation_error',
+      });
+    });
+
+    it('pickFreeSlug pomija slug oczekującej propozycji (sufiks -2)', async () => {
+      await seedProjectProposal('pend-pick-free', 'pending');
+      expect(await slugs.pickFreeSlug('Pend Pick Free', 'proj_whatever')).toBe('pend-pick-free-2');
     });
 
     it('assertSlugAvailable: zajęty przez projekt -> validation_error; wolny -> ok; excludeProjectId pozwala na własny', async () => {
       const { project } = await service.createProject('Assert Slug Owner');
-      await expect(service.assertSlugAvailable(project.slug)).rejects.toMatchObject({ code: 'validation_error' });
-      await expect(service.assertSlugAvailable(project.slug, { excludeProjectId: project.id })).resolves.toBeUndefined();
-      await expect(service.assertSlugAvailable('assert-slug-free')).resolves.toBeUndefined();
+      await expect(slugs.assertSlugAvailable(project.slug)).rejects.toMatchObject({ code: 'validation_error' });
+      await expect(slugs.assertSlugAvailable(project.slug, { excludeProjectId: project.id })).resolves.toBeUndefined();
+      await expect(slugs.assertSlugAvailable('assert-slug-free')).resolves.toBeUndefined();
     });
   });
 
@@ -676,10 +722,10 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
       await expect(service.createAccountToken('acc-dup')).rejects.toMatchObject({ code: 'validation_error' });
 
       // Ta sama etykieta na tokenie PROJEKTOWYM nie koliduje z kontem (inny zakres unikalności)…
-      const { tokenRow } = await service.createProject('acc-dup-project', 'acc-dup');
+      const { tokenRow } = await service.createProject('acc-dup-project', { label: 'acc-dup' });
       expect(tokenRow.label).toBe('acc-dup');
       // …i odwrotnie: etykieta tokenu projektowego nie blokuje nowego tokenu konta.
-      await service.createProject('acc-dup-project-2', 'acc-only-in-project');
+      await service.createProject('acc-dup-project-2', { label: 'acc-only-in-project' });
       await expect(service.createAccountToken('acc-only-in-project')).resolves.toBeDefined();
     });
 
@@ -739,7 +785,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
         code: 'validation_error',
       });
       // Etykieta zajęta wyłącznie przez token PROJEKTOWY nie blokuje zmiany nazwy tokenu konta.
-      await service.createProject('acc-relabel-project', 'acc-relabel-project-only');
+      await service.createProject('acc-relabel-project', { label: 'acc-relabel-project-only' });
       const renamed = await service.updateTokenLabel(a.tokenRow.id, 'acc-relabel-project-only');
       expect(renamed.label).toBe('acc-relabel-project-only');
       expect(renamed.projectId).toBeNull();
@@ -759,13 +805,20 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
     });
   });
 
-  describe('resolveProjectScope (serwis + baza, roadmap v1.5)', () => {
+  describe('resolveProjectScope (czysta funkcja + ProjectSlugService + baza, roadmap v1.5)', () => {
+    // Dokładnie to, co robi BearerGuard: nagłówek -> readProjectHeader -> pure resolveProjectScope.
+    const resolveScope = (lookup: TokenLookup, header: string | undefined) =>
+      resolveProjectScope(
+        { token: lookup.token, tokenProject: lookup.project, slug: readProjectHeader(header) },
+        slugs,
+      );
+
     it('token konta + slug -> projekt z atrybucją tokenu konta; brak/nieznany slug -> nierozwiązany', async () => {
       const account = await service.createAccountToken('acc-scope');
       const { project } = await service.createProject('Scope Target');
       const lookup = (await service.lookupToken(account.token))!;
 
-      const res = await service.resolveProjectScope(lookup, 'scope-target');
+      const res = await resolveScope(lookup, 'scope-target');
       expect(res).toEqual({
         status: 'resolved',
         context: {
@@ -776,8 +829,8 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
           tokenLabel: 'acc-scope',
         },
       });
-      expect((await service.resolveProjectScope(lookup, undefined)).status).toBe('unresolved');
-      expect(await service.resolveProjectScope(lookup, 'scope-nope')).toEqual({
+      expect((await resolveScope(lookup, undefined)).status).toBe('unresolved');
+      expect(await resolveScope(lookup, 'scope-nope')).toEqual({
         status: 'unresolved',
         reason: 'project_not_found',
         requestedSlug: 'scope-nope',

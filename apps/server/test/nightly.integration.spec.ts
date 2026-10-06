@@ -26,9 +26,10 @@ import { EmbeddingService } from '../src/embeddings/embedding.service';
 import { NIGHTLY_LOCK_KEY, NightlyService } from '../src/nightly/nightly.service';
 import { RecencyPruneScorer } from '../src/nightly/prune-scorer';
 import type { ProjectContext } from '../src/projects/projects.service';
-import { ProjectsService } from '../src/projects/projects.service';
+import type { ProjectsService } from '../src/projects/projects.service';
 import { ProposalsService } from '../src/proposals/proposals.service';
 import { UsageService } from '../src/usage/usage.service';
+import { buildProjectsService } from './helpers/services';
 
 /** Jak w `proposals.integration.spec.ts` — testcontainers nie odpala prawdziwego sidecara TEI.
  * Nightly nigdy nie woła `embed()` podczas detekcji (czyta wektory z `embeddings` bezpośrednio) —
@@ -169,7 +170,7 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
     db = drizzle(pool, { schema });
     await migrate(db, { migrationsFolder: resolve(process.cwd(), 'src/db/migrations') });
 
-    projects = new ProjectsService(db, new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' })));
+    projects = buildProjectsService(db, new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' })));
     audit = new AuditService(db);
   });
 

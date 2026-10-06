@@ -12,9 +12,11 @@ import {
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Response } from 'express';
 import { MemoryService } from '../memory/memory.service';
+import { OnboardingService } from '../onboarding/onboarding.service';
+import { ProjectProposalService } from '../onboarding/project-proposal.service';
 import { BearerGuard } from '../projects/bearer.guard';
 import type { RequestWithMcpAuth } from '../projects/project-scope';
-import { ProjectsService } from '../projects/projects.service';
+import { ProjectSlugService } from '../projects/project-slug.service';
 import { RateLimitExceptionFilter } from '../rate-limit/rate-limit.filter';
 import { McpIpThrottleGuard } from './mcp-ip-throttle.guard';
 import { McpRateLimitGuard } from './mcp-rate-limit.guard';
@@ -44,7 +46,9 @@ const METHOD_NOT_ALLOWED_BODY = {
 export class McpController {
   constructor(
     private readonly memory: MemoryService,
-    private readonly projects: ProjectsService,
+    private readonly slugs: ProjectSlugService,
+    private readonly onboarding: OnboardingService,
+    private readonly projectProposals: ProjectProposalService,
   ) {}
 
   @Post()
@@ -56,7 +60,15 @@ export class McpController {
       return;
     }
 
-    const server = createMcpServer({ memory: this.memory, projects: this.projects }, auth);
+    const server = createMcpServer(
+      {
+        memory: this.memory,
+        scope: this.slugs,
+        onboarding: this.onboarding,
+        projectProposals: this.projectProposals,
+      },
+      auth,
+    );
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
     res.on('close', () => {

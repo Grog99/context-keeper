@@ -32,6 +32,10 @@ export interface ProposalPayloadShape {
    * NIE tutaj. Renderowane w kolejce PRZED akceptacją (`QueueScreen.tsx` → `ProposalRelations`,
    * FINDING 1 review PR #15) — recenzent musi widzieć krawędzie, które approve utworzy. */
   relations?: { type: RelationType; targetId: string }[];
+  /** Tylko `type='create_project'` (roadmap v1.5, scope B) — lustro `CreateProjectPayload`
+   * (`apps/server/src/proposals/proposals.types.ts`): nazwa i ZNORMALIZOWANY slug nowego projektu. */
+  name?: string;
+  slug?: string;
 }
 
 export interface ProposalView {
@@ -55,6 +59,8 @@ export interface ProposalView {
 export interface ApproveResult {
   proposalId: string;
   materializedId?: string;
+  /** Tylko `type='create_project'` — id nowo utworzonego projektu (`materializedId` zostaje memory-owe). */
+  projectId?: string;
   archivedIds: string[];
   embedding: 'promoted' | 'recomputed' | 'vectorless';
 }
