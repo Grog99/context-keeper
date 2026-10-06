@@ -64,7 +64,7 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 | Rola | Kto | Potrzeba |
 |---|---|---|
 | **Recenzent / właściciel pamięci** | człowiek (start: 1 osoba, docelowo zespół) | przeglądać i zatwierdzać zapisy, edytować, tworzyć dokumenty, promować do `global`, utrzymać czystość store'u |
-| **Agent piszący** | Claude / inny agent AI z tokenem projektu | zapisać nowo poznany fakt (jako propozycję), nie czekając na człowieka |
+| **Agent piszący** | Claude / inny agent AI z tokenem projektu albo tokenem konta (v1.5) | zapisać nowo poznany fakt (jako propozycję), nie czekając na człowieka |
 | **Agent czytający** | j.w. | znaleźć kontekst do zadania (fakty + dokumenty) w swoim projekcie + `global` |
 
 **Model użytkowników v1:** brak kont per-user w aplikacji. Dashboard za wspólnym auth aplikacji (współdzielone hasło + sesja, za VPN/proxy). Per-user auth to v2.
@@ -80,7 +80,7 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 ### 4.1 W zakresie v1 (in-scope)
 
 - **Remote MCP server** (oficjalny `@modelcontextprotocol/sdk`) z 3 narzędziami: `search_memory`, `get_memory`, `save_memory`.
-- **Scope pamięci:** `global` | `project`; projekt wyznaczany przez credential (token per projekt), nie przez argument agenta.
+- **Scope pamięci:** `global` | `project`; projekt wyznaczany przez credential (token per projekt), nie przez argument agenta (v1.5: token projektowy → jego projekt; token konta → projekt z nagłówka `X-Context-Keeper-Project` w commitowanym `.mcp.json` — dalej nie argument agenta).
 - **Pełna kolejka akceptacji** — każda treściowa mutacja to `proposal`; nic nie wchodzi do pamięci bez akceptacji. **Optimistic concurrency** (stale = blokada + badge).
 - **Dwa rodzaje pamięci (`kind`):** `fact` (fakty accreted przez agenta, mutowalne) i `document` (dokumenty authored przez człowieka: PRD, roadmap — kanon, permanentne; w v1 human-only).
 - **Hybrid retrieval** — wektor + full-text, fuzja RRF, dwufazowy (nagłówki → pełne body); FTS-only fallback przy embedding-down.
@@ -88,7 +88,7 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 - **Nocny job** jako **proposer** — proponuje dedup/merge/prune; lock, idempotentne re-propose, samosprzątanie stale.
 - **Soft-delete** (`archived`), nigdy hard-delete — z awaryjnym **hard-purge CLI** (sekrety/PII).
 - **Bezpieczeństwo treści:** skaner sekretów przy save (agent=block, human=warn), limity/walidacja wejścia.
-- **Audit log** append-only, **rate limiting** per-token, **taksonomia błędów** MCP.
+- **Audit log** append-only, **rate limiting** per-token (v1.5: per token × projekt), **taksonomia błędów** MCP.
 - **Kontrakt z agentem:** opisy narzędzi MCP (pełny kontrakt) + snippet do `CLAUDE.md`/`AGENTS.md`.
 - **Deployment configurable przy wdrożeniu:** preset embeddingów (`multilingual` domyślny / `english` lekki EN-only / `api`) + tryb reverse proxy (bundled Caddy / bring-your-own-proxy dla homelaba). Szczegóły w [`tech-stack.md`](tech-stack.md) §7, §9.
 - **Instalator onboardingu:** interaktywny `install.sh` generujący `.env` + sekrety + wybór profili Compose; uruchomienie stacku opcjonalne (prompt, default = tylko generacja). Nie zastępuje 12-factor env — kanonem zostaje `.env.example`.
@@ -112,7 +112,7 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 
 **UC-1 — Agent zapisuje fakt.** Agent poznaje fakt → `save_memory` → system liczy embedding + dedup (z twardym budżetem czasu) → zwraca `{id, status: "pending"}` bez czekania na człowieka. Fakt niewidoczny dla search do akceptacji.
 
-**UC-2 — Agent szuka kontekstu.** `search_memory(query, tags?, kind?)` → tanie nagłówki (`fact`+`document`) ze scope z tokena → triage → `get_memory(id)` po pełne body.
+**UC-2 — Agent szuka kontekstu.** `search_memory(query, tags?, kind?, all_projects?)` (v1.5: token konta może opcjonalnie przeszukać wszystkie projekty) → tanie nagłówki (`fact`+`document`) ze scope z tokena → triage → `get_memory(id)` po pełne body.
 
 **UC-3 — Recenzent zatwierdza zapis.** Człowiek widzi `pending` proposal z diffem zależnym od typu → akceptuje / odrzuca / edytuje-przed-akceptacją / **zatwierdza jako zamiennik [X]** (supersession). Akceptacja transakcyjnie materializuje pamięć; stale proposal jest zablokowany + oznaczony badge.
 
@@ -122,9 +122,11 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 
 **UC-6 — Nocny job proponuje porządki.** Job skanuje `fact`, wykrywa duplikaty/staleness → wrzuca propozycje do tej samej kolejki (filtr `origin=nightly`), pomijając duplikaty i sprzątając własne stale. Człowiek zatwierdza jak zwykły zapis.
 
-**UC-7 — Zarządzanie projektami/tokenami.** Człowiek tworzy projekt (z pierwszym, etykietowanym bearer tokenem `ck_…`, widocznym raz, w bazie hash), dodaje kolejne tokeny dla kolejnych agentów (etykieta wymagana), rotuje token pojedynczego agenta (graceful — nowy obok starego, stary wygasa po okresie karencji, reszta agentów nietknięta) albo unieważnia go natychmiast (skompromitowany credential), i zmienia etykietę istniejącego tokena (v1.3).
+**UC-7 — Zarządzanie projektami/tokenami.** Człowiek tworzy projekt (z pierwszym, etykietowanym bearer tokenem `ck_…`, widocznym raz, w bazie hash), dodaje kolejne tokeny dla kolejnych agentów (etykieta wymagana), rotuje token pojedynczego agenta (graceful — nowy obok starego, stary wygasa po okresie karencji, reszta agentów nietknięta) albo unieważnia go natychmiast (skompromitowany credential), i zmienia etykietę istniejącego tokena (v1.3). (v1.5) Tokeny konta (jeden token do wielu repo, zarządzane jak tokeny projektu) i slug projektu (edytowalny, bez aliasów).
 
 **UC-8 — Agent próbuje zapisać sekret.** Skaner wykrywa sekret → save zablokowany (`secret_blocked` actionable error), audit `secret_blocked` (metadane: typ sekretu + który token/agent, v1.3) → operator widzi sygnał w dashboardzie i **rotuje albo unieważnia wyciekły credential TEGO agenta**, bez wpływu na pozostałe tokeny projektu.
+
+**UC-9 — Agent podpina repo przez MCP (v1.5).** Agent z tokenem konta (np. na polecenie `/context-keeper:onboard`) woła `list_projects`, wybiera projekt pasujący do repo albo proponuje nowy przez `create_project({name, slug})` (propozycja w kolejce — zatwierdza człowiek), po czym zapisuje w repo `.mcp.json` z nagłówkiem projektu oraz bloki `AGENTS.md`/`CLAUDE.md` (scalanie, idempotentnie, diff przed zapisem). Token nigdy nie trafia do pliku ani odpowiedzi narzędzia.
 
 ---
 
@@ -132,15 +134,16 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 
 ### 6.1 Interfejs MCP
 
-- **FR-M1** `search_memory(query, tags?, kind?)` → `[{id, header, tags, score}]`. Scope z tokena. Domyślnie `fact`+`document`; opcjonalny filtr `kind`. Dla `document` excerpt dopasowanego chunku. Przy embedding-down → **FTS-only** (ciche).
-- **FR-M2** `get_memory(id)` → pełne body; bumpuje `last_accessed_at`/`access_count`. **Egzekwuje scope**; poza scope **lub** nieistniejące → identyczne **`not_found`** (anty-probing IDOR).
+- **FR-M1** `search_memory(query, tags?, kind?, all_projects?)` → `[{id, header, tags, score}]` (+ `excerpt` dla `document`, + `project` w trybie cross). Scope: projekt (z tokena albo nagłówka) + `global`. Domyślnie `fact`+`document`; opcjonalny filtr `kind`. Przy embedding-down → **FTS-only** (ciche). **(v1.5)** `all_projects: true` — tylko token konta — przeszukuje `global` + wszystkie projekty instancji w jednej puli rankingu (bez preferencji bieżącego projektu); każdy wynik niesie `project` (slug źródła albo `null` dla global); token projektowy dostaje `validation_error`.
+- **FR-M2** `get_memory(id)` → pełne body; bumpuje `last_accessed_at`/`access_count`. **Egzekwuje scope zależny od typu tokena (v1.5):** token projektowy — projekt + `global`, poza scope **lub** nieistniejące → identyczne **`not_found`** (anty-probing IDOR); token konta — pamięć dowolnego projektu instancji + `global` (anty-IDOR niczego tu nie chroni: token konta i tak czyta każdy projekt przez zmianę nagłówka). Zapis (`supersedes`/`relations`) zawsze tylko w projekcie z nagłówka.
 - **FR-M3** `save_memory(header, body, tags)` → proposal, `{id, status}`. Embedding + dedup z **twardym budżetem czasu** (po timeoucie `pending` bez embeddingu, doembed przy akceptacji). **Dedup advisory:** twardy `duplicate_pending` tylko exact-match do pending; exact do approved → `already_exists`; **podobne → proposal zawsze powstaje + hint** (embedding nie odróżnia korekty od duplikatu).
 - **FR-M4** Zapisy agenta **tylko project-scoped**. Promocja do `global` = akcja człowieka.
 - **FR-M5** Agent w v1 tylko **tworzy** (`create`). Korekta faktu = nowy `create` + human-mediated supersession.
-- **FR-M6** Auth: statyczny bearer token per projekt w `Authorization`; serwer mapuje token → `project_id`. **Zweryfikowany dla Claude Code**; OAuth → roadmapa.
-- **FR-M7** **Taksonomia błędów:** błędy wykonania narzędzia → `isError` + koperta `{code, message}` (`validation_error`/`secret_blocked`/`not_found`); transport/auth → HTTP (`401`, `429`+`Retry-After`). `code` stabilne.
+- **FR-M6** Auth: statyczny bearer w `Authorization`. Dwa typy (v1.5): **token projektowy** — serwer mapuje token → `project_id`; **token konta** — działa w każdym projekcie instancji, projekt wskazuje nagłówek `X-Context-Keeper-Project: <slug>` z commitowanego `.mcp.json`. Niepowodzenie wyboru projektu = błąd tool-level (FR-M7), nie HTTP. **Zweryfikowany dla Claude Code**; OAuth → roadmapa.
+- **FR-M7** **Taksonomia błędów:** błędy wykonania narzędzia → `isError` + koperta `{code, message}` (`validation_error`/`secret_blocked`/`not_found`); transport/auth → HTTP (`401`, `429`+`Retry-After`). `code` stabilne. **(v1.5)** błędy scope'u projektu `project_required` / `project_not_found` / `project_pending` / `project_forbidden`; koperta `{code, message, details?}` — `details.projects` (`[{slug, name}]`) przy `project_required`/`project_not_found`. `code` i kształt `details` stabilne.
 - **FR-M8** **Idempotencja:** exact `hash(header+body+scope+project+kind)` → `duplicate_pending` (pending) / `already_exists` (approved). Bez client idempotency key w v1.
 - **FR-M9** **Kontrakt z agentem:** opisy narzędzi niosą pełny kontrakt (co/czego nie zapisywać, human-gate, jeden fakt/zapis, semantyka zwrotki); load-bearing polityka (w tym „nie zapisuj sekretów") jedzie z serwerem, nie z pluginem/wklejką. Snippet proaktywności → `CLAUDE.md`/`AGENTS.md`.
+- **FR-M10 (v1.5) Onboarding repo przez MCP.** Tylko dla tokenu konta (z nagłówkiem i bez): `list_projects` (projekty + gotowe `.mcp.json` z nagłówkiem, bloki `AGENTS.md`/`CLAUDE.md`, wskazówki zapisu) i `create_project(name, slug)` (propozycja projektu w kolejce akceptacji; approve zakłada projekt bez tokena). Prompt MCP `onboard` jako dodatek wywoływany przez człowieka — nic load-bearing. Narzędzia nigdy nie zwracają tokena.
 
 ### 6.2 Kolejka akceptacji (write path)
 
@@ -165,7 +168,7 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 
 - **FR-D1 Kolejka akceptacji:** `pending` proposale, filtr po `origin`/`type`. Diff zależny od typu. Edit-before-approve; **„Zatwierdź jako zamiennik [X]"**; stale = blokada + badge z powodem.
 - **FR-D2 Przeglądarka pamięci:** `approved`/`archived`, filtry: `scope`, `kind`, tagi, status. Detal z metadanymi, `access_count`/`last_accessed_at`, historią `revisions`. Akcje człowieka = commit bezpośredni + `revision`.
-- **FR-D3 Projekty/tokeny:** CRUD projektów; **wiele bearer tokenów per projekt** (v1.3, etykieta wymagana — atrybucja per-agent), każdy widoczny raz przy tworzeniu. **Rotacja graceful** (token-scoped: nowy obok starego, stary wygasa po okresie karencji konfigurowalnym env-em, pozostałe tokeny projektu nietknięte) + **unieważnienie natychmiastowe** (osobna akcja, dla skompromitowanych danych) + rename etykiety. Żyje poza przełącznikiem kontekstu (lista wszystkich).
+- **FR-D3 Projekty/tokeny:** CRUD projektów; **wiele bearer tokenów per projekt** (v1.3, etykieta wymagana — atrybucja per-agent), każdy widoczny raz przy tworzeniu. **Rotacja graceful** (token-scoped: nowy obok starego, stary wygasa po okresie karencji konfigurowalnym env-em, pozostałe tokeny projektu nietknięte) + **unieważnienie natychmiastowe** (osobna akcja, dla skompromitowanych danych) + rename etykiety. Żyje poza przełącznikiem kontekstu (lista wszystkich). (v1.5) **Tokeny konta** (sekcja na ekranie Projekty: wydanie, rotacja, unieważnienie, rename — `api/account-tokens`); **slug projektu** przy tworzeniu (opcjonalny) i edycja z ostrzeżeniem + audytem `project_settings_changed`; bloki onboardingu renderowane przez serwer (`GET /api/onboarding`).
 - **FR-D4 Audyt:** odrzucone proposale + przegląd `revisions` + filtrowalne eventy (m.in. **`secret_blocked`**, `purge_tombstone`).
 - **FR-D5 Human-create:** akcja „Nowa pamięć" (`fact`/`document`), pola `header`/`body`/`kind`/`tags`; `scope`/`project_id` wyprowadzane z aktywnego kontekstu. Import: **wklejka + upload `.md`** (bez bulk). Opcjonalnie miękkie „similar existing memories".
 - **FR-D6 Przełącznik aktywnego kontekstu:** `Wszystkie` | `Global` | projekt — cała aplikacja dziedziczy. `Wszystkie` = zunifikowany inbox recenzenta (create wyłączony). Widok projektu **strict** (tylko pamięci projektu; global to osobny kontekst).
@@ -191,9 +194,9 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 
 ## 7. Wymagania niefunkcjonalne (NFR)
 
-- **NFR-1 Kontrola dostępu na odczyt.** Read w MCP filtrowany tokenem; `get_memory` egzekwuje scope (IDOR → `not_found`). Dashboard read = bez ograniczeń (zaufany człowiek).
+- **NFR-1 Kontrola dostępu na odczyt.** Read w MCP zależny od typu tokena (v1.5): projektowy — projekt + `global`, `get_memory` egzekwuje scope (IDOR → `not_found`); konta — dowolny projekt instancji (`get_memory` zawsze, `search_memory` przez `all_projects`), zapis tylko w projekcie z nagłówka. Dashboard read = bez ograniczeń (zaufany człowiek).
 - **NFR-2 Audit log.** Append-only, zdarzenia zmieniające stan (z aktorem, czasem, referencją do `revision`), w tym `secret_blocked`, `purge_tombstone`, `nightly_run`. Odczyty nie per-event — liczniki.
-- **NFR-3 Rate limiting.** Per-token (od v1.3 dosłownie per bearer token, nie per projekt — N agentów per projekt dostają N niezależnych budżetów), ostrzej na `save_memory`; `429` + `Retry-After`.
+- **NFR-3 Rate limiting.** Per token × projekt (od v1.3 per bearer token, nie per projekt; **v1.5:** token konta ma osobny budżet w każdym projekcie, narzędzia konta osobny, `create_project` własny niski limit), ostrzej na `save_memory`; `429` + `Retry-After`.
 - **NFR-4 Observability.** Structured logs na stdout, `/health` (embedding-down = degraded, nie unhealthy), minimalne metryki w dashboardzie (§6.4 FR-D7).
 - **NFR-5 Trwałość / backup.** Jedna baza = jedno źródło prawdy (wektory w dumpie). `pg_dump` na cronie + kopia offsite, retencja N dni.
 - **NFR-6 Retencja `archived`.** Soft-delete nigdy nie kasuje wiersza; `archived` żyją bezterminowo, ale embeddingi kasowane (nie wyszukiwalne). Wyjątek = hard-purge (sekrety/PII).
@@ -207,11 +210,11 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 
 | Trade-off | Świadoma akceptacja |
 |---|---|
-| **Miękka izolacja** (metadana + filtr, nie twarda multi-tenancy) | Wyciek tokenu = pełny odczyt i zapis projektu. Mitygacja (v1.3) = rotacja (graceful) albo unieważnienie (natychmiastowe) TEGO konkretnego tokena — inne tokeny/agenci projektu nietknięci. |
+| **Miękka izolacja** (metadana + filtr, nie twarda multi-tenancy) | Wyciek tokenu = pełny odczyt i zapis projektu. **Token konta (v1.5): wyciek = odczyt i zapis wszystkich projektów instancji** — dlatego do CI tokeny projektowe. Mitygacja (v1.3) = rotacja (graceful) albo unieważnienie (natychmiastowe) TEGO konkretnego tokena — inne tokeny/agenci projektu nietknięci. |
 | **Cross-agent latency** | Fakt agenta A niewidoczny dla agenta B (ten sam projekt) do akceptacji. Stan sesji ma żyć w kontekście agenta. |
 | **Async ack (fire-and-forget)** | Fakt zapisany w kroku 1 nie będzie znaleziony przez search w kroku 5 tej samej sesji (pending). |
 | **Przepustowość akceptacji** | v1 zakłada, że jeden recenzent nadąża. Powyżej — anti-fatigue (v2). |
-| **Audyt per-agent od v1.3** | Rozwiązane: wiele tokenów per projekt (`project_tokens`, etykieta wymagana) + atrybucja `audit_log.metadata.{tokenId,tokenLabel}`/`search_events.token_id`. `actor` pozostaje `agent:<project_id>` (nie per-token) — filtr projektu w `AuditService.query` niezmieniony. |
+| **Audyt per-agent od v1.3** | Rozwiązane: wiele tokenów per projekt (`project_tokens`, etykieta wymagana) + atrybucja `audit_log.metadata.{tokenId,tokenLabel}`/`search_events.token_id`. `actor` pozostaje `agent:<project_id>` (v1.5: projekt z nagłówka przy tokenie konta; `agent:account` dla akcji bez projektu — `create_project`) (nie per-token) — filtr projektu w `AuditService.query` niezmieniony. |
 | **Provider/preset embeddingów zablokowany per deployment** | Wybór presetu (`multilingual`/`english`/`api`) to decyzja deploy-time; zmiana modelu = re-embed wszystkiego (CLI `reembed`), nie tani runtime-swap. Preset `english` (EN-only) szybszy/lżejszy, ale ryzykowny przy treści mieszanej PL/EN → `multilingual` domyślny. |
 | **Dedup advisory** | Podobne zapisy nie są auto-suppressowane (bo embedding nie odróżnia korekty od duplikatu) → nieco więcej duplikatów w kolejce; czyści człowiek/nocny job. |
 | **Statyczny bearer (nie OAuth)** | Zweryfikowany dla klientów header-configurable (Claude Code/Cursor/SDK). Desktop/web-connector (OAuth) → roadmapa. |
@@ -228,7 +231,7 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 - **Adopcja:** agent realnie sięga do pamięci zamiast pytać od zera (rosnący `access_count`).
 - **Higiena sekretów:** wykryte sekrety nie wchodzą do store'u; każda blokada → sygnał rotacji dla operatora.
 
-**Strategia testów** (skupiona na rdzeniu, nie pełne pokrycie — szczegóły [`tech-stack.md`](tech-stack.md) §15): priorytet 1 = transakcja akceptacji + optimistic-concurrency; priorytet 2 = scope/IDOR; dalej skaner sekretów, nocny job, retrieval, `recall@k`, cienki MCP e2e (zarazem smoke łączności bearer).
+**Strategia testów** (skupiona na rdzeniu, nie pełne pokrycie — szczegóły [`tech-stack.md`](tech-stack.md) §15): priorytet 1 = transakcja akceptacji + optimistic-concurrency; priorytet 2 = scope/IDOR (zależny od typu tokena, v1.5); dalej skaner sekretów, nocny job, retrieval, `recall@k`, cienki MCP e2e (zarazem smoke łączności bearer).
 
 ---
 

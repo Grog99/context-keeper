@@ -1,8 +1,8 @@
 # Context Keeper — Tech Stack & Architektura
 
-**Wersja dokumentu:** v1.3 (dostęp: wiele tokenów per projekt + graceful rotation) · **Data:** 2026-07-29
+**Wersja dokumentu:** v1.5 (wiele repo: token konta, slug projektu, onboarding przez MCP, wyszukiwanie między projektami) · **Data:** 2026-10-06
 **Źródła:** `plan-pamiec-agentow-mcp.md`, `research-prior-art-pamiec-agentow.md`, sesja ustaleń przedimplementacyjnych
-**Ostatnia synchronizacja z kodem:** 2026-07-29 (przegląd techniczny — §4, §5, §6, §12, §13; patrz [`tech-review.md`](tech-review.md))
+**Ostatnia synchronizacja z kodem:** 2026-10-06 (synchronizacja kanonu v1.5 — §0, §1, §4, §5, §6, §9, §10, §12, §13, §14, §15)
 
 > Ten dokument opisuje **jak** budujemy. Uzasadnienia produktowe (co i dla kogo) są w [`prd.md`](prd.md).
 > Zasada przewodnia: **prosto w v1, schema/architektura gotowa na rozszerzenia.**
@@ -10,6 +10,22 @@
 ---
 
 ## 0. Changelog
+
+### v1.5 — wiele repo
+
+1. **Token konta + wybór projektu nagłówkiem** — `project_tokens.project_id IS NULL` = token konta (działa w każdym
+   projekcie instancji); projekt wskazuje `X-Context-Keeper-Project: <slug>` z commitowanego `.mcp.json`; nowa kolumna
+   `projects.slug`; nierozwiązany projekt = błąd tool-level (`project_*`, koperta `{code, message, details?}`), nie HTTP.
+   Migracja 0012. → §4, §5, §10
+2. **Onboarding przez MCP** — narzędzia konta `list_projects` / `create_project` (propozycja `proposal_type='create_project'`,
+   approve zakłada projekt bez tokena; migracja 0013), prompt `onboard`; bloki `.mcp.json` / `AGENTS.md` / `CLAUDE.md`
+   renderuje serwer — jedno źródło dla MCP i dashboardu. → §4, §5, §12, §14
+3. **Rate limiting** kluczowany `tokenId:projectId` (narzędzia pamięci) / `tokenId:account` (narzędzia konta), osobny niski
+   limit `create_project`. → §10, §12
+4. **Wyszukiwanie między projektami** — `search_memory(all_projects)` tylko dla tokenu konta, `get_memory` tokenem konta
+   czyta dowolny projekt; `search_events.cross_project` (migracja 0014). → §4, §5, §6, §10
+5. **Kontrakt narzędzi** — źródłem tekstu opisów jest kod (`apps/server/src/mcp/tool-contract.ts`);
+   [`mcp-tool-contract.md`](mcp-tool-contract.md) to dokument zasad bez kopii opisów. → §5, §14
 
 ### v1.3 — dostęp: wiele tokenów per projekt + graceful rotation
 
@@ -57,7 +73,7 @@ Jeden VPS, Docker Compose, jedna baza (Postgres) jako jedyne źródło prawdy. S
 
 ```mermaid
 flowchart TB
-    Agent["Agent AI (Claude / inny)\nbearer token per projekt"]
+    Agent["Agent AI (Claude / inny)\nbearer: token projektowy\nlub konta + nagłówek projektu"]
     Human["Recenzent (człowiek)\nza VPN / CF Access"]
 
     subgraph VPS["VPS — Docker Compose"]
@@ -127,7 +143,7 @@ Jeden dyskryminator `kind` na tabeli `memories` (nie osobne tabele — reużycie
 | `kind` | `fact` \| `document` \| `event` (rozszerzalny enum; `event` zaimplementowane w v1.2) |
 | `tags` | lista stringów. **Normalizacja:** trim + lowercase + collapse whitespace; max ~10, każdy ≤ ~40 zn., charset `[a-z0-9-_/]` |
 | `scope` | `global` \| `project` |
-| `project_id` | z credentialu przy zapisie (agent) lub z aktywnego kontekstu UI (human-create); pusty dla `global` |
+| `project_id` | z credentialu (token projektowy) albo z nagłówka `X-Context-Keeper-Project` (token konta, v1.5) przy zapisie agenta; z aktywnego kontekstu UI (human-create); pusty dla `global` |
 | `status` | `approved` \| `archived` (soft-delete, nigdy hard-delete) \| `purged` (tombstone po hard-purge §10 — treść wymazana, wiersz zostaje; ustawiane wyłącznie przez CLI/dashboard purge). **Predykat „wszystko poza `approved`" jest niepoprawny** — `purged` to nie archiwum |
 | `source` | `agent` \| `human` \| `nightly` (kto utworzył) |
 | `created_at` / `updated_at` / `approved_at` | znaczniki czasu |
@@ -143,13 +159,14 @@ Jeden dyskryminator `kind` na tabeli `memories` (nie osobne tabele — reużycie
 
 `memory_id`, `chunk_index`, `chunk_text`, `embedding_model`, `vector`. Mały dokument = jeden chunk (chunking wtedy niewidoczny). Jedna ścieżka kodu dla małych i dużych.
 
-### `proposals` (kolejka akceptacji — każda treściowa mutacja)
+### `proposals` (kolejka akceptacji — każda treściowa mutacja + propozycje projektów)
 
-`type` (`create`\|`update`\|`merge`\|`delete`), `payload`, `affected_ids`, `origin` (`agent`\|`human`\|`nightly`), `status` (`pending`\|`approved`\|`rejected`\|`withdrawn`). `withdrawn` = samo-wycofanie maszynowe przez nocny job (§8), odróżnione od `rejected` (decyzja człowieka) mimo tego samego skutku — audyt ma pokazywać KTO zdecydował. Metryka „decyzje recenzenta" liczy `approved`+`rejected`, nigdy `withdrawn`.
+`type` (`create`\|`update`\|`merge`\|`delete`\|`create_project`), `payload`, `affected_ids`, `origin` (`agent`\|`human`\|`nightly`), `status` (`pending`\|`approved`\|`rejected`\|`withdrawn`). `withdrawn` = samo-wycofanie maszynowe przez nocny job (§8), odróżnione od `rejected` (decyzja człowieka) mimo tego samego skutku — audyt ma pokazywać KTO zdecydował. Metryka „decyzje recenzenta" liczy `approved`+`rejected`, nigdy `withdrawn`.
 
 - Kolejka to **tabela**, nie flaga `status=pending` na dokumencie — bo merge (A+B→C) to operacja „utwórz C, zarchiwizuj A, zarchiwizuj B", której flaga nie wyrazi. Jeden mechanizm i jedna powierzchnia audytu dla zapisów agenta, edycji człowieka i propozycji nocnego joba.
 - **Optimistic concurrency (nowe):** proposal celujący w istniejące pamięci zapisuje przy utworzeniu **`base_versions`** — `revision_id` bazowy każdego `affected_id` (stan, względem którego liczono payload). Przy akceptacji sprawdzany wewnątrz transakcji (§8bis). Drift → proposal jest **stale** (computed guard, bez nowej wartości w enumie `status`).
 - **Idempotencja / dedup (nowe):** twardy `duplicate_pending` tylko przy **exact match** `hash(header+body+scope+project+kind [+event_time])` wobec pending proposala — szóste pole dokładane WYŁĄCZNIE dla `kind='event'` (hashe `fact`/`document` bit-w-bit jak przed v1.3), więc to samo zdarzenie odnotowane dla dwóch różnych czasów to dwie pamięci, nie duplikat; exact-match do approved → `already_exists`; podobne → proposal + hint (§5).
+- **`create_project` (v1.5)** — propozycja założenia projektu, nie mutacja pamięci: payload `{name, slug}`, `scope='global'`, `project_id=NULL`, `affected_ids=[]`, `content_hash=NULL`. Unikalność slugu wśród oczekujących: partial unique index `proposals_create_project_slug_pending_key` na `(payload->>'slug') WHERE status='pending' AND payload->>'slug' IS NOT NULL` (predykat celowo bez `type = 'create_project'` — Postgres 55P04 przy migracji w jednej transakcji; niezmiennik: tylko ten payload ma klucz `slug`). Approve zakłada wiersz `projects` **bez tokena** (zniesiony niezmiennik „nigdy projekt bez tokena"); kolizja slugu przy approve → `validation_error`, propozycja zostaje `pending`; odrzucenie zwalnia slug. Brak edit-before-approve i supersession.
 
 > **Forward-compat (v2):** miejsce na pole `confidence`/`auto_eligible` (anti-fatigue / sedymentacja).
 
@@ -167,17 +184,18 @@ Wektory policzone przy `save` (dla dedup), zanim proposal zostanie zatwierdzony.
 
 ### `audit_log` (append-only)
 
-`id`, `event_type`, `actor` (token+`project_id` albo `"human-dashboard"`), `affected_ids`, `revision_id` (opcjonalnie, before/after), `created_at`. Odczyty **nie** logowane per-event — zostają liczniki.
+`id`, `event_type`, `actor` (`agent:<project_id>` (narzędzia pamięci — projekt z credentialu albo z nagłówka), `agent:account` (v1.5 — akcje tokenu konta bez projektu: `create_project` → `proposal_created` / `secret_blocked`, token w `metadata.{tokenId,tokenLabel}`) albo `"human-dashboard"`), `affected_ids`, `revision_id` (opcjonalnie, before/after), `created_at`. Odczyty **nie** logowane per-event — zostają liczniki.
 
-- **event_type:** `proposal_created`/`approved`/`rejected`/`edited`, `human_edit`, `archive`, `promote`, `token_created`/`rotated`/**`revoked`**/**`relabeled`** (v1.3 — `revoked`=unieważnienie natychmiastowe, `relabeled`=rename etykiety, kosmetyczny), **`secret_blocked`** (metadane: typ sekretu + `tokenId`/`tokenLabel` (v1.3, atrybucja per-agent) + czas — bez materiału sekretu; sygnał rotacji/unieważnienia, §10), **`purge_tombstone`** (content wymazany, powód, czas — §10), **`nightly_run`** (status/liczniki, §8), **`project_settings_changed`** (v1.2 — zmiana ustawień projektu z dialogu szczegółów, np. `include_events_in_default_search`; metadane `{field, from, to}`).
+- **event_type:** `proposal_created`/`approved`/`rejected`/`edited`, `human_edit`, `archive`, `promote`, `token_created`/`rotated`/**`revoked`**/**`relabeled`** (v1.3 — `revoked`=unieważnienie natychmiastowe, `relabeled`=rename etykiety, kosmetyczny), **`secret_blocked`** (metadane: typ sekretu + `tokenId`/`tokenLabel` (v1.3, atrybucja per-agent) + czas — bez materiału sekretu; sygnał rotacji/unieważnienia, §10), **`purge_tombstone`** (content wymazany, powód, czas — §10), **`nightly_run`** (status/liczniki, §8), **`project_settings_changed`** (v1.2 — zmiana ustawień projektu z dialogu szczegółów, np. `include_events_in_default_search`; metadane `{field, from, to}`; v1.5: także `field: 'slug'` przy edycji slugu, `{from, to}`). v1.5 nie dodało wartości enuma `event_type`.
 
 ### `projects`
 
 Projekty. Dodanie projektu bez redeployu.
 
 - `include_events_in_default_search` (v1.2) — boolean, default `false`. Per-projektowy toggle: czy `kind=event` dokłada się do domyślnego zestawu `kind` w `search_memory` (agent nadal może zawsze poprosić o `kind=event` jawnie). Edytowany w dialogu szczegółów projektu (§9.3); zmiana audytowana jako `project_settings_changed`.
+- `slug` (v1.5) — `text NOT NULL`, format `^[a-z0-9]+(-[a-z0-9]+)*$`, 2–48 znaków, unikalny (`projects_slug_key` + CHECK `projects_slug_format_check`); wartość nagłówka `X-Context-Keeper-Project`. Backfill w migracji 0012 z `name`: transliteracja (polskie + łacińskie diakrytyki), lowercase, ciągi spoza `[a-z0-9]` → `-`, cięcie do 48, wynik < 2 zn. → `project-<końcówka id>`, kolizje → `-2`, `-3`… (kolejność `created_at, id`); reguły zduplikowane w `projects/slug.ts` z testem parytetu. Edytowalny w dashboardzie (ostrzeżenie + audyt `project_settings_changed`), **bez aliasów** — repo ze starym slugiem dostają `project_not_found`. CLI `create-project --slug`.
 
-### `project_tokens` (v1.3 — wiele tokenów per projekt + graceful rotation)
+### `project_tokens` (v1.3 — wiele tokenów per projekt + graceful rotation; v1.5 — tokeny konta)
 
 1 projekt → N tokenów (dawniej trzy kolumny tokena bezpośrednio na `projects` — 1:1). **Token: `ck_` +
 256-bit losowość (base64url); w bazie `token_hash` = SHA-256 (deterministyczny, indeksowany), bez
@@ -198,10 +216,30 @@ pepper.** Lookup token→(projekt, token) = jeden trafiony indeks JOIN (§10).
   osobna, natychmiastowa akcja (dla skompromitowanych danych) — działa na `active` i `grace`,
   idempotentna.
 - `search_events.token_id` (nullable, `ON DELETE SET NULL`) + `audit_log.metadata.{tokenId,tokenLabel}`
-  niosą atrybucję per-agent — `audit_log.actor` pozostaje `agent:<project_id>` (format aktora
-  niezmieniony, żeby nie złamać filtra `AuditService.query` po projekcie).
-- Rate limiting (§10) kluczowany `token_id`, nie `project_id` — N agentów per projekt dostaje N
-  niezależnych budżetów zamiast dzielenia jednego.
+  niosą atrybucję per-agent — `audit_log.actor` pozostaje `agent:<project_id>` (dla tokenu konta to
+  projekt z nagłówka; `agent:account` dla akcji bez projektu — format aktora niezmieniony, żeby nie
+  złamać filtra `AuditService.query` po projekcie).
+- Rate limiting (§10) kluczowany `tokenId:projectId` (v1.5; v1.3: `token_id`) — N agentów per projekt =
+  N budżetów, a token konta ma osobny budżet w każdym projekcie.
+- **Token konta (v1.5):** `project_id IS NULL` (FK z cascade zostaje dla tokenów projektowych; migracja
+  0012 operacyjnie nieodwracalna po pierwszym tokenie konta). Ten sam cykl życia
+  (`active`/`grace`/`revoked`). Unikalność etykiety tokenów konta: osobny partial unique
+  `project_tokens_account_label_active_key` na `(label) WHERE project_id IS NULL AND status='active'`
+  (NULL-e są w indeksie projektowym rozłączne). Lookup nie zakłada projektu: guard ustala `tokenScope` i
+  rozwiązuje projekt z nagłówka.
+
+### `search_events` (instrumentacja `search_memory`, v1.1; `cross_project` v1.5)
+
+Append-only, jeden wiersz per wywołanie `search_memory` (wyłącznie MCP; `get_memory` nie jest
+instrumentowany — ma `access_count`). Kolumny: `id` (`sev_…`), `project_id` (NOT NULL, FK `restrict` —
+bieżący projekt), `token_id` (nullable, `ON DELETE SET NULL`, v1.3), `result_count`, `degraded` (brak
+query-vectora), `cross_project` (v1.5 — wyszukiwanie z `all_projects: true`, zapisywane pod bieżącym
+projektem i tokenem), `created_at`. Bez treści i hasha zapytania (prywatność). Retencja
+`SEARCH_EVENTS_RETENTION_DAYS` (nocny job). Osobna tabela od `audit_log`. **Reguła zero-result:** wskaźnik
+zero-result na ekranie Pomiary wyłącza wiersze `degraded` ORAZ `cross_project` (licznik i mianownik) —
+degradacja nie znaczy „brak treści", a tryb cross rzadziej daje 0; w liczbie wyszukiwań i wolumenie liczą
+się normalnie. Wywołanie odrzucone przed wyszukiwaniem (błąd scope'u, `all_projects` tokenem projektowym)
+nie zostawia wiersza.
 
 ### Ścieżka human-create (nowe)
 
@@ -219,15 +257,19 @@ pepper.** Lookup token→(projekt, token) = jeden trafiony indeks JOIN (§10).
 ## 5. Interfejs MCP
 
 - **Transport: Streamable HTTP** przez **oficjalny `@modelcontextprotocol/sdk`**, jeden endpoint (POST+GET). Stary HTTP+SSE przestarzały (spec 2025-03-26); najnowsza rewizja transportu 2025-11-25 — SDK ją śledzi. Narzędzia request/response → app-tier bezstanowy.
-- **Auth: statyczny bearer token per projekt** w nagłówku `Authorization`; serwer mapuje token → `project_id`. **Zweryfikowane (nowe):** Claude Code CLI łączy się po `--header "Authorization: Bearer …"`; `.mcp.json` = `type:"http"` (alias `streamable-http`), `url`, `headers`; wspierana ekspansja `${VAR}` (token w env, nie plaintext w commicie); serwer odrzucający header → deterministyczny fail (bez cichego fallbacku do OAuth). **OAuth 2.1 + PKCE → roadmapa** (gdyby serwer stał się publiczny / potrzebny Desktop/web-connector); kod bearer się nie marnuje.
+- **Auth: statyczny bearer** w `Authorization` — token projektowy (→ jego projekt) albo **token konta** (v1.5, → projekt z nagłówka `X-Context-Keeper-Project: <slug>` z commitowanego `.mcp.json`). Nierozwiązany projekt nie odrzuca żądania (każdy ważny token przechodzi); narzędzie pamięci zwraca błąd tool-level `project_*` — przy HTTP 4xx klient MCP uznałby serwer za niepodłączony. **Zweryfikowane (nowe):** Claude Code CLI łączy się po `--header "Authorization: Bearer …"`; `.mcp.json` = `type:"http"` (alias `streamable-http`), `url`, `headers`; wspierana ekspansja `${VAR}` (token w env, nie plaintext w commicie); serwer odrzucający header → deterministyczny fail (bez cichego fallbacku do OAuth). **OAuth 2.1 + PKCE → roadmapa** (gdyby serwer stał się publiczny / potrzebny Desktop/web-connector); kod bearer się nie marnuje.
 
 ### Narzędzia
 
 | Narzędzie | Sygnatura | Uwagi |
 |---|---|---|
-| `search_memory` | `(query, tags?, kind?)` → `[{id, header, tags, score}]` | Scope z tokena. Domyślnie `fact`+`document` (+ `event`, v1.2, TYLKO gdy projekt ma `include_events_in_default_search=true`); opcjonalny filtr `kind` (`fact`\|`document`\|`event`) honorowany zawsze niezależnie od togglea. Dla `document` dokłada excerpt dopasowanego chunku; dla `event` ranking podlega age-decay (§4). Przy embedding-down → **FTS-only** (§6), ciche. |
-| `get_memory` | `(id)` → pełne body | Bumpuje `last_accessed_at`/`access_count`. **Egzekwuje scope** (`id` ∈ projekt tokena albo `global`). Poza scope **lub** nieistniejące → identyczne **`not_found`** (anty-probing IDOR). |
-| `save_memory` | `(header, body, tags?, kind?, event_time?, supersedes?, relations?)` → `{id, status}` | Liczy embedding + dedup przed odpowiedzią z **twardym budżetem czasu** (po timeoucie → `pending` bez embeddingu, doembed przy akceptacji). `id` mintowany przy proposalu; wiersz `memories` materializowany dopiero przy akceptacji. Statusy: `pending` / `duplicate_pending` / `already_exists`. Pełny kontrakt parametrów i guardów → [`mcp-tool-contract.md`](mcp-tool-contract.md) (jedno źródło prawdy, ta tabela go nie duplikuje). |
+| `search_memory` | `(query, tags?, kind?, all_projects?)` → `[{id, header, tags, score, excerpt?, project?}]` | Scope: projekt (z tokena albo nagłówka) + `global`. (v1.5) `all_projects: true` — tylko token konta: global + wszystkie projekty, wynik niesie `project` (slug \| `null`), token projektowy → `validation_error` (§6). Domyślnie `fact`+`document` (+ `event`, v1.2, TYLKO gdy projekt ma `include_events_in_default_search=true`); opcjonalny filtr `kind` (`fact`\|`document`\|`event`) honorowany zawsze niezależnie od togglea. Dla `document` dokłada excerpt dopasowanego chunku; dla `event` ranking podlega age-decay (§4). Przy embedding-down → **FTS-only** (§6), ciche. |
+| `get_memory` | `(id)` → pełne body | Bumpuje `last_accessed_at`/`access_count`. **Scope zależny od typu tokena:** projektowy — projekt tokena albo `global`, poza scope lub nieistniejące → identyczne `not_found` (anty-probing IDOR); konta (v1.5) — dowolny projekt instancji + `global`. |
+| `save_memory` | `(header, body, tags?, kind?, event_time?, supersedes?, relations?)` → `{id, status}` | Liczy embedding + dedup przed odpowiedzią z **twardym budżetem czasu** (po timeoucie → `pending` bez embeddingu, doembed przy akceptacji). `id` mintowany przy proposalu; wiersz `memories` materializowany dopiero przy akceptacji. Statusy: `pending` / `duplicate_pending` / `already_exists`. Pełny kontrakt parametrów i guardów → tekst opisu w `apps/server/src/mcp/tool-contract.ts` (`SAVE_MEMORY_DESCRIPTION`), zasady w [`mcp-tool-contract.md`](mcp-tool-contract.md). |
+| `list_projects` | `()` → `{projects:[{slug,name,mcpJson}], agentsMd, claudeMd, mcpUrlConfigured, hint}` | (v1.5) tylko token konta (zawsze, z nagłówkiem i bez); read-only; nigdy nie zwraca tokena. |
+| `create_project` | `(name, slug)` → `{status:'pending', proposalId, project, mcpJson, agentsMd, claudeMd, mcpUrlConfigured, next}` | (v1.5) tylko token konta; propozycja w kolejce (human-gated); approve zakłada projekt bez tokena. |
+
+**Prompt `onboard`** (v1.5) — tylko token konta (capability `prompts`), statyczny, bez argumentów, bez dostępu do bazy; nic load-bearing (§14). Zestaw narzędzi i prompt zależą wyłącznie od typu tokena (`mcp-server.factory.ts`), nigdy od nagłówka ani stanu bazy.
 
 ### Dedup / idempotencja (advisory, nie hard-block)
 
@@ -242,19 +284,28 @@ Bez client-supplied idempotency key w v1 (hash treści wystarcza).
 
 ### Taksonomia błędów
 
-Błędy *wykonania narzędzia* → wynik z **`isError: true`** + koperta `{code, message}` (agent czyta i się adaptuje). Błędy *transportu/auth* → **status HTTP** (obsługuje klient).
+Błędy *wykonania narzędzia* → wynik z **`isError: true`** + koperta `{code, message, details?}` (agent czyta i się adaptuje). Błędy *transportu/auth* → **status HTTP** (obsługuje klient).
 
 | Warstwa | Przypadek | `code` / status |
 |---|---|---|
 | Tool-level (`isError`) | walidacja poza limitem / braki | `validation_error` |
 | | sekret wykryty przy save | `secret_blocked` (agent; „usuń sekret, referuj po nazwie") |
-| | `get_memory` poza scope lub nieistniejące | `not_found` (nieodróżnialne — anty-probing) |
-| Transport (HTTP) | zły/brak bearer | `401` |
-| | rate limit | `429` + `Retry-After` |
+| | narzędzie pamięci, token konta bez nagłówka `X-Context-Keeper-Project` | `project_required` + `details.projects` (`[{slug, name}]`, wszystkie projekty) |
+| | narzędzie pamięci, token konta, slug z nagłówka nie istnieje albo ma zły format | `project_not_found` + `details.projects` |
+| | narzędzie pamięci, token konta, slug należy do oczekującej propozycji `create_project` | `project_pending` (bez `details`) |
+| | narzędzie pamięci, token projektowy + nagłówek z innym slugiem niż projekt tokena | `project_forbidden` (bez `details`, stały komunikat bez echa slugu — anty-probing) |
+| | `search_memory` z `all_projects: true` tokenem projektowym | `validation_error` |
+| | `get_memory` — token projektowy: poza scope (projekt + `global`) lub nieistniejące; token konta: nieistniejące / niezatwierdzone (odczyt dowolnego projektu jest dozwolony) | `not_found` (nieodróżnialne — anty-probing) |
+| | `create_project` — slug w złym formacie, projekt o tym slugu już istnieje, propozycja tego slugu już oczekuje, nazwa pusta po normalizacji | `validation_error` |
+| | `create_project` — nazwa wygląda jak sekret | `secret_blocked` |
+| Transport (HTTP) | zły/brak/nieusable bearer (projektowy lub konta — ten sam komunikat) | `401` |
+| | rate limit — per token × projekt × narzędzie (klucz `tokenId:projectId`); narzędzia konta per token (`tokenId:account`), `create_project` z własnym niskim limitem; przed auth throttle per IP | `429` + `Retry-After` |
 | Nie-błąd (status w wyniku) | save | `pending` / `duplicate_pending` / `already_exists` |
 | | search przy embedding-down | ciche FTS-only |
 
-`code` stabilne (snippet/plugin i agenci mogą się na nich opierać); komunikaty tekstowe mogą się zmieniać.
+Błędy scope'u projektu sprawdzane są na początku handlera narzędzia (`requireProject()`) — przed naszą walidacją (`validation_error`) i logiką narzędzia, bez skutków ubocznych (audyt, `search_events`) i bez zużycia budżetu rate limitu. Wcześniej działa tylko walidacja `inputSchema` w SDK MCP: argumenty niezgodne ze schematem dają surowy błąd SDK (`isError` bez koperty `{code}`).
+
+`code` stabilne (snippet/plugin i agenci mogą się na nich opierać); komunikaty tekstowe mogą się zmieniać. `details` występuje tylko przy `project_required`/`project_not_found` (`toErrorEnvelope`, `common/errors.ts`) i ma stały kształt.
 
 ### Semantyka zapisu
 
@@ -275,6 +326,8 @@ Błędy *wykonania narzędzia* → wynik z **`isError: true`** + koperta `{code,
 6. **Post-fuzja: age-decay × graph boost** (oba re-rank only, mnożniki na score z RRF — nie zmieniają zbioru kandydatów, tylko kolejność). **Age-decay:** wykładniczy half-life `EVENT_DECAY_HALFLIFE_DAYS`, wyłącznie `kind='event'`, ujemny wiek (data przyszła) clampowany do faktora 1. **Graph boost:** jedno dodatkowe zapytanie o krawędzie `memory_relations` w obrębie zbioru wyników, waga `GRAPH_BOOST_WEIGHT` (0 = wyłączony). To jedyne miejsce, gdzie kolejność operacji rankingu jest udokumentowana — debugując „dlaczego ten wynik wyszedł wyżej", zacznij tutaj.
 7. **Top-k + próg relevance** (odcięcie szumu).
 8. **Dwufazowo:** `search_memory` → nagłówki (+ excerpt dla `document`); `get_memory(id)` → pełne body (v1 = całość). Chunk-targeted `get` → v2.
+
+> **Tryb cross-project (v1.5, `all_projects: true`, tylko token konta):** warunek zakresu (`memory/read-scope.ts`) budowany raz i podawany obu ramionom (FTS i wektor) — global + każdy projekt w jednej puli RRF, te same limity kandydatów i top-k, **bez preferencji bieżącego projektu**. Domyślny zestaw `kind` z togglea **bieżącego** projektu. Graph boost (krok 6) bierze krawędzie każdego projektu obecnego w zbiorze wyników (krawędzie są intra-project — brak boostu między projektami). Wyniki niosą `project` (slug lub `null`); w trybie domyślnym pola nie ma. Jeden wiersz `search_events` z `cross_project=true` (§4).
 
 **Tagi:** podwójna rola — filtr strukturalny w search + tekst dopisany do embeddowanego chunku.
 
@@ -353,7 +406,7 @@ Wektor liczony przy `save` (dla dedup) → `staging_embeddings` (powiązany z pr
 - **Hosting:** pojedynczy VPS + Docker Compose (nie serverless — serverless dokłada connection pooling do Postgresa, cold start, uniemożliwia lokalne embeddingi).
 - **Sizing VPS wg embeddingów:** `api` → ~2 GB; `local` lekki (bge-small/nomic) → ~4 GB; **`local` multi-język (bge-m3) → ~8 GB** (Postgres + app + model + zapas na budowę HNSW). Odpowiada presetom (§7): `api`/`english`/`multilingual`; przy domyślnym `multilingual` (bge-m3) celujemy w **8 GB**.
 - **Config: 12-factor env** (§12). Projekty i tokeny w tabeli `projects` (nie w env).
-- **Bootstrapping / first-run:** komenda seed/CLI (`create-project`, `rotate-token`, **`purge`**, **`run-nightly`**, **`reembed`**) do założenia pierwszego projektu i tokenu oraz operacji uprzywilejowanych; hasło dashboardu z env przy pierwszym starcie, zmiana potem w dashboardzie. CLI to komendy `nestjs-commander` w tym samym kodzie (reużycie serwisów), odpalane przez `docker compose run --rm app <cmd>`.
+- **Bootstrapping / first-run:** komenda seed/CLI (`create-project [--slug]`, `list-projects` (kolumna SLUG na końcu), `create-token` / `list-tokens` / `rotate-token` / `revoke-token`, `create-account-token` / `list-account-tokens` (v1.5), **`purge`**, **`run-nightly`**, **`reembed`**) do założenia pierwszego projektu i tokenu oraz operacji uprzywilejowanych; hasło dashboardu z env przy pierwszym starcie, zmiana potem w dashboardzie. CLI to komendy `nestjs-commander` w tym samym kodzie (reużycie serwisów), odpalane przez `docker compose run --rm app <cmd>`.
 - **Sekrety:** klucze API i seed hasła jako `.env` / Docker secrets na hoście — nie w obrazie, nie w repo.
 - **Backup:** `pg_dump` na cronie (wektory są w dumpie) + kopia offsite, retencja N dni.
 - **Migracje:** narzędzie migracyjne od dnia zero.
@@ -383,9 +436,9 @@ Cienki generator nad `.env` + profilami Compose — **nie osobna warstwa configu
 
 ## 10. Bezpieczeństwo
 
-- **Kontrola dostępu na odczyt.** Read w MCP filtrowany tokenem (projekt + `global`). **`get_memory(id)` egzekwuje scope** — bez tego IDOR. Poza scope lub nieistniejące → identyczne **`not_found`** (anty-probing istnienia cudzych `id`). Dashboard read = bez ograniczeń (zaufany człowiek, wspólny auth); restrykcje per-projekt dopiero z per-user auth (v2).
+- **Kontrola dostępu na odczyt (zależna od typu tokena, v1.5 — `mcp/read-scope-policy.ts`).** Token projektowy: read w MCP filtrowany do projektu tokena + `global`; **`get_memory(id)` egzekwuje scope** — bez tego IDOR; poza scope lub nieistniejące → identyczne **`not_found`** (anty-probing). Token konta: pamięć **dowolnego** projektu instancji + `global` — `get_memory` zawsze, `search_memory` po jawnym `all_projects: true` (domyślnie projekt z nagłówka + global). Poszerzenie dotyczy wyłącznie odczytu: zapis (`save_memory`, gate'y `supersedes`/`relations` — `MemoryService.inScope`) zostaje przy projekcie z nagłówka. Zakres odczytu liczy jedno miejsce (`memory/read-scope.ts`). Dashboard read = bez ograniczeń (zaufany człowiek, wspólny auth); restrykcje per-projekt dopiero z per-user auth (v2).
 - **Dwie rozłączne powierzchnie auth:**
-  - MCP: publiczny + bearer per projekt (maszyna). **Zweryfikowane dla Claude Code (§5).**
+  - MCP: publiczny + bearer — token projektowy albo token konta + nagłówek `X-Context-Keeper-Project` (v1.5) (maszyna). **Zweryfikowane dla Claude Code (§5).**
   - Dashboard + JSON API: wspólne hasło aplikacji → podpisany cookie sesji (tylko HTTPS) + **za VPN/proxy** (Tailscale / Cloudflare Access). Cookie `SameSite` + ochrona CSRF na mutacjach.
 
 ### Token — format i hashowanie (nowe)
@@ -407,8 +460,8 @@ Cienki generator nad `.env` + profilami Compose — **nie osobna warstwa configu
 ### Pozostałe
 
 - **Audit log** append-only (§4) — każdy zapis, który wszedł do pamięci, ma ślad, kto go wepchnął.
-- **Rate limiting** per-token (token bucket), **od v1.3 kluczowany `token_id`** (dawniej `project_id` — token==projekt było 1:1, więc nieodróżnialne; z N tokenów per projekt kluczowanie po projekcie dzieliłoby jeden budżet między agentów): ostrzej na `save_memory`, luźniej na `search`/`get`; `429` + `Retry-After`. Licznik w pamięci działa dla jednej instancji; przy skalowaniu poziomym → współdzielony store (Redis) — poza v1.
-- **Threat model (świadomy):** miękka izolacja — wyciek tokenu = pełny odczyt i zapis projektu. Mitygacja = rotacja (graceful) albo unieważnienie (natychmiastowe) TEGO konkretnego tokena (v1.3 — inne tokeny/agenci tego samego projektu nietknięte). Twarda multi-tenancy poza zakresem v1.
+- **Rate limiting** per-token (token bucket, in-memory, okno per minuta), klucz bucketu `<klucz>:<narzędzie>`: od v1.3 per `token_id` (N agentów projektu = N budżetów); **od v1.5** narzędzia pamięci `tokenId:projectId` (token konta ma osobny budżet w każdym projekcie — zapętlony agent w jednym repo nie dusi pozostałych; dla tokenu projektowego bez zmian), narzędzia konta `tokenId:account`. Limity: `save_memory` ostrzej, `search`/`get` luźniej, `list_projects` = limit search, `create_project` własny niski (`RATE_LIMIT_CREATE_PROJECT_PER_MIN`, domyślnie 3/min). Wywołanie z nierozwiązanym projektem nie zużywa budżetu (skończy się błędem tool-level bez skutków); `initialize`/`tools/list`/`prompts/*` nie są limitowane. `429` + `Retry-After`. Przed auth: throttle per IP (`RATE_LIMIT_MCP_IP_PER_MIN`). Licznik w pamięci → przy skalowaniu poziomym Redis (poza v1).
+- **Threat model (świadomy):** miękka izolacja — wyciek tokenu projektowego = pełny odczyt i zapis TEGO projektu; **wyciek tokenu konta (v1.5) = odczyt i zapis wszystkich projektów instancji** (projekt wybiera dowolny nagłówek) + możliwość proponowania nowych projektów. Dlatego token konta to credential dewelopera na jego maszynie (zmienna `CONTEXT_KEEPER_TOKEN`, nigdy w repo), a do CI i dla współpracowników zalecane są tokeny projektowe. Mitygacja = rotacja (graceful) albo unieważnienie (natychmiastowe) TEGO konkretnego tokena (inne tokeny/agenci nietknięte). Twarda multi-tenancy poza zakresem v1.
 
 ---
 
@@ -434,21 +487,23 @@ Cienki generator nad `.env` + profilami Compose — **nie osobna warstwa configu
 | `TAGS_MAX` / `TAG_MAX_LEN` | limity tagów (~10 / ~40) |
 | `NIGHTLY_CRON` / `NIGHTLY_TZ` | harmonogram nocnego jobu (domyślnie ~03:00 lokalnie) |
 | `TOKEN_GRACE_PERIOD_HOURS` | (v1.3) okres karencji po rotacji tokena, w godzinach (domyślnie 72, max 720) |
-| `RATE_LIMIT_*` | limity token-bucket per narzędzie (od v1.3 per `token_id`, §10) |
+| `RATE_LIMIT_SAVE_PER_MIN` / `RATE_LIMIT_SEARCH_PER_MIN` / `RATE_LIMIT_GET_PER_MIN` / `RATE_LIMIT_MCP_IP_PER_MIN` | limity token-bucket per narzędzie: `RATE_LIMIT_SAVE_PER_MIN` (20) / `RATE_LIMIT_SEARCH_PER_MIN` (120, także `list_projects`) / `RATE_LIMIT_GET_PER_MIN` (240), kluczowane per token × projekt (v1.5, §10); `RATE_LIMIT_MCP_IP_PER_MIN` (300) — throttle per IP przed auth |
+| `RATE_LIMIT_CREATE_PROJECT_PER_MIN` | (v1.5) limit `create_project` per token konta, domyślnie 3/min (tylko okno minutowe) |
 | `DASHBOARD_PASSWORD` | seed hasła dashboardu przy pierwszym starcie (sekret) |
 | `SESSION_SECRET` | podpis cookie sesji (sekret) |
 | `COMPOSE_PROFILES` | aktywne profile Compose (`local-embeddings`, `edge-proxy`) — ustawiane przez instalator |
 | `TRUST_PROXY` | `true` gdy TLS terminowany upstream (tryb B) — honoruj `X-Forwarded-*` (§9) |
 | `PORT_MCP` / `PORT_DASHBOARD` | rozdzielne porty `app` (routing/firewall przez zewnętrzny proxy w trybie B) |
 | `ACME_DOMAIN` / `ACME_EMAIL` | domena + email dla Let's Encrypt (tylko bundled Caddy, tryb A) |
+| `PUBLIC_MCP_URL` | (v1.2, nośny dla MCP od v1.5) publiczny origin `/mcp` do renderowania `.mcp.json` w `list_projects`/`create_project` i na ekranie Onboarding; fallback `https://${ACME_DOMAIN}`, inaczej placeholder + `mcpUrlConfigured: false` |
 
-> **Ta tabela nie jest kompletna** — pokazuje zmienne nośne architektonicznie (~24 z 54). Nie
+> **Ta tabela nie jest kompletna** — pokazuje zmienne nośne architektonicznie (~27 z 62). Nie
 > traktuj braku wiersza jako „taki knob nie istnieje": pełny, autorytatywny zestaw to
 > [`.env.example`](../.env.example) (kanon, z komentarzami) + `apps/server/src/config/env.ts`
 > (walidacja zod — jedyne miejsce, gdzie wartości domyślne są prawdziwe). Poza tabelą zostają m.in.
 > całe rodziny `RRF_*` / `SEARCH_*` (parametry kroków 4 i 7 z §6), `NIGHTLY_*` poza cronem,
 > `BACKUP_*`, `EMBEDDING_PRESET` (§7), `EVENT_DECAY_HALFLIFE_DAYS` i `GRAPH_BOOST_WEIGHT` (§6),
-> `BODY_MAX_EVENT`, `SESSION_TTL_HOURS`, `DB_AUTO_MIGRATE`, `PUBLIC_MCP_URL`.
+> `BODY_MAX_EVENT`, `SESSION_TTL_HOURS`, `DB_AUTO_MIGRATE`.
 
 *(Konkretne wartości progów/limitów = knoby dostrajane na realnych danych — patrz [`prd.md`](prd.md) §11.)*
 
@@ -463,7 +518,7 @@ Cienki generator nad `.env` + profilami Compose — **nie osobna warstwa configu
 | `conflicts_report` (sprzeczności) | nocny job na `kind=fact`; ewentualnie weryfikacja AI |
 | Anti-fatigue / sedymentacja | miejsce na `confidence`/`auto_eligible` w `proposals` |
 | Hot-swap providera embeddingów | `embedding_model` przy każdym wektorze; filtr aktywnego modelu w search |
-| Per-user auth | dashboard auth wymienny bez zmiany reszty |
+| Per-user auth | dashboard auth wymienny bez zmiany reszty; token konta (v1.5) jako krok w stronę per-user; zakres odczytu MCP zawężany w jednym miejscu (`memory/read-scope.ts`, `readScopeCondition`) |
 | OAuth 2.1 dla MCP | bearer wymienny na granicy transportu; kod się nie marnuje |
 | Skalowanie poziome app | app-tier bezstanowy; rate-limiter do przeniesienia na Redis |
 | Interop wire-format | mapowanie na granicy MCP (`remember↔create`…), bez renamu nazw wewnętrznych |
@@ -477,11 +532,13 @@ Nie kontrolujemy system-promptu agenta → sterowanie zachowaniem idzie przez tr
 | Warstwa | Co niesie | Zasięg | Status |
 |---|---|---|---|
 | **1. Opisy narzędzi MCP** | pełny kontrakt: co/czego nie zapisywać, human-gate caveat, forma (jeden fakt/zapis), semantyka zwrotki | **wszyscy** klienci, automatycznie przez `tools/list` | **v1, must-have** |
-| **2. Snippet do `CLAUDE.md` / `AGENTS.md`** | proaktywność („szukaj w pamięci na starcie zadania") + forma połączenia `Bearer ${VAR}` | Claude Code + konwencja cross-agent | **v1** |
-| **3. Plugin Claude Code** | bundluje config połączenia (URL + bearer) + skill proaktywności | tylko Claude Code | **v1.1** |
+| **2. Snippet do `CLAUDE.md` / `AGENTS.md`** | proaktywność („szukaj w pamięci na starcie zadania") + forma połączenia `Bearer ${CONTEXT_KEEPER_TOKEN}` (+ nagłówek `X-Context-Keeper-Project` przy tokenie konta, v1.5) | Claude Code + konwencja cross-agent | **v1** |
+| **3. Plugin Claude Code** | bundluje config połączenia (URL + bearer) + skill proaktywności | tylko Claude Code | ⏸️ warunkowy (backlog) |
 
 - **Load-bearing kontrakt (w tym „nie zapisuj sekretów") musi jechać z serwerem (warstwa 1)** — nie z pluginem/wklejką, bo agent kogoś, kto zapomniał wkleić, i tak zaśmieci/zatruje kolejkę.
-- Opisy = jedyny mechanizm anti-flooding w v1 (auto-allow → v2). Prompt-engineering → dostrajalne na `recall@k` + obserwacji jakości kolejki; baseline w osobnym wersjonowanym artefakcie (np. `context/mcp-tool-contract.md`).
+- Opisy = jedyny mechanizm anti-flooding w v1 (auto-allow → v2). Prompt-engineering → dostrajalne na `recall@k` + obserwacji jakości kolejki; źródłem tekstu opisów jest kod (`apps/server/src/mcp/tool-contract.ts`, v1.5); [`mcp-tool-contract.md`](mcp-tool-contract.md) trzyma zasady i uzasadnienia, bez kopii opisów.
+- **Warstwa 2 serwowana z serwera (v1.5)** — snippet `AGENTS.md`/`CLAUDE.md` i `.mcp.json` renderuje moduł `apps/server/src/onboarding/` (`onboarding-templates.ts`) — jedno źródło dla narzędzi MCP `list_projects`/`create_project` i ekranu Onboarding (`GET /api/onboarding`); SPA nie trzyma kopii.
+- **Prompt MCP `onboard` (v1.5)** — dodatek do warstwy 2 wywoływany przez człowieka (np. `/context-keeper:onboard`), nie osobna warstwa. **Nic load-bearing:** wszystko, czego agent musi się trzymać, jest w opisach narzędzi i w krokach `ONBOARDING_SETUP_STEPS` zwracanych w `hint`/`next`; agent, który promptu nie wywoła, dostaje te same kroki.
 
 ---
 
@@ -492,7 +549,7 @@ Skupiona na **rdzeniu poprawności i bezpieczeństwa** — nie pełne pokrycie (
 - **Unit** (czysta logika): limity/walidacja, normalizacja tagów, **skaner sekretów na korpusie fixture** (pozytywy blokowane, false-positive przechodzą), dedup-klasyfikacja, mapowanie koperty błędów.
 - **Integration na efemerycznym Postgresie** (najważniejsza warstwa, testcontainers):
   - **[priorytet 1]** transakcja akceptacji (create/update/merge) + **optimistic-concurrency stale-check**,
-  - **[priorytet 2]** scope/IDOR (`get_memory` cross-project → `not_found`, token→project),
+  - **[priorytet 2]** scope/IDOR (token projektowy: `get_memory` cross-project → `not_found`; token konta: odczyt dowolnego projektu, zapis tylko w projekcie z nagłówka; rozwiązywanie projektu z nagłówka),
   - cykl życia embeddingu staging↔embeddings,
   - nocny job — idempotentne re-propose + samosprzątanie stale + lock,
   - retrieval pipeline — collapse + RRF na seedowanych danych.
