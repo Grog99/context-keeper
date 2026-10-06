@@ -3,12 +3,14 @@ import { AuditModule } from '../audit/audit.module';
 import { ConfigModule } from '../config/config.module';
 import { DbModule } from '../db/db.module';
 import { EmbeddingsModule } from '../embeddings/embeddings.module';
+import { LlmModule } from '../llm/llm.module';
 import { MemoryModule } from '../memory/memory.module';
 import { NightlyModule } from '../nightly/nightly.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { ProposalsModule } from '../proposals/proposals.module';
 import { PurgeModule } from '../purge/purge.module';
 import { ApproveProposalCommand } from './approve-proposal.command';
+import { CheckLlmCommand } from './check-llm.command';
 import { CreateAccountTokenCommand } from './create-account-token.command';
 import { CreateProjectCommand } from './create-project.command';
 import { CreateTokenCommand } from './create-token.command';
@@ -41,6 +43,7 @@ import { SeedMemoryCommand } from './seed-memory.command';
     MemoryModule,
     ProposalsModule,
     NightlyModule,
+    LlmModule,
     AuditModule,
     PurgeModule,
   ],
@@ -60,6 +63,7 @@ import { SeedMemoryCommand } from './seed-memory.command';
     RejectProposalCommand,
     EditProposalCommand,
     RunNightlyCommand,
+    CheckLlmCommand,
     RecordBackupCommand,
     PurgeCommand,
   ],

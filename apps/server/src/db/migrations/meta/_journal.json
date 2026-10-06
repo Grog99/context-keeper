@@ -113,6 +113,13 @@
       "when": 1791318469347,
       "tag": "0015_nightly_scale_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791321332067,
+      "tag": "0016_llm_settings",
+      "breakpoints": true
     }
   ]
 }

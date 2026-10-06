@@ -5,9 +5,10 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AuditService } from '../src/audit/audit.service';
 import { generateId, ID_PREFIX } from '../src/common/ids';
+import { createSecretBox } from '../src/common/secret-box';
 import { AppConfigService } from '../src/config/config.service';
 import { envSchema } from '../src/config/env';
 import type { Database } from '../src/db/db.tokens';
@@ -15,6 +16,7 @@ import * as schema from '../src/db/schema';
 import {
   EMBEDDING_DIM,
   embeddings,
+  llmSettings,
   memories,
   proposals,
   type MemoryRow,
@@ -23,6 +25,10 @@ import {
 } from '../src/db/schema';
 import type { EmbeddingProvider } from '../src/embeddings/embedding-provider';
 import { EmbeddingService } from '../src/embeddings/embedding.service';
+import { LlmSettingsService } from '../src/llm/llm-settings.service';
+import { LlmService } from '../src/llm/llm.service';
+import { LLM_API_KEY_AAD, LLM_GLOBAL_SETTINGS_ID } from '../src/llm/llm.constants';
+import { OpenAiChatProvider } from '../src/llm/openai-chat.provider';
 import { NIGHTLY_LOCK_KEY, NightlyService } from '../src/nightly/nightly.service';
 import { RecencyPruneScorer } from '../src/nightly/prune-scorer';
 import type { ProjectContext } from '../src/projects/projects.service';
@@ -70,6 +76,20 @@ function daysAgo(n: number): Date {
 
 const ACTIVE_MODEL = 'nightly-test-model';
 
+/** Liczniki kroku LLM (v1.6) przy wyłączonym kroku — dowód, że dedup/prune nie zmieniły się ani o jeden. */
+const LLM_ZEROS = {
+  llmCalls: 0,
+  llmErrors: 0,
+  llmSkippedCap: 0,
+  llmSkippedBreaker: 0,
+  llmSkippedSecret: 0,
+  llmSkippedKeyUnreadable: 0,
+};
+
+/** Dwa różne klucze szyfrujące (32 B base64) — zmieniony SECRETS_ENCRYPTION_KEY (G7). */
+const KEY_A = Buffer.alloc(32, 1).toString('base64');
+const KEY_B = Buffer.alloc(32, 2).toString('base64');
+
 describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', () => {
   let container: StartedPostgreSqlContainer;
   let pool: Pool;
@@ -81,7 +101,15 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
    * (jak `buildServices` w `proposals.integration.spec.ts`). Embedding provider zawsze ten sam stub
    * modelowy — detekcja nightly filtruje po `embedding.model`, więc wektory seedowane w testach
    * muszą nosić DOKŁADNIE `ACTIVE_MODEL`. */
-  function buildServices(envOverrides: Record<string, unknown> = {}): {
+  /** Prawdziwy `LlmService` (prawdziwe `LlmSettingsService` + `OpenAiChatProvider`) na wspólnej bazie i audycie. */
+  function buildLlmService(config: AppConfigService): LlmService {
+    return new LlmService(new LlmSettingsService(db, config, audit), new OpenAiChatProvider(), audit);
+  }
+
+  function buildServices(
+    envOverrides: Record<string, unknown> = {},
+    llmOverride?: LlmService,
+  ): {
     config: AppConfigService;
     nightly: NightlyService;
     proposalsService: ProposalsService;
@@ -98,6 +126,7 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
       embeddingService,
       new RecencyPruneScorer(),
       new UsageService(db),
+      llmOverride ?? buildLlmService(config),
     );
     const proposalsService = new ProposalsService(db, config, audit, embeddingService);
     return { config, nightly, proposalsService };
@@ -216,6 +245,7 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
         skippedPoliteness: 0,
         skippedCap: 0,
         searchEventsPruned: 0,
+        ...LLM_ZEROS,
       });
 
       const proposalRow = await findNightlyProposal('merge', [factA.id, factB.id]);
@@ -249,6 +279,7 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
         skippedPoliteness: 0,
         skippedCap: 0,
         searchEventsPruned: 0,
+        ...LLM_ZEROS,
       });
     });
 
@@ -405,6 +436,7 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
           skippedPoliteness: 0,
           skippedCap: 0,
           searchEventsPruned: 0,
+          ...LLM_ZEROS,
         });
 
         const auditRow = await audit.latestByEventType('nightly_run');
@@ -439,7 +471,16 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
           pruneProposed: expect.any(Number),
           skippedPoliteness: expect.any(Number),
           skippedCap: expect.any(Number),
+          searchEventsPruned: expect.any(Number),
+          llmCalls: 0,
+          llmErrors: 0,
+          llmSkippedCap: 0,
+          llmSkippedBreaker: 0,
+          llmSkippedSecret: 0,
+          llmSkippedKeyUnreadable: 0,
         },
+        // v1.6: stan kroku LLM trafia do `nightly_run.metadata` (Ustawienia czytają stąd ostatni przebieg).
+        llm: { state: 'disabled', skippedSecret: [] },
       });
       // Dokładnie to pole czyta `MetricsController` (`nightlyRun.at`/`nightlyRun.metadata`).
       expect(auditRow!.createdAt).toBeInstanceOf(Date);
@@ -613,6 +654,86 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
     });
   });
 
+  describe('krok LLM (B1) — opt-in, fail-open, bez żadnego żądania do sieci', () => {
+    afterEach(async () => {
+      vi.restoreAllMocks();
+      // Przywróć domyślny stan wiersza instancji (wyłączony, bez klucza) dla kolejnych testów.
+      await db
+        .update(llmSettings)
+        .set({ enabled: false, endpoint: null, model: null, apiKeyCiphertext: null })
+        .where(eq(llmSettings.id, LLM_GLOBAL_SETTINGS_ID));
+    });
+
+    it('domyślnie (wyłączony): 0 żądań do sieci, llm.state=disabled, liczniki LLM = 0, blok llm w nightly_run', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      const { nightly } = buildServices();
+
+      const result = await nightly.run({ actor: 'tester-llm-off' });
+
+      expect(result.status).toBe('success');
+      expect(result.llm).toEqual({ state: 'disabled', skippedSecret: [] });
+      expect(result.counters).toMatchObject(LLM_ZEROS);
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      const auditRow = await audit.latestByEventType('nightly_run');
+      expect((auditRow!.metadata as { llm?: unknown }).llm).toEqual({ state: 'disabled', skippedSecret: [] });
+    });
+
+    it('włączony, ale B1 nie ma detektora: nadal 0 żądań (budżet otwarty, nic go nie woła)', async () => {
+      await db
+        .update(llmSettings)
+        .set({ enabled: true, endpoint: 'http://llm.invalid/v1/chat/completions', model: 'm' })
+        .where(eq(llmSettings.id, LLM_GLOBAL_SETTINGS_ID));
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      const { nightly } = buildServices();
+
+      const result = await nightly.run({ actor: 'tester-llm-on' });
+
+      expect(result.status).toBe('success');
+      expect(result.llm?.state).toBe('ready');
+      expect(result.counters).toMatchObject(LLM_ZEROS);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('G7: klucz zaszyfrowany kluczem A, serwis zbudowany z kluczem B -> success + llm.state=key_unreadable, 0 żądań', async () => {
+      const ciphertext = createSecretBox(KEY_A).encrypt('sk-test-sentinel', LLM_API_KEY_AAD);
+      await db
+        .update(llmSettings)
+        .set({
+          enabled: true,
+          endpoint: 'http://llm.invalid/v1/chat/completions',
+          model: 'm',
+          apiKeyCiphertext: ciphertext,
+        })
+        .where(eq(llmSettings.id, LLM_GLOBAL_SETTINGS_ID));
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+      const { nightly } = buildServices({ SECRETS_ENCRYPTION_KEY: KEY_B });
+
+      const result = await nightly.run({ actor: 'tester-llm-key' });
+
+      expect(result.status).toBe('success');
+      expect(result.llm?.state).toBe('key_unreadable');
+      // Decyzja Stage 2: licznik rośnie dopiero z wywołań detektorów (od B2), nie przy otwarciu budżetu.
+      expect(result.counters.llmSkippedKeyUnreadable).toBe(0);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('fail-open: odczyt ustawień rzuca -> status=success, llm.state=unavailable (nigdy failed)', async () => {
+      const broken = {
+        openRunBudget: async () => {
+          throw new Error('baza ustawień niedostępna');
+        },
+      } as unknown as LlmService;
+      const { nightly } = buildServices({}, broken);
+
+      const result = await nightly.run({ actor: 'tester-llm-unavailable' });
+
+      expect(result.status).toBe('success');
+      expect(result.llm).toEqual({ state: 'unavailable', skippedSecret: [] });
+      expect(result.counters).toMatchObject(LLM_ZEROS);
+    });
+  });
+
   describe('G2 — stała liczba parametrów ANN (nightly-scale)', () => {
     /** Wektor jednostkowy wzdłuż osi `axis` — wzajemnie ortogonalne (dystans ~1, poza progiem dedup),
      * więc kolejne fakty testu nigdy nie tworzą klastra ani propozycji. Osie 0/1 zajmują NEAR/DISTINCT. */
@@ -638,6 +759,7 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
         embeddingService,
         new RecencyPruneScorer(),
         new UsageService(loggingDb),
+        new LlmService(new LlmSettingsService(loggingDb, config, audit), new OpenAiChatProvider(), audit),
       );
     }
 

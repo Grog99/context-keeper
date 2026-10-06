@@ -18,6 +18,23 @@ function zBool(defaultValue = false) {
 }
 
 /**
+ * Dekoduje `SECRETS_ENCRYPTION_KEY` do 32 bajtów (AES-256) albo zwraca `null`. Akceptuje base64 i
+ * base64url (z paddingiem — 44 znaki — i bez — 43 znaki), czyli wyjście `openssl rand -base64 32`.
+ * Czysta funkcja: współdzielona przez walidację env (fail-fast przy starcie) i `common/secret-box.ts`.
+ * NIGDY nie loguje ani nie zwraca samej wartości w komunikacie — wołający dostaje bufor albo `null`.
+ */
+export function decodeSecretsKey(value: string): Buffer | null {
+  const s = value.trim();
+  if (!/^[A-Za-z0-9+/_-]+={0,2}$/.test(s)) return null;
+  const unpadded = s.replace(/=+$/, '');
+  // 32 bajty = 43 znaki base64 bez paddingu (44 z jednym '='); inne długości to nie ten rozmiar klucza.
+  if (unpadded.length !== 43) return null;
+  if (s.length !== unpadded.length && s.length !== 44) return null;
+  const buf = Buffer.from(unpadded, 'base64');
+  return buf.length === 32 ? buf : null;
+}
+
+/**
  * Trójka implikowana przez preset (§7 tech-stack) — PRESET jest tylko wygodą instalatora,
  * PROVIDER/MODEL/DIM zostają autorytatywne (walidacja w superRefine niżej).
  * `api` celuje w DIM=1024 (Matryoshka — `text-embedding-3-*` zwraca skrócony/renormalizowany
@@ -165,6 +182,17 @@ export const envSchema = z
     SESSION_SECRET: z.string().optional(),
     SESSION_TTL_HOURS: z.coerce.number().int().positive().default(12),
     DASHBOARD_COOKIE_NAME: z.string().min(1).default('ck_session'),
+    // Klucz szyfrujący sekrety trzymane w bazie (roadmap v1.6, `llm_settings.api_key_ciphertext`) —
+    // AES-256-GCM, 32 bajty w base64/base64url (`openssl rand -base64 32`). OPCJONALNY: bez niego appka
+    // startuje normalnie, a zapis klucza API w Ustawieniach jest odrzucany czytelnym komunikatem (G5).
+    // Pusty string (`SECRETS_ENCRYPTION_KEY=` z compose/.env) = brak. Ustawiony, ale nie-32-bajtowy =
+    // twardy fail przy starcie (literówka nie może po cichu zamienić się w "klucz nieczytelny" w UI);
+    // komunikat NIE niesie wartości. Zmiana klucza unieważnia zapisane szyfrogramy (G7: wpisz ponownie).
+    SECRETS_ENCRYPTION_KEY: z
+      .preprocess((v) => (v === '' ? undefined : v), z.string().optional())
+      .refine((v) => v === undefined || decodeSecretsKey(v) !== null, {
+        message: 'musi być 32-bajtowym kluczem w base64/base64url (openssl rand -base64 32)',
+      }),
 
     // Compose / edge
     COMPOSE_PROFILES: z.string().optional(),

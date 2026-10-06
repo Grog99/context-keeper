@@ -91,7 +91,8 @@ export type ScreenKey =
   | 'audyt'
   | 'pomiary'
   | 'operacje'
-  | 'onboarding';
+  | 'onboarding'
+  | 'ustawienia';
 
 export interface GlobalKeyboardHandlers {
   onNavigate: (screen: ScreenKey) => void;
@@ -111,11 +112,12 @@ const SCREEN_CHORD_KEYS: Record<string, ScreenKey> = {
   m: 'pomiary', // "m" jak w "poMiary" — "p" jest już zajęte przez "pamiec"
   o: 'operacje',
   w: 'onboarding', // "w" jak w "onboardinW"/"welcome" — "o" jest już zajęte przez "operacje"
+  s: 'ustawienia', // "s" jak "Settings" — "u" też wolne, ale "s" pasuje do skrótu `g s` z design-systemu (§9.9)
 };
 const CHORD_TIMEOUT_MS = 900;
 
 /** §9.0/§10 — skróty globalne (rail + top bar): `⌘K`/`Ctrl+K` paleta poleceń, `/` (deleguje do
- * palety — jeden punkt wejścia do wyszukiwania, jak w makiecie), `g` potem `k/p/c/t/a/m/o/w` skok do
+ * palety — jeden punkt wejścia do wyszukiwania, jak w makiecie), `g` potem `k/p/c/t/a/m/o/w/s` skok do
  * ekranu, `?` ściągawka skrótów. */
 export function useGlobalKeyboard(handlers: GlobalKeyboardHandlers): void {
   const ref = useRef(handlers);

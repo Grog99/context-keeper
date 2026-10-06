@@ -144,11 +144,21 @@ export class AuditService {
     return pageByKeyset(rows, limit);
   }
 
-  async latestByEventType(eventType: AuditEventType): Promise<AuditLogRow | null> {
+  /** Najnowszy wpis danego typu. `metadataContains` (opcjonalny, roadmap v1.6) zawęża do wpisów, których
+   * `metadata` zawiera podany fragment JSON (`@>`) — np. ostatni UDANY `nightly_run`
+   * (`{status: 'success'}`), z pominięciem `failed`/`skipped-locked`. Bez parametru zachowanie bez zmian. */
+  async latestByEventType(
+    eventType: AuditEventType,
+    metadataContains?: Record<string, unknown>,
+  ): Promise<AuditLogRow | null> {
+    const conditions: SQL[] = [eq(auditLog.eventType, eventType)];
+    if (metadataContains) {
+      conditions.push(sql`${auditLog.metadata} @> ${JSON.stringify(metadataContains)}::jsonb`);
+    }
     const [row] = await this.db
       .select()
       .from(auditLog)
-      .where(eq(auditLog.eventType, eventType))
+      .where(and(...conditions))
       .orderBy(desc(auditLog.createdAt))
       .limit(1);
     return row ?? null;

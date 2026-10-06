@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { auditEventType, memoryKind, memoryScope, memoryStatus, proposalOrigin, proposalStatus, proposalType, relationType } from '../db/schema/enums';
 import { AUDIT_QUERY_MAX_LIMIT } from '../audit/audit.service';
 import { decodeKeysetCursor } from '../common/keyset-cursor';
+import { LLM_CALL_CAP_MAX, LLM_CALL_CAP_MIN, LLM_TIMEOUT_MAX_MS, LLM_TIMEOUT_MIN_MS } from '../llm/llm.constants';
+import { isValidLlmEndpointUrl } from '../llm/llm-settings.service';
 import { HEADER_MAX_LEN } from '../memory/validation';
 import { LIST_SCOPES } from '../memory/memory-admin.service';
 import { PROPOSALS_LIST_MAX_LIMIT } from '../proposals/proposals.service';
@@ -239,3 +241,31 @@ export const usageQuery = z.strictObject({
   projectId: opaqueId.optional(),
 });
 export type UsageQuery = z.output<typeof usageQuery>;
+
+// ---- PUT /api/settings/llm ----------------------------------------------------------
+
+/**
+ * Ustawienia kroku LLM (roadmap v1.6) — pełny stan formularza + akcja na kluczu API. `endpoint`/`model`:
+ * pusty string -> `null` robi serwis (`LlmSettingsService`); niepusty endpoint musi być URL-em http(s) bez
+ * loginu i hasła. Spójność (włączony ⇒ endpoint i model, G14) i obecność `SECRETS_ENCRYPTION_KEY` (G5)
+ * egzekwuje serwis. `apiKey` to write-only unia: `keep` (domyślnie z formularza) | `set` z wartością |
+ * `clear`. `ZodValidationPipe` nie cytuje wejścia w komunikatach, więc klucz nie wycieka w 400.
+ */
+export const llmSettingsBody = z.strictObject({
+  enabled: z.boolean(),
+  endpoint: z
+    .string()
+    .trim()
+    .max(2048)
+    .refine((v) => v === '' || isValidLlmEndpointUrl(v), 'Endpoint must be an http(s) URL without credentials')
+    .nullable(),
+  model: z.string().trim().max(200).nullable(),
+  callCap: z.number().int().min(LLM_CALL_CAP_MIN).max(LLM_CALL_CAP_MAX),
+  timeoutMs: z.number().int().min(LLM_TIMEOUT_MIN_MS).max(LLM_TIMEOUT_MAX_MS),
+  apiKey: z.discriminatedUnion('action', [
+    z.strictObject({ action: z.literal('keep') }),
+    z.strictObject({ action: z.literal('set'), value: z.string().trim().min(1).max(4096) }),
+    z.strictObject({ action: z.literal('clear') }),
+  ]),
+});
+export type LlmSettingsBody = z.output<typeof llmSettingsBody>;

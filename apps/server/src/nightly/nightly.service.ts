@@ -9,6 +9,9 @@ import { embeddings, memories, proposals, stagingEmbeddings } from '../db/schema
 import type { MemoryKind, MemoryScope } from '../db/schema/enums';
 import { findAnnNeighbors } from '../embeddings/ann-search';
 import { EmbeddingService } from '../embeddings/embedding.service';
+import { LlmRunBudget } from '../llm/llm-budget';
+import { LlmService } from '../llm/llm.service';
+import { EMPTY_LLM_COUNTERS, type NightlyLlmReport } from '../llm/llm.types';
 import { computeStaleIds } from '../proposals/proposals.service';
 import { UsageService } from '../usage/usage.service';
 import { buildClusters, pickCanonicalMerge, type NeighborPair } from './dedup-cluster';
@@ -42,6 +45,7 @@ const EMPTY_COUNTERS: NightlyCounters = {
   skippedPoliteness: 0,
   skippedCap: 0,
   searchEventsPruned: 0,
+  ...EMPTY_LLM_COUNTERS,
 };
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -83,6 +87,11 @@ const NEIGHBOR_SCAN_CONCURRENCY = 10;
  * z poprzednich przebiegów (`reconcile.ts`) i tylko RÓŻNICUJE kolejkę (create/withdraw) — nie ma
  * checkpointów ani historii przebiegów poza samą tabelą `proposals`. Mid-run crash zostawia bazę
  * spójną (każdy insert/withdraw jest niezależny) — kolejny przebieg samo-naprawia stan.
+ *
+ * Od roadmap v1.6 job ma OPCJONALNY krok LLM (opt-in w Ustawieniach, domyślnie wyłączony): `runLocked`
+ * otwiera na starcie budżet przebiegu (`LlmService.openRunBudget`) i dokłada jego liczniki + blok `llm`
+ * do wyniku. Fail-open (ust. 3): żadna awaria ustawień/providera nie zamienia przebiegu w `failed`.
+ * Sam B1 nie ma jeszcze żadnego detektora korzystającego z modelu — budżet jest otwierany, ale nie wołany.
  */
 @Injectable()
 export class NightlyService {
@@ -96,6 +105,7 @@ export class NightlyService {
     private readonly embedding: EmbeddingService,
     @Inject(PRUNE_SCORER) private readonly pruneScorer: PruneScorer,
     private readonly usage: UsageService,
+    private readonly llm: LlmService,
   ) {}
 
   /**
@@ -125,13 +135,14 @@ export class NightlyService {
           finishedAt: finishedAt.toISOString(),
           durationMs: finishedAt.getTime() - startedAt.getTime(),
           counters: EMPTY_COUNTERS,
+          llm: null,
         };
         this.logger.warn('[nightly] lock zajęty przez inny przebieg — skipped-locked, no-op.');
         await this.audit.log({ eventType: 'nightly_run', actor, metadata: { ...result } });
         return result;
       }
 
-      const counters = await this.runLocked(actor);
+      const { counters, llm } = await this.runLocked(actor);
       const finishedAt = new Date();
       const result: NightlyRunResult = {
         status: 'success',
@@ -139,6 +150,7 @@ export class NightlyService {
         finishedAt: finishedAt.toISOString(),
         durationMs: finishedAt.getTime() - startedAt.getTime(),
         counters,
+        llm,
       };
       await this.audit.log({ eventType: 'nightly_run', actor, metadata: { ...result } });
       return result;
@@ -170,7 +182,11 @@ export class NightlyService {
 
   // ---- orkiestracja pod lockiem: detekcja -> reconcile -> apply ---------
 
-  private async runLocked(actor: string): Promise<NightlyCounters> {
+  private async runLocked(actor: string): Promise<{ counters: NightlyCounters; llm: NightlyLlmReport }> {
+    const budget = await this.openLlmBudget(actor);
+    // B2/B3: detektory korzystające z modelu dostają tu `budget` i wołają `budget.call(...)` — jedyna droga
+    // do providera (cap, bezpiecznik, skaner sekretów, liczniki). B1 nie ma jeszcze żadnego, więc krok
+    // nie wykonuje ani jednego żądania, niezależnie od ustawień.
     const activeModel = this.embedding.model;
     const facts = await this.loadApprovedFacts(activeModel);
     const factById = new Map(facts.map((f) => [f.id, f]));
@@ -281,15 +297,39 @@ export class NightlyService {
     }
 
     return {
-      created,
-      withdrawn,
-      skippedAsDup: reconciled.skipped.length,
-      mergeProposed,
-      pruneProposed,
-      skippedPoliteness,
-      skippedCap,
-      searchEventsPruned,
+      counters: {
+        created,
+        withdrawn,
+        skippedAsDup: reconciled.skipped.length,
+        mergeProposed,
+        pruneProposed,
+        skippedPoliteness,
+        skippedCap,
+        searchEventsPruned,
+        ...budget.counters(),
+      },
+      llm: budget.report(),
     };
+  }
+
+  /** Otwiera budżet LLM przebiegu. Odczyt ustawień z bazy, który się nie uda, daje stan `unavailable` —
+   * nigdy `failed` (fail-open, ust. 3). Nieczytelny klucz (G7) jest widoczny jako `llm.state` w metadanych
+   * przebiegu + jedno ostrzeżenie w logu; liczniki `llmSkippedKeyUnreadable` rosną dopiero z wywołań
+   * detektorów (od B2). */
+  private async openLlmBudget(actor: string): Promise<LlmRunBudget> {
+    try {
+      const budget = await this.llm.openRunBudget(actor);
+      if (budget.state === 'key_unreadable') {
+        this.logger.warn(
+          '[nightly] krok LLM pominięty: zapisanego klucza API nie da się odszyfrować (zmieniony SECRETS_ENCRYPTION_KEY?) — wpisz go ponownie w Ustawieniach.',
+        );
+      }
+      return budget;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`[nightly] nie udało się odczytać ustawień LLM (fail-open, krok LLM pominięty): ${message}`);
+      return LlmRunBudget.unavailable();
+    }
   }
 
   // ---- detekcja: dedup (ANN) ---------------------------------------------

@@ -55,6 +55,8 @@ services:
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY}
       SESSION_SECRET: ${SESSION_SECRET}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+      # Opcjonalny: klucz szyfrujący sekrety w bazie (klucz API modelu LLM z Ustawień). `openssl rand -base64 32`.
+      SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:-}
     expose:
       - "3000"
       - "3001"

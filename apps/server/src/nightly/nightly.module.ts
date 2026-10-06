@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { LlmModule } from '../llm/llm.module';
 import { UsageModule } from '../usage/usage.module';
 import { NightlyService } from './nightly.service';
 import { PRUNE_SCORER } from './nightly.types';
@@ -12,10 +13,10 @@ import { RecencyPruneScorer } from './prune-scorer';
  * startuje wyłącznie na explicit wywołanie (CLI `run-nightly` albo ten endpoint), nigdy sam z siebie
  * przy starcie procesu HTTP. `DB`, `PG_POOL`, `EmbeddingService`, `AppConfigService` przychodzą z
  * globalnych modułów — tylko `AuditModule` trzeba zaimportować jawnie (tak samo jak w
- * `MemoryModule`/`ProposalsModule`).
+ * `MemoryModule`/`ProposalsModule`). `LlmModule` (v1.6) dostarcza budżet kroku LLM przebiegu.
  */
 @Module({
-  imports: [AuditModule, UsageModule],
+  imports: [AuditModule, UsageModule, LlmModule],
   providers: [NightlyService, { provide: PRUNE_SCORER, useClass: RecencyPruneScorer }],
   exports: [NightlyService],
 })

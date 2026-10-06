@@ -96,3 +96,38 @@ describe('envSchema — RATE_LIMIT_CREATE_PROJECT_PER_MIN (roadmap v1.5)', () =>
     expect(() => envSchema.parse({ ...BASE, RATE_LIMIT_CREATE_PROJECT_PER_MIN: '0' })).toThrow();
   });
 });
+
+describe('envSchema — SECRETS_ENCRYPTION_KEY (roadmap v1.6, G5)', () => {
+  const KEY_44 = Buffer.alloc(32, 3).toString('base64'); // 44 znaki, padding '='
+  const KEY_43 = Buffer.alloc(32, 250).toString('base64url'); // 43 znaki, url-safe bez paddingu
+
+  it('nieustawiona -> undefined (appka startuje, zapis klucza API będzie odrzucany)', () => {
+    expect(envSchema.parse({ ...BASE }).SECRETS_ENCRYPTION_KEY).toBeUndefined();
+  });
+
+  it("pusty string ('SECRETS_ENCRYPTION_KEY=' z compose) -> undefined", () => {
+    expect(envSchema.parse({ ...BASE, SECRETS_ENCRYPTION_KEY: '' }).SECRETS_ENCRYPTION_KEY).toBeUndefined();
+  });
+
+  it('poprawny klucz 44-znakowy (openssl rand -base64 32) i 43-znakowy url-safe przechodzą', () => {
+    expect(KEY_44).toHaveLength(44);
+    expect(KEY_43).toHaveLength(43);
+    expect(envSchema.parse({ ...BASE, SECRETS_ENCRYPTION_KEY: KEY_44 }).SECRETS_ENCRYPTION_KEY).toBe(KEY_44);
+    expect(envSchema.parse({ ...BASE, SECRETS_ENCRYPTION_KEY: KEY_43 }).SECRETS_ENCRYPTION_KEY).toBe(KEY_43);
+  });
+
+  it.each([
+    ['16-bajtowy klucz', Buffer.alloc(16, 1).toString('base64')],
+    ['64-bajtowy klucz', Buffer.alloc(64, 1).toString('base64')],
+    ['śmieci', 'to-nie-jest-klucz!!'],
+    ['za krótki', 'abc'],
+  ])('%s -> issue na ścieżce SECRETS_ENCRYPTION_KEY, bez wartości w komunikacie', (_label, value) => {
+    const parsed = envSchema.safeParse({ ...BASE, SECRETS_ENCRYPTION_KEY: value });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      const issue = parsed.error.issues.find((i) => i.path.join('.') === 'SECRETS_ENCRYPTION_KEY');
+      expect(issue).toBeDefined();
+      expect(issue!.message).not.toContain(value);
+    }
+  });
+});

@@ -52,6 +52,8 @@ const EVENT_TYPES: AuditEventType[] = [
   'project_settings_changed',
   'relation_created',
   'relation_removed',
+  'llm_secret_skipped',
+  'instance_settings_changed',
 ];
 
 const EVENT_CONFIG: Record<AuditEventType, { icon: LucideIcon; variant: NonNullable<BadgeProps['variant']> }> = {
@@ -77,6 +79,10 @@ const EVENT_CONFIG: Record<AuditEventType, { icon: LucideIcon; variant: NonNulla
   // `memory_relations`, przez agenta (attach-on-save) albo człowieka (dashboard).
   relation_created: { icon: Link2, variant: 'info' },
   relation_removed: { icon: Unlink2, variant: 'neutral' },
+  // Roadmap v1.6 ("Provider LLM dla nocnego jobu") — wpis pominięty przez krok LLM z powodu sekretu
+  // (BEZ CTA "Zarządzaj tokenem": to nie sygnał tokena, tylko wpisu w pamięci) i zapis w Ustawieniach.
+  llm_secret_skipped: { icon: ShieldAlert, variant: 'danger' },
+  instance_settings_changed: { icon: Settings, variant: 'info' },
 };
 
 function EventBadge({ eventType }: { eventType: AuditEventType }) {

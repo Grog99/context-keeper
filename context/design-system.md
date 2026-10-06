@@ -381,6 +381,7 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 │           │                                                                │
 │  ────────  │                                                               │
 │   Projekty│                                                                │
+│ ⚙ Ustaw.  │                                                                │
 │ ◐ Motyw   │                                                                │
 │   Wyloguj │                                                                │
 └──────────┴──────────────────────────────────────────────────────────────┘
@@ -390,7 +391,7 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
   nawigacja 7 ekranów kontekstowych (Kolejka z badge liczby pending), separator, przycisk
   `＋ Nowa pamięć` (aktywny tylko gdy kontekst = konkretny/Global), a na samym dole — wizualnie
   odcięta `border-t` — sekcja konta/ustawień: wejście do **Projekty** (ustawienia całego projektu,
-  poza kontekstem — §9.3), toggle motywu, Wyloguj.
+  poza kontekstem — §9.3), **Ustawienia** (ustawienia instancji, poza kontekstem — §9.9), toggle motywu, Wyloguj.
 - **Top bar (52px):** search (`⌘K`) (lewo) · **health strip** (MetricStat ×4, `ml-auto`).
 - **Health strip** jest wszechobecny (P1) — recenzent zawsze widzi głębokość kolejki, zdrowie embeddingu, wynik nocnego jobu, `secret_blocked`/24h.
 
@@ -495,6 +496,10 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 - **Filtry:** `event_type` (m.in. `secret_blocked`, `purge_tombstone`, `nightly_run`, `proposal_*`, `promote`, `archive`, `token_*`), zakres czasu, projekt.
 - **Tabela:** czas (mono, tabular) · `event_type` (chip) · aktor (`OriginPath`/`human-dashboard`) · `affected_ids` (mono, klik → pamięć) · `rev_…`.
 - **`secret_blocked`** wyróżniony `danger` — to sygnał rotacji/unieważnienia; wiersz linkuje do projektu/tokena z CTA „Zarządzaj tokenem" (v1.3 — operator wybiera `Rotuj` albo `Unieważnij` w `ProjectTokensDialog`).
+- **`llm_secret_skipped`** (v1.6, ikona `shield-alert`, `danger`) — krok LLM nocnego joba pominął wpis, bo skaner wykrył w nim sekret
+  (`affected_ids` = id pamięci, `metadata.secretType`, bez materiału). Bez CTA „Zarządzaj tokenem" — to nie jest sygnał tokena, tylko
+  wpisu w pamięci; człowiek decyduje, czy go poprawić. **`instance_settings_changed`** (v1.6, ikona `settings`, `info`) — zapis w
+  „Ustawieniach" (`metadata.section`, `metadata.changes`; klucz API tylko jako `set`/`cleared`, nigdy wartość).
 - **`token_revoked`** (v1.3, ikona `shield-off`, `danger`) i **`token_relabeled`** (v1.3, ikona `pencil`, `neutral`) dołączone do `token_*` — aktor niesie dodatkowy chip z `metadata.tokenLabel`, gdy obecny (agent-path eventy: `proposal_created`, `secret_blocked`).
 - **Sekcja `revisions`:** przegląd historii zmian (before/after) niezależnie od kolejki.
 
@@ -536,6 +541,34 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
   kontekstu) + `.mcp.json` z nagłówkiem, `EmptyState` gdy brak projektów; (3) `AGENTS.md`; (4) `CLAUDE.md`;
   (5) *Token projektowy (CI / współpracownik)* — `.mcp.json` bez nagłówka; (6) kroki końcowe + `curl /health`.
 
+### 9.9 Ustawienia (v1.6) — ustawienia instancji
+
+- **Route/label:** `/ustawienia`, „Ustawienia" — spójne z polskimi slugami. Skrót klawiaturowy `g s`. Wejście w dolnej sekcji railu
+  (§9.0), pod „Projekty", nad toggle'em motywu — ustawienia instancji to nie nawigacja kontekstowa (precedens: `Projekty`, §9.3).
+  Ten ekran **ignoruje** `ContextSwitcher` (dziś ustawienia są globalne dla instancji; model per projekt to późniejsze
+  rozszerzenie, które nie zmienia układu ekranu).
+- **Rama:** `ScreenContainer width="prose"`. Ekran powstaje z jedną sekcją, „Model LLM", w karcie `rounded-lg border bg-surface p-4`;
+  kolejne sekcje ustawień instancji dochodzą pod nią w tym samym stylu.
+- **Sekcja „Model LLM"** (krok LLM nocnego joba — opcjonalny, domyślnie wyłączony):
+  1. **Stan** — `StatusChip` (kolor + ikona + label, P2): `Wyłączony` (neutral) · `Włączony · <model>` (success) · `Klucz nieczytelny —
+     wpisz ponownie` (danger, ikona `key-round`). Stan „nieczytelny" znaczy, że `SECRETS_ENCRYPTION_KEY` zmieniono lub zgubiono —
+     zapisany klucz API jest bezużyteczny, a nocny job pomija krok LLM (liczone w przebiegu).
+  2. **Ostrzeżenie o egressie** — pole `warning` nad formularzem: po włączeniu treść pamięci wychodzi do wskazanego endpointu
+     (poza maszynę, jeśli to zewnętrzne API); wpisy ze skanera sekretów nie są wysyłane (lista poniżej).
+  3. **Formularz** — `Switch` „Włącz krok LLM w nocnym jobie"; `Input` **endpoint** (placeholder
+     `https://api.openai.com/v1/chat/completions`, podpowiedź „Ollama: `http://localhost:11434/v1/chat/completions`" — pełny URL
+     `/chat/completions`); `Input` **model** (wymagany po włączeniu, bez domyślnej wartości — nazwa zależy od providera);
+     **klucz API** — write-only: pokazuje wyłącznie „ustawiony" / „brak", przyciski `Zmień` (otwiera pole `type=password`) i `Usuń`
+     (za potwierdzeniem), wartość nigdy nie wraca do przeglądarki; pole jest wyłączone z podpowiedzią „ustaw `SECRETS_ENCRYPTION_KEY`
+     na serwerze", gdy serwer nie ma klucza szyfrującego; **limit wywołań na przebieg** (domyślnie 100); **timeout** w sekundach
+     (domyślnie 30); `Zapisz`; błędy z API inline pod formularzem (nie tylko toast).
+  4. **„Sprawdź połączenie"** — przycisk secondary obok `Zapisz`; wyłączony przy niezapisanych zmianach lub bez zapisanego
+     endpointu i modelu; stan pending; wynik inline: `OK · <model> · 412 ms` albo czytelny błąd (status, bez klucza). To jedno
+     testowe wywołanie na żądanie — **bez żywej sondy** w pasku zdrowia ani w metrykach (płatne wywołanie).
+  5. **„Ostatni przebieg"** — czas (względny + absolutny w tooltipie), stan LLM z `nightly_run`, tabela liczników (`tabular-nums`):
+     wywołania, błędy, pominięte (limit · bezpiecznik · sekret · klucz). Lista wpisów pominiętych przez skaner sekretów:
+     `MonoId` linkujące do `/pamiec?id=…` + chip z typem sekretu. Gdy nie było jeszcze udanego przebiegu — `EmptyState`.
+
 ---
 
 ## 10. Stany, dostępność, klawiatura
@@ -543,7 +576,7 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 - **Focus:** zawsze widoczny `focus-visible` — ring 2px iris + offset 2px. Nawigacja Tab przez wszystkie interaktywne.
 - **Kontrast:** cel **WCAG AA** (tekst ≥4.5:1, UI/ikony ≥3:1). Palety §2 dobrane pod to w obu motywach; status-fg na status-subtle spełnia AA.
 - **Kolor nie jest jedynym sygnałem** (P2): każdy status = kolor **+ ikona + label**.
-- **Klawiatura (kolejka):** `j/k` góra/dół, `Enter` detal, `A` approve, `R` reject, `E` edit, `S` zamiennik, `x` zaznacz/odznacz (bulk approve/reject, roadmap v1.3), `/` search, `⌘K` paleta poleceń, `g` potem `k/p/c/t/a/m/o/w` — skok do ekranu (Kolejka/Pamięć/Oś czasu/Projekty/Audyt/Pomiary/Operacje/Onboarding). Skróty widoczne w tooltipach i „?" cheatsheet.
+- **Klawiatura (kolejka):** `j/k` góra/dół, `Enter` detal, `A` approve, `R` reject, `E` edit, `S` zamiennik, `x` zaznacz/odznacz (bulk approve/reject, roadmap v1.3), `/` search, `⌘K` paleta poleceń, `g` potem `k/p/c/t/a/m/o/w/s` — skok do ekranu (Kolejka/Pamięć/Oś czasu/Projekty/Audyt/Pomiary/Operacje/Onboarding/Ustawienia). Skróty widoczne w tooltipach i „?" cheatsheet.
 - **Reduced motion:** `prefers-reduced-motion` → bez translate/shimmer.
 - **Empty / loading / error:** każdy list ma `EmptyState`, `Skeleton`, i inline error (nie modal) z akcją „Ponów".
 - **Live vs polling:** v1 kolejka odświeżana pollingiem — pokaż „ostatnia aktualizacja Xs temu" + ręczny refresh; bez fałszywego „real-time".
@@ -569,7 +602,7 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 4. **Ekran-bohater** — Kolejka (§9.1) end-to-end na realnym API, potem Pamięć/Projekty/Audyt.
 5. **A11y pass** — focus, kontrast, klawiatura (§10) jako część „definition of done", nie po fakcie.
 
-**Poza v1 (spójne z roadmapą PRD §10):** bulk approve/reject (anti-fatigue) — layout kolejki już to udźwignie (checkbox na wierszu + bulk bar); ręczny trigger nocnego jobu i hard-purge w dashboardzie (v1.1) — miejsce w Audycie/Projektach; per-user auth (v2) — dolna sekcja railu (dziś: Projekty, toggle motywu, Wyloguj — §9.0) już istnieje i ją rozszerzy.
+**Poza v1 (spójne z roadmapą PRD §10):** bulk approve/reject (anti-fatigue) — layout kolejki już to udźwignie (checkbox na wierszu + bulk bar); ręczny trigger nocnego jobu i hard-purge w dashboardzie (v1.1) — miejsce w Audycie/Projektach; per-user auth (v2) — dolna sekcja railu (dziś: Projekty, Ustawienia, toggle motywu, Wyloguj — §9.0) już istnieje i ją rozszerzy.
 
 ---
 

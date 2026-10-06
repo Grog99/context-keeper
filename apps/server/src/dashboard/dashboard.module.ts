@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { Module } from '@nestjs/common';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { AuditModule } from '../audit/audit.module';
+import { LlmModule } from '../llm/llm.module';
 import { MemoryModule } from '../memory/memory.module';
 import { NightlyModule } from '../nightly/nightly.module';
 import { OnboardingModule } from '../onboarding/onboarding.module';
@@ -22,6 +23,7 @@ import { NightlyController } from './nightly.controller';
 import { OnboardingController } from './onboarding.controller';
 import { ProjectsController } from './projects.controller';
 import { ProposalsController } from './proposals.controller';
+import { SettingsController } from './settings.controller';
 import { UsageMetricsController } from './usage-metrics.controller';
 
 /**
@@ -34,6 +36,9 @@ import { UsageMetricsController } from './usage-metrics.controller';
  * rejestrowane WYŁĄCZNIE w `CliModule`. Import modułu sam z siebie nic nie uruchamia (`NightlyService`/
  * `PurgeService` stają się tylko wstrzykiwalne w tym procesie) — obie usługi startują wyłącznie na
  * explicit wywołanie z `NightlyController`/`MemoriesController`.
+ *
+ * `LlmModule` (roadmap v1.6) zasila `SettingsController` (`/api/settings/llm` — ustawienia kroku LLM i
+ * „Sprawdź połączenie"; ekran „Ustawienia").
  *
  * `OnboardingModule` (roadmap v1.5) zasila `OnboardingController` (`GET /api/onboarding`); tokeny konta
  * obsługuje `AccountTokensController` na tym samym `ProjectsService` co tokeny projektowe.
@@ -52,6 +57,7 @@ import { UsageMetricsController } from './usage-metrics.controller';
     NightlyModule,
     PurgeModule,
     OnboardingModule,
+    LlmModule,
     ServeStaticModule.forRoot({
       // `__dirname` w skompilowanym dist to `dist/dashboard/` (mirror src/dashboard/) — `dist/public`
       // wymaga wyjścia jeden poziom wyżej, NIE `join(__dirname, 'public')` (patrz M5: kopiowany tam
@@ -73,6 +79,7 @@ import { UsageMetricsController } from './usage-metrics.controller';
     UsageMetricsController,
     ConfigController,
     NightlyController,
+    SettingsController,
   ],
   providers: [SessionGuard, CsrfGuard, LoginThrottleService],
 })

@@ -56,6 +56,8 @@ services:
       EMBEDDING_QUERY_TIMEOUT_MS: ${EMBEDDING_QUERY_TIMEOUT_MS:-800}
       SESSION_SECRET: ${SESSION_SECRET:-}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      # Klucz szyfrujący sekrety w bazie (klucz API modelu LLM z Ustawień) — opcjonalny, generuje go install.sh.
+      SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:-}
       NIGHTLY_CRON: ${NIGHTLY_CRON:-0 3 * * *}
       NIGHTLY_TZ: ${NIGHTLY_TZ:-Europe/Warsaw}
       NIGHTLY_DEDUP_DISTANCE: ${NIGHTLY_DEDUP_DISTANCE:-0.05}

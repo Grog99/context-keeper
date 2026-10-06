@@ -71,6 +71,13 @@ export const auditEventType = pgEnum('audit_event_type', [
   // (dashboard, `MemoryAdminService`).
   'relation_created',
   'relation_removed',
+  // roadmap v1.6 ("Provider LLM dla nocnego jobu") — krok LLM pominął wpis pamięci, bo `scanForSecrets`
+  // trafił w jego treść (`affected_ids` = [id pamięci], `metadata.secretType`, BEZ materiału). Osobny
+  // typ zamiast reużycia `secret_blocked`: ten liczy metryka `secretBlocked24h` i niesie CTA tokena.
+  'llm_secret_skipped',
+  // roadmap v1.6 — zapis w ekranie „Ustawienia" (ustawienia instancji; dziś sekcja `llm`). Metadane:
+  // `{section, changes}`, klucz API wyłącznie jako 'set'/'cleared' — nigdy wartość.
+  'instance_settings_changed',
 ]);
 
 // Aliasy TS dla wartości enumów (Faza 2+) — jedno źródło prawdy (enumValues), bez duplikowania literałów.

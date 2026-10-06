@@ -60,6 +60,7 @@ hasłem.
 | `DASHBOARD_PASSWORD` | seed hasła dashboardu (wymagany w produkcji) |
 | `EMBEDDING_API_KEY` | klucz do zewnętrznego API embeddingów (`EMBEDDING_PROVIDER=api`) |
 | `EMBEDDING_API_URL` | endpoint API embeddingów, np. `https://api.openai.com/v1/embeddings` |
+| `SECRETS_ENCRYPTION_KEY` | **opcjonalna, ale zalecana** — klucz AES-256 (`openssl rand -base64 32`) szyfrujący klucz API modelu LLM trzymany w bazie. Bez niej appka działa normalnie, ale w Ustawieniach nie da się zapisać klucza API. **Ustaw raz i nie zmieniaj** — zmiana/utrata = zapisane klucze stają się nieczytelne (wpisz je ponownie) |
 
 ### Skonfigurowalne (mają default w compose, nadpisz w razie potrzeby)
 
@@ -106,6 +107,28 @@ Na Coolify nie masz (zwykle) dostępu do hosta — zamiennik to **Coolify → za
 > potrzebnego przez `infra/backup.sh`) jest wersyjny/planowo-zależny w Coolify — **potwierdź na
 > swojej instancji** przed poleganiem na tym mechanizmie produkcyjnie. Do czasu potwierdzenia,
 > traktuj to jako rekomendowany kierunek, nie gotowy przepis "wklej i zapomnij".
+
+### Krok LLM nocnego joba (opcjonalny)
+
+Nocny job może — opcjonalnie — pytać model językowy (opt-in, **domyślnie wyłączony**; bez tego job
+działa dokładnie jak dotąd). Konfiguracja LLM **nie jest w env**, tylko w bazie i w dashboardzie:
+
+1. Ustaw `SECRETS_ENCRYPTION_KEY` w Coolify UI (`openssl rand -base64 32`) i zrestartuj `app` — potrzebna
+   tylko do zapisu klucza API (lokalne Ollama/vLLM go nie wymagają).
+2. Dashboard → **Ustawienia** → „Model LLM": endpoint (pełny adres `…/chat/completions`), model, klucz API,
+   limit wywołań na przebieg (domyślnie 100), timeout (domyślnie 30 s). Zmiana działa od następnego
+   przebiegu, bez redeployu.
+3. **Sprawdź połączenie** w Ustawieniach albo w kontenerze `app`: `node dist/cli.js check-llm` — jedno
+   testowe wywołanie, na wyjściu model i latencja albo czytelny błąd (bez klucza).
+
+> **Uwaga — egress:** po włączeniu treść pamięci jest wysyłana do wskazanego endpointu (poza maszynę, jeśli to
+> zewnętrzne API). Wpisy, w których skaner sekretów znajdzie sekret, nie są wysyłane (audyt
+> `llm_secret_skipped` + lista w Ustawieniach).
+
+Najgorszy czas przebiegu zależy od ustawień: przy sprawnym providerze do `limit × timeout`, a przy martwym
+tylko `3 × timeout` (bezpiecznik po 3 kolejnych błędach). Ręczny trigger z dashboardu jest synchroniczny,
+a reverse-proxy z domyślnym `proxy_read_timeout` 60 s (nginx) zwróci 504, gdy przebieg potrwa dłużej —
+przebieg wtedy i tak dobiega końca w tle.
 
 ## 6. Bezpieczeństwo — dashboard 3001 MUSI być za kontrolą dostępu (decyzja zamknięta)
 

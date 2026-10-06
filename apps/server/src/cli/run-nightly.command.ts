@@ -32,7 +32,11 @@ export class RunNightlyCommand extends CommandRunner {
         `[run-nightly] status=${result.status} durationMs=${result.durationMs} ` +
         `created=${c.created} withdrawn=${c.withdrawn} skipped=${c.skippedAsDup} ` +
         `merge=${c.mergeProposed} prune=${c.pruneProposed} ` +
-        `skippedPoliteness=${c.skippedPoliteness} skippedCap=${c.skippedCap}`;
+        `skippedPoliteness=${c.skippedPoliteness} skippedCap=${c.skippedCap} ` +
+        `searchEventsPruned=${c.searchEventsPruned} ` +
+        `llm=${result.llm?.state ?? '-'} llmCalls=${c.llmCalls} llmErrors=${c.llmErrors} ` +
+        `llmSkipped=cap:${c.llmSkippedCap},breaker:${c.llmSkippedBreaker},` +
+        `secret:${c.llmSkippedSecret},key:${c.llmSkippedKeyUnreadable}`;
       if (result.status === 'success') {
         console.log(summary);
       } else {

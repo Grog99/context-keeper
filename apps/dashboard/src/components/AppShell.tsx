@@ -10,6 +10,7 @@ import {
   PlugZap,
   Plus,
   ScrollText,
+  Settings,
   Sun,
   Wrench,
 } from 'lucide-react';
@@ -52,6 +53,10 @@ const NAV_ITEMS: RailNavItem[] = [
  * nie wybranej pamięci. Ląduje w dolnej sekcji railu, przy toggle motywu i „Wyloguj". */
 const PROJECTS_NAV_ITEM: RailNavItem = { to: '/projekty', label: 'Projekty', icon: FolderKanban, screen: 'projekty' };
 
+/** §9.9 — ustawienia instancji (sekcja "Model LLM", roadmap v1.6); poza nawigacją kontekstową, w dolnej
+ * sekcji railu pod "Projekty" — ten sam precedens co `PROJECTS_NAV_ITEM`. */
+const SETTINGS_NAV_ITEM: RailNavItem = { to: '/ustawienia', label: 'Ustawienia', icon: Settings, screen: 'ustawienia' };
+
 const SCREEN_PATH: Record<ScreenKey, string> = {
   kolejka: '/kolejka',
   pamiec: '/pamiec',
@@ -61,6 +66,7 @@ const SCREEN_PATH: Record<ScreenKey, string> = {
   pomiary: '/pomiary',
   operacje: '/operacje',
   onboarding: '/onboarding',
+  ustawienia: '/ustawienia',
 };
 
 /** Label paska zdrowia (FR-D7): `up`/`degraded` + latencja ostatniego health-checku, gdy znana. */
@@ -106,7 +112,7 @@ function RailNavLink({ item, children }: RailNavLinkProps) {
 
 /**
  * §9.0 design-systemu — rama wszystkich ekranów: rail (240px, marka → `ContextSwitcher` → nawigacja
- * 7 ekranów kontekstowych → "Nowa pamięć" → dolna sekcja: Projekty + toggle motywu + Wyloguj) + top
+ * 7 ekranów kontekstowych → "Nowa pamięć" → dolna sekcja: Projekty + Ustawienia + toggle motywu + Wyloguj) + top
  * bar (52px: ⌘K search, health strip). Screeny renderują się przez `<Outlet/>` (React Router) —
  * AppShell sam nie zna treści ekranów, tylko ramę + skróty globalne.
  */
@@ -192,6 +198,7 @@ export function AppShell() {
         </Tooltip>
         <div className="mt-auto flex flex-col gap-1 border-t border-border pt-2.5">
           <RailNavLink item={PROJECTS_NAV_ITEM} />
+          <RailNavLink item={SETTINGS_NAV_ITEM} />
           <Button
             variant="ghost"
             size="sm"

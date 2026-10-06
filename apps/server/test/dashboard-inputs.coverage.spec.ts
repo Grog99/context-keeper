@@ -11,6 +11,7 @@ import { NightlyController } from '../src/dashboard/nightly.controller';
 import { OnboardingController } from '../src/dashboard/onboarding.controller';
 import { ProjectsController } from '../src/dashboard/projects.controller';
 import { ProposalsController } from '../src/dashboard/proposals.controller';
+import { SettingsController } from '../src/dashboard/settings.controller';
 import { UsageMetricsController } from '../src/dashboard/usage-metrics.controller';
 
 /** `RouteParamtypes` (`@nestjs/common/enums/route-paramtypes.enum`) — wartości numeryczne
@@ -39,6 +40,7 @@ const DASHBOARD_CONTROLLERS: Ctor[] = [
   ConfigController,
   MetricsController,
   NightlyController,
+  SettingsController,
 ];
 
 interface ArgMetaEntry {
