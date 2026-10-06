@@ -14,6 +14,7 @@ import type { Database } from '../src/db/db.tokens';
 import * as schema from '../src/db/schema';
 import { auditLog, projects as projectsTable, proposals } from '../src/db/schema';
 import { OnboardingService } from '../src/onboarding/onboarding.service';
+import { ONBOARDING_SETUP_STEPS } from '../src/onboarding/onboarding-templates';
 import { ProjectProposalService } from '../src/onboarding/project-proposal.service';
 import { ACCOUNT_ACTOR } from '../src/projects/project-scope';
 import { ProjectSlugService } from '../src/projects/project-slug.service';
@@ -186,6 +187,7 @@ describe('ProjectProposalService + OnboardingService (integration, testcontainer
       expect(entry.headers.Authorization).toBe('Bearer ${CONTEXT_KEEPER_TOKEN}');
       expect(JSON.stringify(res)).not.toMatch(/ck_[A-Za-z0-9_-]{20,}/);
       expect(res.next).toContain('project_pending');
+      expect(res.next).toContain(ONBOARDING_SETUP_STEPS);
       expect(res.agentsMd).toContain('search_memory');
     });
   });
@@ -262,6 +264,7 @@ describe('ProjectProposalService + OnboardingService (integration, testcontainer
       expect(listed).toEqual([...listed].sort());
       expect(list.mcpUrlConfigured).toBe(false);
       expect(list.hint).toContain('<your-mcp-host>');
+      expect(list.hint).toContain(ONBOARDING_SETUP_STEPS);
     });
 
     it('listProjects: puste projects + hint o create_project (świeża baza)', async () => {
@@ -274,6 +277,7 @@ describe('ProjectProposalService + OnboardingService (integration, testcontainer
         const list = await new OnboardingService(config, new ProjectSlugService(freshDb)).listProjects();
         expect(list.projects).toEqual([]);
         expect(list.hint).toContain('create_project');
+        expect(list.hint).toContain(ONBOARDING_SETUP_STEPS);
         expect(list.agentsMd).toContain('Project binding');
       } finally {
         await freshPool.end();

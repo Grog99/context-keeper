@@ -3,9 +3,12 @@ import type { AppConfigService } from '../src/config/config.service';
 import { resolveMcpPublicUrl } from '../src/onboarding/mcp-public-url';
 import {
   AGENTS_MD_BLOCK,
+  AGENTS_MD_HEADING,
   CLAUDE_MD_BLOCK,
   MCP_SERVER_NAME,
   MCP_URL_PLACEHOLDER,
+  ONBOARD_PROMPT_TEXT,
+  ONBOARDING_SETUP_STEPS,
   TOKEN_ENV_PLACEHOLDER,
   renderMcpJson,
 } from '../src/onboarding/onboarding-templates';
@@ -65,6 +68,45 @@ describe('bloki AGENTS.md / CLAUDE.md', () => {
 
   it('CLAUDE.md importuje AGENTS.md', () => {
     expect(CLAUDE_MD_BLOCK).toBe('# CLAUDE.md\n@AGENTS.md');
+  });
+});
+
+describe('kroki onboardingu i prompt onboard', () => {
+  it('blok AGENTS.md zaczyna się od wspólnego nagłówka (znacznik idempotencji)', () => {
+    expect(AGENTS_MD_HEADING).toBe('Project memory — Context Keeper');
+    expect(AGENTS_MD_BLOCK.startsWith(`## ${AGENTS_MD_HEADING}`)).toBe(true);
+  });
+
+  it('kroki niosą politykę zapisu: scalanie, idempotencja, zmienna, precedencja, restart, diff', () => {
+    expect(ONBOARDING_SETUP_STEPS).toContain('mcpServers["context-keeper"]');
+    expect(ONBOARDING_SETUP_STEPS).toMatch(/merge/i);
+    expect(ONBOARDING_SETUP_STEPS).toContain(PROJECT_HEADER_NAME);
+    expect(ONBOARDING_SETUP_STEPS).toContain(AGENTS_MD_HEADING);
+    expect(ONBOARDING_SETUP_STEPS).toContain('@AGENTS.md');
+    expect(ONBOARDING_SETUP_STEPS).toContain('CONTEXT_KEEPER_TOKEN');
+    expect(ONBOARDING_SETUP_STEPS).toMatch(/WITHOUT printing its value/);
+    expect(ONBOARDING_SETUP_STEPS).toMatch(/diff/i);
+    expect(ONBOARDING_SETUP_STEPS).toMatch(/restart/i);
+    expect(ONBOARDING_SETUP_STEPS).toMatch(/fully replaces/);
+    expect(ONBOARDING_SETUP_STEPS).toMatch(/ask the user before replacing/);
+  });
+
+  it('kroki są numerowaną listą markdown', () => {
+    const lines = ONBOARDING_SETUP_STEPS.split('\n');
+    expect(lines.length).toBeGreaterThan(1);
+    lines.forEach((line, i) => expect(line.startsWith(`${i + 1}. `)).toBe(true));
+  });
+
+  it('kroki nie zawierają tokenu (ck_)', () => {
+    expect(ONBOARDING_SETUP_STEPS).not.toMatch(/ck_/);
+  });
+
+  it('prompt onboard osadza kroki dosłownie, nazywa oba narzędzia i nie zawiera tokenu', () => {
+    expect(ONBOARD_PROMPT_TEXT).toContain(ONBOARDING_SETUP_STEPS);
+    expect(ONBOARD_PROMPT_TEXT).toContain('list_projects');
+    expect(ONBOARD_PROMPT_TEXT).toContain('create_project');
+    expect(ONBOARD_PROMPT_TEXT).toMatch(/repository or directory name/);
+    expect(ONBOARD_PROMPT_TEXT).not.toMatch(/ck_/);
   });
 });
 
