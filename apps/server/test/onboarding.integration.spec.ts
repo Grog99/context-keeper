@@ -18,6 +18,7 @@ import { ProjectProposalService } from '../src/onboarding/project-proposal.servi
 import { ACCOUNT_ACTOR } from '../src/projects/project-scope';
 import { ProjectSlugService } from '../src/projects/project-slug.service';
 import type { TokenContext } from '../src/projects/projects.service';
+import { buildProjectsService } from './helpers/services';
 
 const ATTRIBUTION: TokenContext = { tokenId: 'tok_onboarding1', tokenLabel: 'acc-onboarding' };
 
@@ -216,6 +217,43 @@ describe('ProjectProposalService + OnboardingService (integration, testcontainer
       expect(blocks.mcpUrlConfigured).toBe(true);
       expect(list.mcpUrlConfigured).toBe(true);
       expect(entry!.mcpJson).toContain('https://ck.example.com/mcp');
+    });
+
+    it('forDashboard: projects == listProjects().projects verbatim; wariant tokenu projektowego bez nagłówka; bez tokenów', async () => {
+      const { onboardingService } = build({ PUBLIC_MCP_URL: 'https://ck.example.com' });
+      // Token projektowy i token konta istnieją — odpowiedź i tak nie może zawierać żadnego ck_….
+      const config = new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' }));
+      const projectsService = buildProjectsService(db, config);
+      const created = await projectsService.createProject('Dashboard Onboarding', { slug: 'onb-dashboard' });
+      const account = await projectsService.createAccountToken('onb-dashboard-acc');
+
+      const result = await onboardingService.forDashboard();
+      const list = await onboardingService.listProjects();
+
+      expect(result.projects).toEqual(list.projects);
+      expect(result.projects.find((p) => p.slug === 'onb-dashboard')).toBeDefined();
+      expect(result.agentsMd).toBe(list.agentsMd);
+      expect(result.claudeMd).toBe(list.claudeMd);
+      expect(result).toMatchObject({
+        serverName: 'context-keeper',
+        mcpUrl: 'https://ck.example.com/mcp',
+        mcpUrlConfigured: true,
+      });
+      expect(result.projectTokenMcpJson).not.toContain('X-Context-Keeper-Project');
+      expect(result.projectTokenMcpJson).toContain('${CONTEXT_KEEPER_TOKEN}');
+      expect(result.projectTokenMcpJson).toContain('https://ck.example.com/mcp');
+      expect(result).not.toHaveProperty('hint');
+
+      const serialized = JSON.stringify(result);
+      expect(serialized).not.toMatch(/ck_[A-Za-z0-9]/);
+      expect(serialized).not.toContain(created.token);
+      expect(serialized).not.toContain(account.token);
+    });
+
+    it('forDashboard: nieskonfigurowany URL -> placeholder + mcpUrlConfigured=false', async () => {
+      const result = await onboarding.forDashboard();
+      expect(result.mcpUrl).toBe('https://<your-mcp-host>/mcp');
+      expect(result.mcpUrlConfigured).toBe(false);
     });
 
     it('listProjects: posortowane po slugu, hint wspomina placeholder URL gdy nieskonfigurowany', async () => {

@@ -467,6 +467,41 @@ export class ProjectsService {
     return project;
   }
 
+  /**
+   * Zmiana slugu istniejącego projektu (roadmap v1.5, ticket #16 — edytowalny w dashboardzie, bez
+   * aliasów). Wejście normalizowane jak nagłówek (trim + lowercase) i walidowane (komunikaty po polsku
+   * — wołający to dashboard). Ten sam slug = no-op (bez UPDATE; kontroler nie loguje audytu).
+   * Wolność slugu sprawdza `assertSlugAvailable` (istniejący projekt poza własnym ORAZ oczekująca
+   * propozycja `create_project`); wyścig, który prześlizgnie się przez pre-check, łapie unikalny indeks
+   * `projects_slug_key`. Serwis sam nie audytuje (konwencja: audyt w kontrolerze).
+   */
+  async updateSlug(projectId: string, rawSlug: string): Promise<ProjectRow> {
+    const slug = normalizeProjectSlugInput(rawSlug);
+    assertValidProjectSlug(slug);
+    const current = await this.findById(projectId);
+    if (!current) {
+      throw new NotFoundException(`Projekt nie istnieje: ${projectId}`);
+    }
+    if (current.slug === slug) return current;
+    await this.slugs.assertSlugAvailable(slug, { excludeProjectId: projectId });
+    try {
+      const [updated] = await this.db
+        .update(projects)
+        .set({ slug })
+        .where(eq(projects.id, projectId))
+        .returning();
+      if (!updated) {
+        throw new NotFoundException(`Projekt nie istnieje: ${projectId}`);
+      }
+      return updated;
+    } catch (err) {
+      if (isUniqueViolation(err, 'projects_slug_key')) {
+        throw new ToolError('validation_error', `Slug "${slug}" jest już zajęty.`);
+      }
+      throw err;
+    }
+  }
+
   /** Liczba pamięci per projekt (§M1 planu Fazy 5, dashboard FR-D3) — jeden zagregowany zapytanie
    * zamiast N+1 per wiersz listy projektów. */
   async countMemoriesByProject(): Promise<Map<string, number>> {

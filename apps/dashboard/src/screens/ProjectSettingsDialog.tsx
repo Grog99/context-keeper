@@ -1,6 +1,19 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { toast } from 'sonner';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../components/ui/alert-dialog';
+import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Input } from '../components/ui/input';
 import { Switch } from '../components/ui/switch';
 import { MonoId } from '../components/MonoId';
 import { api } from '../lib/api';
@@ -8,6 +21,18 @@ import { describeApiError } from '../lib/errors';
 import { formatAbsoluteTime } from '../lib/format';
 import { queryKeys } from '../lib/query';
 import type { ProjectListItem } from '../types/api';
+
+// Klient-side mirror reguł slugu (`apps/server/src/projects/slug.ts`: `PROJECT_SLUG_RE`, 2–48 znaków) —
+// TYLKO do wyłączenia przycisku "Zapisz"; serwer zostaje authoritative (komunikat błędu zawsze z API).
+const PROJECT_SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+const PROJECT_SLUG_MIN = 2;
+const PROJECT_SLUG_MAX = 48;
+function normalizeSlugInput(raw: string): string {
+  return raw.trim().toLowerCase();
+}
+function isValidSlug(slug: string): boolean {
+  return slug.length >= PROJECT_SLUG_MIN && slug.length <= PROJECT_SLUG_MAX && PROJECT_SLUG_RE.test(slug);
+}
 
 export interface ProjectSettingsDialogProps {
   project: ProjectListItem | null;
@@ -20,7 +45,8 @@ export interface ProjectSettingsDialogProps {
  * pole: `includeEventsInDefaultSearch` (roadmap v1.2, "kind=event episodic") — czy `event` dokłada
  * się do domyślnego `kind` w `search_memory` agenta. Zmiana leci przez `PATCH /api/projects/:id`,
  * backend audytuje ją jako `project_settings_changed` (widoczne na ekranie "Audyt" bez dodatkowej
- * pracy tutaj).
+ * pracy tutaj). Roadmap v1.5: edycja slugu (`SlugRow`) z ostrzeżeniem przed zapisem — repo z dotychczasowym
+ * slugiem w `.mcp.json` przestają się rozwiązywać, a ten sam `PATCH` audytuje zmianę (`field: 'slug'`).
  */
 export function ProjectSettingsDialog({ project, onOpenChange }: ProjectSettingsDialogProps) {
   const queryClient = useQueryClient();
@@ -50,6 +76,7 @@ export function ProjectSettingsDialog({ project, onOpenChange }: ProjectSettings
               <dd>
                 <MonoId value={project.id} />
               </dd>
+              <SlugRow key={project.id} project={project} />
               <dt className="text-muted-foreground">Pamięci</dt>
               <dd className="font-mono text-xs tabular-nums">{project.memoryCount}</dd>
               <dt className="text-muted-foreground">Utworzono</dt>
@@ -82,5 +109,92 @@ export function ProjectSettingsDialog({ project, onOpenChange }: ProjectSettings
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Wiersz "slug" w `<dl>` ustawień: wartość (kopiowalna) + "Edytuj" → input + "Zapisz"/"Anuluj"; "Zapisz"
+ * otwiera `AlertDialog` z ostrzeżeniem, dopiero potwierdzenie wysyła `PATCH`. Montowany z `key={project.id}`,
+ * więc stan edycji nie przecieka między projektami. */
+function SlugRow({ project }: { project: ProjectListItem }) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(project.slug);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const normalized = normalizeSlugInput(value);
+  const canSave = isValidSlug(normalized) && normalized !== project.slug;
+
+  const slugMutation = useMutation({
+    mutationFn: (slug: string) => api.patch<ProjectListItem>(`/projects/${project.id}`, { slug }),
+    onSuccess: () => {
+      setConfirmOpen(false);
+      setEditing(false);
+      toast.success('Slug zmieniony');
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects() });
+    },
+    onError: (err) => {
+      setConfirmOpen(false);
+      toast.error(describeApiError(err));
+    },
+  });
+
+  function startEditing() {
+    setValue(project.slug);
+    setEditing(true);
+  }
+
+  return (
+    <>
+      <dt className="text-muted-foreground">slug</dt>
+      <dd>
+        {editing ? (
+          <div className="flex items-center gap-1.5">
+            <Input
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              autoFocus
+              className="h-8 font-mono text-xs"
+              maxLength={PROJECT_SLUG_MAX}
+              aria-label="Nowy slug"
+            />
+            <Button variant="primary" size="sm" disabled={!canSave} onClick={() => setConfirmOpen(true)}>
+              Zapisz
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
+              Anuluj
+            </Button>
+          </div>
+        ) : (
+          <span className="inline-flex items-center gap-2">
+            <MonoId value={project.slug} label="slug" />
+            <Button variant="secondary" size="sm" onClick={startEditing}>
+              Edytuj
+            </Button>
+          </span>
+        )}
+      </dd>
+
+      <AlertDialog open={confirmOpen} onOpenChange={(open) => !open && !slugMutation.isPending && setConfirmOpen(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Zmienić slug „{project.slug}” → „{normalized}”?
+            </AlertDialogTitle>
+          </AlertDialogHeader>
+          <AlertDialogDescription>
+            Repo z tym slugiem w <span className="font-mono">.mcp.json</span> przestaną się rozwiązywać — agenci
+            dostaną <span className="font-mono">project_not_found</span>, dopóki nie zaktualizujesz nagłówka{' '}
+            <span className="font-mono">X-Context-Keeper-Project</span> w ich <span className="font-mono">.mcp.json</span>.
+            Stary slug nie zostaje aliasem. Zmiana trafia do audytu.
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={slugMutation.isPending}>Anuluj</AlertDialogCancel>
+            <AlertDialogAction onClick={() => slugMutation.mutate(normalized)} disabled={slugMutation.isPending}>
+              {slugMutation.isPending ? 'Zapisywanie…' : 'Zmień slug'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

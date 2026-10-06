@@ -25,6 +25,11 @@ export const queryKeys = {
   projects: () => ['projects'] as const,
   /** Dialog "Tokeny" (roadmap v1.3, "Wiele tokenów per projekt + graceful rotation"). */
   projectTokens: (projectId: string) => ['projects', projectId, 'tokens'] as const,
+  /** Sekcja "Tokeny konta" na ekranie Projekty (roadmap v1.5). */
+  accountTokens: () => ['account-tokens'] as const,
+  /** Ekran "Onboarding" (roadmap v1.5) — zagnieżdżony pod `projects`, żeby istniejące
+   * `invalidateQueries(queryKeys.projects())` (np. po zmianie slugu) odświeżało też bloki `.mcp.json`. */
+  onboarding: () => ['projects', 'onboarding'] as const,
   audit: (filter: Record<string, unknown>) => ['audit', filter] as const,
   metrics: () => ['metrics'] as const,
   usage: (filter: Record<string, unknown>) => ['metrics', 'usage', filter] as const,

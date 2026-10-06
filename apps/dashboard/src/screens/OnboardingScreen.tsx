@@ -1,175 +1,230 @@
 import { useQuery } from '@tanstack/react-query';
-import { Info } from 'lucide-react';
+import { Folder, Info, ShieldAlert } from 'lucide-react';
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { CopyBlock } from '../components/CopyBlock';
+import { EmptyState } from '../components/EmptyState';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { Skeleton } from '../components/ui/skeleton';
 import { api } from '../lib/api';
+import { useActiveContext } from '../lib/context';
 import { queryKeys } from '../lib/query';
-import type { DashboardLimits } from '../types/api';
+import type { AccountTokenApi, OnboardingApi, ProjectListItem } from '../types/api';
 
-const MCP_HOST_PLACEHOLDER = 'https://<your-mcp-host>';
+/** Placeholdery w blokach env/CLI — realny token pokazuje wyłącznie `TokenReveal` po wydaniu. */
+const ENV_BLOCK = `# Windows (PowerShell / cmd)
+setx CONTEXT_KEEPER_TOKEN "ck_…"
 
-/** Snippet do wklejenia w `AGENTS.md` (Codex/Cursor czytają bezpośrednio, Claude Code przez
- * `@AGENTS.md` w CLAUDE.md — patrz Blok 3) dowolnego zewnętrznego repo, które ma dogfoodować TĘ
- * instancję Context Keepera. English (per konwencja `mcp-tool-contract.md` — treść adresowana do
- * dowolnego agenta LLM, nie tylko polskojęzycznych), uogólniony z `AGENTS.md` tego repo. */
-const AGENTS_SNIPPET = `## Project memory — Context Keeper (MCP)
+# macOS / Linux (profil shella)
+export CONTEXT_KEEPER_TOKEN=ck_…`;
 
-This project uses a Context Keeper instance as shared, persistent, human-gated
-project memory, exposed as an MCP server named \`context-keeper\`. Tools:
-\`search_memory\`, \`get_memory\`, \`save_memory\`. Each tool's own MCP description
-carries the full contract (writes are human-gated, secrets are rejected, return
-statuses) — this snippet only covers when to reach for them and what to store.
-
-Work proactively:
-- At the START of a task, call \`search_memory\` to pull relevant project context
-  (decisions, conventions, environment specifics) before you start guessing.
-- When a non-obvious decision, fact, or convention comes up, propose it with
-  \`save_memory\` yourself — don't wait to be asked.
-
-What to save, and as which kind:
-- \`fact\` (the default) — one atomic, self-contained fact: a decision, a team
-  convention, a "why", a deployment specific.
-- \`document\` — a longer, self-contained reference saved whole (a decision record,
-  a spec, a convention writeup). Pass \`kind: "document"\`.
-- \`event\` — something that happened at a point in time (a deploy, an incident, a
-  decision made in a meeting). Pass \`kind: "event"\` AND \`event_time\` (ISO 8601,
-  e.g. \`2026-07-28T14:30:00Z\`) — \`event_time\` is required, there is no implicit
-  "now", and it is when the event HAPPENED, not when you save it. Backdating is
-  unrestricted. Correcting an event afterwards (including its \`event_time\`) stays
-  human-only.
-- To fix something already in memory, find it via \`search_memory\` and re-save it
-  with \`supersedes: <id>\` — your new header+body replace it in place — rather than
-  adding a near-duplicate.
-- To link this memory to one you already found, pass \`relations: [{type, targetId}]\`
-  (\`caused_by\` | \`follows\` | \`context_for\`, up to 16) — boosts related results in
-  later searches.
-
-Memory hygiene:
-- Save only what you can't derive from the repo — decisions, team conventions,
-  the "why", deployment specifics. Don't store what's already in the README, docs,
-  or code.`;
-
-/** Notatka dla Claude Code (nie czyta `AGENTS.md` automatycznie, w odróżnieniu od Codex/Cursor) —
- * dokładnie ten sam mechanizm co `CLAUDE.md` tego repo. */
-const CLAUDE_NOTE = `# CLAUDE.md
-@AGENTS.md`;
-
-/** Buduje `.mcp.json` (kształt tego repo — `type: "http"` + `Authorization: Bearer <placeholder>`).
- * `JSON.stringify` nad zwykłym stringiem (nie template literal) celowo — `Authorization` MUSI
- * wylądować w schowku jako literalny placeholder `${CONTEXT_KEEPER_TOKEN}`, nie zinterpolowany
- * string. */
-function buildMcpJsonBlock(mcpUrl: string): string {
-  return JSON.stringify(
-    {
-      mcpServers: {
-        'context-keeper': {
-          type: 'http',
-          url: mcpUrl,
-          headers: {
-            Authorization: 'Bearer ${CONTEXT_KEEPER_TOKEN}',
-          },
-        },
-      },
-    },
-    null,
-    2,
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-lg border border-border bg-surface p-4">
+      <h2 className="mb-1 text-sm font-semibold text-foreground">{title}</h2>
+      {children}
+    </section>
   );
 }
 
+function Mono({ children }: { children: React.ReactNode }) {
+  return <code className="font-mono">{children}</code>;
+}
+
 /**
- * Ekran "Onboarding" (roadmap v1.2, Warstwa 2) — trzy copy-able bloki (snippet AGENTS.md, blok
- * `.mcp.json`, notatka CLAUDE.md) + polskie kroki setupu, do wklejenia w DOWOLNE zewnętrzne repo,
- * żeby podpiąć je pod TĘ instancję Context Keepera. Bez selektora projektu — URL MCP jest
- * instance-wide, nie per-projekt (locked task decision). Publiczny URL rozwiązywany server-side
- * (`GET /api/config` -> `mcpPublicUrl`, `ConfigController.resolveMcpPublicUrl`); `null` renderuje
- * placeholder `https://<your-mcp-host>` + notatkę poniżej.
+ * Ekran "Onboarding" (roadmap v1.2, przebudowa v1.5) — bloki do wklejenia w dowolnym zewnętrznym repo,
+ * żeby podpiąć je pod TĘ instancję Context Keepera. Wszystkie teksty (`.mcp.json` z nagłówkiem projektu,
+ * `AGENTS.md`, `CLAUDE.md`, wariant tokenu projektowego) renderuje SERWER (`GET /api/onboarding`, jedno
+ * źródło z narzędziami MCP `list_projects`/`create_project`) — SPA ich nie duplikuje. Model domyślny:
+ * token konta w zmiennej środowiskowej (raz na maszynę) + commitowany `.mcp.json` z nagłówkiem
+ * `X-Context-Keeper-Project` per repo. Ekran NIGDY nie pokazuje wartości tokenu: tokeny konta wydaje się
+ * w Projekty → Tokeny konta (albo CLI), a lista tutaj niesie wyłącznie etykiety.
  */
 export function OnboardingScreen() {
-  const { data } = useQuery({
-    queryKey: queryKeys.config(),
-    queryFn: () => api.get<DashboardLimits>('/config'),
-    staleTime: 5 * 60_000,
+  const { active } = useActiveContext();
+  const [chosenSlug, setChosenSlug] = useState<string | null>(null);
+
+  const onboardingQuery = useQuery({
+    queryKey: queryKeys.onboarding(),
+    queryFn: () => api.get<OnboardingApi>('/onboarding'),
+  });
+  const accountTokensQuery = useQuery({
+    queryKey: queryKeys.accountTokens(),
+    queryFn: () => api.get<AccountTokenApi[]>('/account-tokens'),
+  });
+  // Tylko do zmapowania aktywnego projektu z przełącznika kontekstu (id → slug) dla domyślnego wyboru.
+  const projectsQuery = useQuery({
+    queryKey: queryKeys.projects(),
+    queryFn: () => api.get<ProjectListItem[]>('/projects'),
   });
 
-  const base = data?.mcpPublicUrl ?? null;
-  const mcpUrl = base ? `${base}/mcp` : `${MCP_HOST_PLACEHOLDER}/mcp`;
-  const healthUrl = base ? `${base}/health` : `${MCP_HOST_PLACEHOLDER}/health`;
-  const mcpJsonBlock = buildMcpJsonBlock(mcpUrl);
+  const onboarding = onboardingQuery.data;
+  const projects = onboarding?.projects ?? [];
+  const contextSlug =
+    active.kind === 'project' ? (projectsQuery.data?.find((p) => p.id === active.projectId)?.slug ?? null) : null;
+  const selected =
+    projects.find((p) => p.slug === chosenSlug) ??
+    projects.find((p) => p.slug === contextSlug) ??
+    projects[0] ??
+    null;
+
+  const usableAccountTokens = (accountTokensQuery.data ?? []).filter(
+    (t) => t.effectiveStatus === 'active' || t.effectiveStatus === 'grace',
+  );
 
   return (
     <ScreenContainer width="prose">
       <h1 className="mb-1 text-xl font-semibold tracking-tight">Onboarding</h1>
       <p className="mb-5 max-w-2xl text-[13.5px] text-muted-foreground">
-        Gotowe bloki do wklejenia w dowolnym zewnętrznym repo, żeby podpiąć je pod tę instancję Context Keepera
-        jako trwałą, human-gated pamięć projektu.
+        Gotowe bloki do podpięcia zewnętrznego repo pod tę instancję Context Keepera: token konta ustawiasz raz na
+        maszynie, a każde repo wskazuje swój projekt nagłówkiem w commitowanym <Mono>.mcp.json</Mono>.
       </p>
 
-      <div className="flex flex-col gap-5">
-        {base === null && (
-          <div className="flex items-start gap-2 rounded-md border border-warning bg-warning-subtle px-2.5 py-2 text-xs text-warning-foreground">
-            <Info className="mt-0.5 size-[15px] shrink-0 text-warning" />
-            Nie skonfigurowano publicznego URL-a MCP — ustaw <code className="font-mono">PUBLIC_MCP_URL</code> w{' '}
-            <code className="font-mono">.env</code> (albo podmień placeholder <code className="font-mono">{MCP_HOST_PLACEHOLDER}</code>{' '}
-            ręcznie poniżej po skopiowaniu).
-          </div>
-        )}
+      {onboardingQuery.isLoading ? (
+        <Skeleton className="h-64 w-full" />
+      ) : !onboarding ? (
+        <EmptyState title="Nie udało się pobrać danych onboardingu" description="Odśwież stronę i spróbuj ponownie." />
+      ) : (
+        <div className="flex flex-col gap-5">
+          {!onboarding.mcpUrlConfigured && (
+            <div className="flex items-start gap-2 rounded-md border border-warning bg-warning-subtle px-2.5 py-2 text-xs text-warning-foreground">
+              <Info className="mt-0.5 size-[15px] shrink-0 text-warning" />
+              Nie skonfigurowano publicznego URL-a MCP — ustaw <Mono>PUBLIC_MCP_URL</Mono> w <Mono>.env</Mono> (albo
+              podmień placeholder <Mono>{onboarding.mcpUrl}</Mono> ręcznie poniżej po skopiowaniu).
+            </div>
+          )}
 
-        <section className="rounded-lg border border-border bg-surface p-4">
-          <h2 className="mb-1 text-sm font-semibold text-foreground">1. Kroki setupu</h2>
-          <ol className="mb-1 list-decimal space-y-1.5 pl-5 text-xs leading-relaxed text-muted-foreground">
-            <li>
-              Utwórz projekt i token w dashboardzie (Projekty → Nowy projekt) — token pokazujemy tylko raz, zapisz go
-              od razu.
-            </li>
-            <li>
-              Ustaw zmienną środowiskową <code className="font-mono">CONTEXT_KEEPER_TOKEN</code> w repo, które
-              onboardujesz (<code className="font-mono">setx</code> na Windows / <code className="font-mono">export</code>{' '}
-              w profilu shella) — token nigdy nie trafia do repo.
-            </li>
-            <li>
-              Dodaj Blok 2 poniżej do <code className="font-mono">.mcp.json</code> w tamtym repo.
-            </li>
-            <li>
-              Wklej Blok 1 (snippet <code className="font-mono">AGENTS.md</code>) do{' '}
-              <code className="font-mono">AGENTS.md</code> tamtego repo — dla Claude Code dodaj też Blok 3 do{' '}
-              <code className="font-mono">CLAUDE.md</code>.
-            </li>
-            <li>Zrestartuj terminal i klienta MCP, przy pierwszym uruchomieniu zaakceptuj serwer.</li>
-            <li>
-              Zweryfikuj: <code className="font-mono">curl {healthUrl}</code> powinno zwrócić{' '}
-              <code className="font-mono">{'{"status":"ok",...}'}</code> (publiczny endpoint, bez tokenu).
-            </li>
-          </ol>
-        </section>
+          <Section title="1. Setup globalny (raz na maszynę)">
+            {accountTokensQuery.isLoading ? (
+              <Skeleton className="mb-3 h-10 w-full" />
+            ) : usableAccountTokens.length === 0 ? (
+              <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
+                <span className="font-medium text-foreground">Nie masz jeszcze tokenu konta.</span> Wydaj go w{' '}
+                <Link to="/projekty" className="underline decoration-dotted hover:decoration-solid">
+                  Projekty → Tokeny konta
+                </Link>{' '}
+                albo z CLI: <Mono>create-account-token &lt;label&gt;</Mono>. Token pokazujemy tylko raz — zapisz go od
+                razu.
+              </p>
+            ) : (
+              <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
+                Aktywne tokeny konta:{' '}
+                <span className="font-mono text-foreground">{usableAccountTokens.map((t) => t.label).join(', ')}</span>.
+                Wartość tokenu jest widoczna tylko raz, przy wydaniu — jeśli ją zgubiłeś, zrotuj token w{' '}
+                <Link to="/projekty" className="underline decoration-dotted hover:decoration-solid">
+                  Projekty → Tokeny konta
+                </Link>
+                .
+              </p>
+            )}
+            <div className="mb-3 flex items-start gap-2 rounded-md border border-warning bg-warning-subtle px-2.5 py-2 text-xs text-warning-foreground">
+              <ShieldAlert className="mt-0.5 size-[15px] shrink-0 text-warning" />
+              Token konta daje odczyt i zapis we wszystkich projektach instancji — trzymaj go wyłącznie w swojej
+              zmiennej środowiskowej; do CI i dla współpracowników użyj tokenu projektowego (sekcja 5).
+            </div>
+            <p className="mb-2 text-xs leading-relaxed text-muted-foreground">
+              Ustaw zmienną środowiskową z tokenem (raz, globalnie — nigdy w repo):
+            </p>
+            <CopyBlock label="zmienna środowiskowa" code={ENV_BLOCK} copyLabel="Kopiuj ustawienie zmiennej" className="mb-3" />
+            <p className="mb-2 text-xs leading-relaxed text-muted-foreground">Adres serwera MCP:</p>
+            <CopyBlock label="Adres MCP" code={onboarding.mcpUrl} copyLabel="Kopiuj adres MCP" className="mb-3" />
 
-        <section className="rounded-lg border border-border bg-surface p-4">
-          <h2 className="mb-1 text-sm font-semibold text-foreground">2. Blok 1 — snippet AGENTS.md / CLAUDE.md</h2>
-          <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
-            Do wklejenia w <code className="font-mono">AGENTS.md</code> onboardowanego repo — po angielsku (treść
-            adresowana do dowolnego agenta LLM, nie tylko polskojęzycznego).
-          </p>
-          <CopyBlock label="AGENTS.md" code={AGENTS_SNIPPET} copyLabel="Kopiuj snippet AGENTS.md" />
-        </section>
+            <h3 className="mb-1 text-xs font-semibold text-foreground">Opcjonalnie: wpis globalny w Claude Code</h3>
+            <p className="mb-2 text-xs leading-relaxed text-muted-foreground">
+              Pozwala agentowi w jeszcze nieskonfigurowanym repo wywołać <Mono>list_projects</Mono> /{' '}
+              <Mono>create_project</Mono>. To krok opcjonalny — domyślna ścieżka to sam <Mono>.mcp.json</Mono> w repo.
+              Token ląduje w <Mono>~/.claude.json</Mono> jako zwykły tekst. Nazwa serwera musi być dokładnie{' '}
+              <Mono>{onboarding.serverName}</Mono> — repo z własnym <Mono>.mcp.json</Mono> o tej samej nazwie
+              nadpisuje ten wpis w całości (zakres projektu wygrywa, nagłówki nie są scalane); wpis zakresu lokalnego
+              przesłaniałby z kolei plik z repo.
+            </p>
+            <CopyBlock
+              label="claude mcp add"
+              code={`claude mcp add --transport http --scope user ${onboarding.serverName} ${onboarding.mcpUrl} --header "Authorization: Bearer ck_…"`}
+              copyLabel="Kopiuj komendę claude mcp add"
+            />
+          </Section>
 
-        <section className="rounded-lg border border-border bg-surface p-4">
-          <h2 className="mb-1 text-sm font-semibold text-foreground">3. Blok 2 — połączenie .mcp.json</h2>
-          <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
-            <code className="font-mono">{'${CONTEXT_KEEPER_TOKEN}'}</code> to placeholder — MCP-klient podstawia
-            realną wartość ze zmiennej środowiskowej, nigdy nie wpisuj tokenu wprost do pliku.
-          </p>
-          <CopyBlock label=".mcp.json" code={mcpJsonBlock} copyLabel="Kopiuj blok .mcp.json" />
-        </section>
+          <Section title="2. Repo — wybrany projekt (.mcp.json z nagłówkiem)">
+            {selected === null ? (
+              <EmptyState
+                icon={Folder}
+                title="Brak projektów"
+                description="Utwórz projekt w Projekty → Nowy projekt albo poproś agenta z tokenem konta o create_project i zatwierdź propozycję w Kolejce."
+                action={
+                  <Link to="/projekty" className="text-xs font-semibold text-primary underline">
+                    Przejdź do Projektów →
+                  </Link>
+                }
+              />
+            ) : (
+              <>
+                <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
+                  Wybierz projekt, który obsługuje to repo, i zacommituj plik <Mono>.mcp.json</Mono> — token zostaje
+                  w zmiennej <Mono>CONTEXT_KEEPER_TOKEN</Mono>, nie w pliku. Tekst jest identyczny z tym, co zwraca
+                  narzędzie MCP <Mono>list_projects</Mono>.
+                </p>
+                <Select value={selected.slug} onValueChange={setChosenSlug}>
+                  <SelectTrigger className="mb-3 h-8 max-w-sm gap-1.5 px-2.5 text-xs" aria-label="Projekt repo">
+                    <SelectValue placeholder="projekt" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {projects.map((p) => (
+                      <SelectItem key={p.slug} value={p.slug}>
+                        {p.name} ({p.slug})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <CopyBlock label=".mcp.json" code={selected.mcpJson} copyLabel="Kopiuj blok .mcp.json" />
+              </>
+            )}
+          </Section>
 
-        <section className="rounded-lg border border-border bg-surface p-4">
-          <h2 className="mb-1 text-sm font-semibold text-foreground">4. Blok 3 — notatka dla Claude Code</h2>
-          <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
-            Claude Code nie wczytuje <code className="font-mono">AGENTS.md</code> automatycznie — zaciągnij go z{' '}
-            <code className="font-mono">CLAUDE.md</code>. Codex/Cursor czytają <code className="font-mono">AGENTS.md</code>{' '}
-            bezpośrednio, ten krok pomiń.
-          </p>
-          <CopyBlock label="CLAUDE.md" code={CLAUDE_NOTE} copyLabel="Kopiuj notatkę CLAUDE.md" />
-        </section>
-      </div>
+          <Section title="3. Snippet AGENTS.md">
+            <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
+              Do wklejenia w <Mono>AGENTS.md</Mono> onboardowanego repo — po angielsku (treść adresowana do dowolnego
+              agenta LLM, nie tylko polskojęzycznego).
+            </p>
+            <CopyBlock label="AGENTS.md" code={onboarding.agentsMd} copyLabel="Kopiuj snippet AGENTS.md" />
+          </Section>
+
+          <Section title="4. Notatka dla Claude Code (CLAUDE.md)">
+            <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
+              Claude Code nie wczytuje <Mono>AGENTS.md</Mono> automatycznie — zaciągnij go z <Mono>CLAUDE.md</Mono>.
+              Codex/Cursor czytają <Mono>AGENTS.md</Mono> bezpośrednio, ten krok pomiń.
+            </p>
+            <CopyBlock label="CLAUDE.md" code={onboarding.claudeMd} copyLabel="Kopiuj notatkę CLAUDE.md" />
+          </Section>
+
+          <Section title="5. Token projektowy (CI / współpracownik / pojedyncze repo)">
+            <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
+              Token projektowy wskazuje projekt sam — <Mono>.mcp.json</Mono> bez nagłówka{' '}
+              <Mono>X-Context-Keeper-Project</Mono>, ta sama zmienna <Mono>CONTEXT_KEEPER_TOKEN</Mono>. Wydasz go w{' '}
+              <Link to="/projekty" className="underline decoration-dotted hover:decoration-solid">
+                Projekty → Tokeny
+              </Link>{' '}
+              przy wybranym projekcie. Istniejące repo z takim <Mono>.mcp.json</Mono> działają bez zmian.
+            </p>
+            <CopyBlock
+              label=".mcp.json (token projektowy)"
+              code={onboarding.projectTokenMcpJson}
+              copyLabel="Kopiuj .mcp.json dla tokenu projektowego"
+            />
+          </Section>
+
+          <Section title="6. Na koniec">
+            <ol className="list-decimal space-y-1.5 pl-5 text-xs leading-relaxed text-muted-foreground">
+              <li>Zrestartuj terminal i klienta MCP, przy pierwszym uruchomieniu zaakceptuj serwer.</li>
+              <li>
+                Zweryfikuj: <Mono>curl {onboarding.mcpUrl.replace(/\/mcp$/, '/health')}</Mono> powinno zwrócić{' '}
+                <Mono>{'{"status":"ok",...}'}</Mono> (publiczny endpoint, bez tokenu).
+              </li>
+            </ol>
+          </Section>
+        </div>
+      )}
     </ScreenContainer>
   );
 }

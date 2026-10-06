@@ -229,6 +229,32 @@ describe('UsageService (integration, testcontainers) — ekran "Pomiary", roadma
     });
   });
 
+  describe('countSearchesByAccountTokens (roadmap v1.5, scope C)', () => {
+    it('liczy wyszukania tokenów konta ze wszystkich projektów; pomija tokeny projektowe, starsze od since i bez tokena', async () => {
+      const account = await projects.createAccountToken('usage-acc-count');
+      const { project: p1, tokenRow: projectToken } = await projects.createProject('usage-acc-p1');
+      const { project: p2 } = await projects.createProject('usage-acc-p2');
+
+      await usage.recordSearch({ projectId: p1.id, tokenId: account.tokenRow.id, resultCount: 1, degraded: false });
+      await usage.recordSearch({ projectId: p2.id, tokenId: account.tokenRow.id, resultCount: 1, degraded: false });
+      await usage.recordSearch({ projectId: p2.id, tokenId: account.tokenRow.id, resultCount: 0, degraded: false });
+      await usage.recordSearch({ projectId: p1.id, tokenId: projectToken.id, resultCount: 1, degraded: false });
+      await usage.recordSearch({ projectId: p1.id, resultCount: 1, degraded: false }); // bez tokena
+      await db.insert(searchEvents).values({
+        id: generateId(ID_PREFIX.searchEvent),
+        projectId: p1.id,
+        tokenId: account.tokenRow.id,
+        resultCount: 1,
+        degraded: false,
+        createdAt: daysAgo(60), // poza oknem 30 dni
+      });
+
+      const counts = await usage.countSearchesByAccountTokens(daysAgo(30));
+      expect(counts.get(account.tokenRow.id)).toBe(3);
+      expect(counts.has(projectToken.id)).toBe(false);
+    });
+  });
+
   describe('pruneOlderThan — retencja search_events', () => {
     it('usuwa TYLKO wiersze starsze niż cutoff, zwraca liczbę usuniętych', async () => {
       const created = await projects.createProject('usage-prune-test');

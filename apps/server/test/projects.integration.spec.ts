@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import { resolve } from 'node:path';
+import { NotFoundException } from '@nestjs/common';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -694,6 +695,66 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
       await expect(slugs.assertSlugAvailable(project.slug)).rejects.toMatchObject({ code: 'validation_error' });
       await expect(slugs.assertSlugAvailable(project.slug, { excludeProjectId: project.id })).resolves.toBeUndefined();
       await expect(slugs.assertSlugAvailable('assert-slug-free')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('updateSlug (roadmap v1.5, scope C)', () => {
+    it('normalizuje wejście (trim + lowercase) i zapisuje nowy slug', async () => {
+      const { project } = await service.createProject('Update Slug Normalize');
+      const updated = await service.updateSlug(project.id, ' My-Proj-Norm ');
+      expect(updated.slug).toBe('my-proj-norm');
+      expect((await service.findById(project.id))?.slug).toBe('my-proj-norm');
+    });
+
+    it('nieprawidłowy format -> validation_error, slug bez zmian', async () => {
+      const { project } = await service.createProject('Update Slug Invalid');
+      for (const bad of ['a', 'bad_slug', '-lead', 'trail-', 'dou--ble', 'x'.repeat(49), '']) {
+        await expect(service.updateSlug(project.id, bad)).rejects.toMatchObject({ code: 'validation_error' });
+      }
+      expect((await service.findById(project.id))?.slug).toBe(project.slug);
+    });
+
+    it('slug innego projektu -> validation_error', async () => {
+      const { project: other } = await service.createProject('Update Slug Other Owner');
+      const { project } = await service.createProject('Update Slug Taker');
+      await expect(service.updateSlug(project.id, other.slug)).rejects.toMatchObject({ code: 'validation_error' });
+      expect((await service.findById(project.id))?.slug).toBe(project.slug);
+    });
+
+    it('slug oczekującej propozycji create_project -> validation_error', async () => {
+      await db.insert(proposals).values({
+        id: generateId(ID_PREFIX.proposal),
+        type: 'create_project',
+        origin: 'agent',
+        status: 'pending',
+        payload: { name: 'Pending Holder', slug: 'upd-slug-pending' },
+        scope: 'global',
+        projectId: null,
+      });
+      const { project } = await service.createProject('Update Slug Pending Taker');
+      await expect(service.updateSlug(project.id, 'upd-slug-pending')).rejects.toMatchObject({
+        code: 'validation_error',
+      });
+    });
+
+    it('ten sam slug (też po normalizacji) -> no-op, zwraca bieżący wiersz', async () => {
+      const { project } = await service.createProject('Update Slug Same');
+      const result = await service.updateSlug(project.id, `  ${project.slug.toUpperCase()} `);
+      expect(result).toEqual(project);
+    });
+
+    it('własny slug przechodzi przez excludeProjectId po zmianie i powrocie', async () => {
+      const { project } = await service.createProject('Update Slug Roundtrip');
+      const first = project.slug;
+      await service.updateSlug(project.id, 'upd-slug-roundtrip-b');
+      const back = await service.updateSlug(project.id, first);
+      expect(back.slug).toBe(first);
+    });
+
+    it('nieznane id -> NotFoundException', async () => {
+      await expect(service.updateSlug('proj_doesnotexist0', 'upd-slug-nobody')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
   });
 

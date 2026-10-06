@@ -57,8 +57,9 @@ generowanie sekretów; **(2)** opcjonalnie — `docker compose up -d`, migracje,
 nigdy nie nadpisuje cicho. Flagi (`-y`, `--start`/`--no-start`, `--dry-run`) — `./install.sh --help`.
 
 Po instalacji dashboard jest pod `http://localhost:3001` (w trybie `edge-proxy`: `https://<ACME_DOMAIN>`).
-Hasło to `DASHBOARD_PASSWORD` z wygenerowanego `.env` — instalator go nie wypisuje. Dalej:
-[Podłącz swojego agenta](#podłącz-swojego-agenta).
+Hasło to `DASHBOARD_PASSWORD` z wygenerowanego `.env` — instalator go nie wypisuje. Instalator wydaje
+**token projektowy** pierwszego projektu; token konta (jeden na wiele repo) wydasz w dashboardzie albo
+CLI `create-account-token`. Dalej: [Podłącz swojego agenta](#podłącz-swojego-agenta).
 
 ## Szybki start — Docker, manualnie (fallback / zaawansowany)
 
@@ -117,19 +118,40 @@ Sidecar embeddingów nie jest wystawiony na host, więc wyszukiwanie działa tyl
 
 ## Podłącz swojego agenta
 
-Po instalacji podpinasz dowolne repo (Claude Code, Codex, Cursor…) pod swoją instancję:
+Po instalacji podpinasz dowolne repo (Claude Code, Codex, Cursor…) pod swoją instancję. Są dwie ścieżki.
 
-1. **Projekt i token** — dashboard → *Projekty* → *Nowy projekt*. Token `ck_` jest pokazywany
-   **raz** — zapisz go od razu. (Alternatywnie CLI `create-project`, jak w szybkim starcie.)
-2. **Snippety** — dashboard → *Onboarding* daje trzy bloki do skopiowania: `.mcp.json`, fragment
-   `AGENTS.md` (kiedy agent ma sięgać po pamięć i co zapisywać) i `CLAUDE.md` (`@AGENTS.md` dla
-   Claude Code, który nie czyta `AGENTS.md` sam). Adres w bloku `.mcp.json` pochodzi z
-   `PUBLIC_MCP_URL` w `.env` serwera (lokalnie `http://localhost:3000`) — bez niego zobaczysz
-   placeholder do ręcznej podmiany.
-3. **Token lokalnie** — `.mcp.json` odwołuje się do `${CONTEXT_KEEPER_TOKEN}`; ustaw tę zmienną
-   środowiskową (`setx` na Windows, `export` w profilu powłoki). Token nigdy nie trafia do repo.
-4. Zrestartuj terminal i klienta MCP, a przy pierwszym uruchomieniu zaakceptuj serwer
+### Token konta + nagłówek (domyślnie, wiele repo)
+
+Jeden token na maszynie, a każde repo wskazuje swój projekt **nagłówkiem** w commitowanym `.mcp.json` —
+nowe repo to jeden plik, bez nowego tokena i bez przestawiania zmiennych.
+
+1. **Token konta** — dashboard → *Projekty* → *Tokeny konta* → *Nowy token* (albo CLI:
+   `create-account-token <label>`). Token `ck_` jest pokazywany **raz** — zapisz go od razu.
+2. **Zmienna środowiskowa, raz globalnie** — `CONTEXT_KEEPER_TOKEN` (`setx` na Windows, `export`
+   w profilu powłoki). Token nigdy nie trafia do repo.
+3. **Per repo** — dashboard → *Onboarding* → wybierz projekt → skopiuj `.mcp.json` (z nagłówkiem
+   `X-Context-Keeper-Project`) oraz bloki `AGENTS.md` / `CLAUDE.md` (`@AGENTS.md` dla Claude Code,
+   który nie czyta `AGENTS.md` sam). Adres w `.mcp.json` pochodzi z `PUBLIC_MCP_URL` w `.env` serwera
+   (lokalnie `http://localhost:3000`) — bez niego zobaczysz placeholder do ręcznej podmiany. Albo zleć to
+   agentowi: z tokenem konta ma narzędzia `list_projects` i `create_project` (to drugie tworzy
+   *propozycję* projektu — zatwierdzasz ją w *Kolejce*).
+4. **Opcjonalnie, tylko Claude Code** — wpis na poziomie użytkownika, żeby agent w jeszcze
+   nieskonfigurowanym repo dosięgnął `list_projects` / `create_project`:
+   `claude mcp add --transport http --scope user context-keeper <adres>/mcp --header "Authorization: Bearer <ck_…>"`.
+   Nazwa serwera musi być dokładnie `context-keeper`, a token ląduje w `~/.claude.json` jako zwykły tekst.
+5. Zrestartuj terminal i klienta MCP, a przy pierwszym uruchomieniu zaakceptuj serwer
    `context-keeper`.
+
+> **Precedencja wpisów MCP w Claude Code:** `.mcp.json` repo zastępuje wpis użytkownika o tej samej
+> nazwie **w całości** (pola nie są scalane), a wpis zakresu lokalnego przesłania oba — szczegóły:
+> [dokumentacja Claude Code](https://code.claude.com/docs/en/mcp).
+
+### Token projektowy (CI / współpracownik / pojedyncze repo)
+
+Token związany z jednym projektem — projekt wynika z tokena, więc `.mcp.json` **bez** nagłówka.
+Wydasz go przy tworzeniu projektu (*Projekty* → *Nowy projekt* albo CLI `create-project <nazwa> [--slug <slug>]`)
+lub w *Projekty* → *Tokeny*; blok `.mcp.json` jest w *Onboarding* → „Token projektowy". Zmienna ta sama: `CONTEXT_KEEPER_TOKEN`.
+Istniejące repo z takim `.mcp.json` działają bez zmian.
 
 Od tej chwili agent szuka w pamięci i proponuje zapisy — każda propozycja czeka w dashboardzie
 (*Kolejka*) na Twoją akceptację.
@@ -183,10 +205,14 @@ patrz `package.json`.
 ## Bezpieczeństwo
 
 - Bearer token `ck_` (256-bit); w bazie tylko **SHA-256** (`project_tokens.token_hash`), nigdy plaintext.
+- **Token konta daje pełny odczyt i zapis we wszystkich projektach instancji** (także propozycje do
+  kolejki i zakładanie projektów) — jego wyciek jest groźniejszy niż wyciek tokena projektowego. Dla CI
+  i współpracowników używaj tokenów projektowych.
 - Wiele tokenów per projekt (jeden na agenta, etykieta wymagana) — rotacja **graceful** (nowy token
   obok starego, stary wygasa po okresie karencji, `TOKEN_GRACE_PERIOD_HOURS`) albo **unieważnienie
   natychmiastowe** dla skompromitowanych danych; CLI: `list-tokens` / `create-token` / `rotate-token`
-  / `revoke-token`.
+  / `revoke-token`, a dla tokenów konta `create-account-token` / `list-account-tokens`
+  (`rotate-token` i `revoke-token` działają dla obu rodzajów).
 - `.env` poza repo; sekrety nie trafiają do obrazu.
 
 ## Operacje

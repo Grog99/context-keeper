@@ -4,10 +4,12 @@ import { ServeStaticModule } from '@nestjs/serve-static';
 import { AuditModule } from '../audit/audit.module';
 import { MemoryModule } from '../memory/memory.module';
 import { NightlyModule } from '../nightly/nightly.module';
+import { OnboardingModule } from '../onboarding/onboarding.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { ProposalsModule } from '../proposals/proposals.module';
 import { PurgeModule } from '../purge/purge.module';
 import { UsageModule } from '../usage/usage.module';
+import { AccountTokensController } from './account-tokens.controller';
 import { AuditController } from './audit.controller';
 import { AuthController } from './auth/auth.controller';
 import { CsrfGuard } from './auth/csrf.guard';
@@ -17,6 +19,7 @@ import { ConfigController } from './config.controller';
 import { MemoriesController } from './memories.controller';
 import { MetricsController } from './metrics.controller';
 import { NightlyController } from './nightly.controller';
+import { OnboardingController } from './onboarding.controller';
 import { ProjectsController } from './projects.controller';
 import { ProposalsController } from './proposals.controller';
 import { UsageMetricsController } from './usage-metrics.controller';
@@ -32,6 +35,9 @@ import { UsageMetricsController } from './usage-metrics.controller';
  * `PurgeService` stają się tylko wstrzykiwalne w tym procesie) — obie usługi startują wyłącznie na
  * explicit wywołanie z `NightlyController`/`MemoriesController`.
  *
+ * `OnboardingModule` (roadmap v1.5) zasila `OnboardingController` (`GET /api/onboarding`); tokeny konta
+ * obsługuje `AccountTokensController` na tym samym `ProjectsService` co tokeny projektowe.
+ *
  * `ServeStaticModule` serwuje SPA (`dist/public`, budowane w M5) — osiągalne wyłącznie na
  * `PORT_DASHBOARD` dzięki `surface.middleware.ts` w `main.ts` (nie tutaj — middleware portowe jest
  * globalne z definicji Express, więc żyje na poziomie bootstrapu, nie modułu).
@@ -45,6 +51,7 @@ import { UsageMetricsController } from './usage-metrics.controller';
     UsageModule,
     NightlyModule,
     PurgeModule,
+    OnboardingModule,
     ServeStaticModule.forRoot({
       // `__dirname` w skompilowanym dist to `dist/dashboard/` (mirror src/dashboard/) — `dist/public`
       // wymaga wyjścia jeden poziom wyżej, NIE `join(__dirname, 'public')` (patrz M5: kopiowany tam
@@ -59,6 +66,8 @@ import { UsageMetricsController } from './usage-metrics.controller';
     ProposalsController,
     MemoriesController,
     ProjectsController,
+    AccountTokensController,
+    OnboardingController,
     AuditController,
     MetricsController,
     UsageMetricsController,

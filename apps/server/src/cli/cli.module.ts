@@ -9,9 +9,11 @@ import { ProjectsModule } from '../projects/projects.module';
 import { ProposalsModule } from '../proposals/proposals.module';
 import { PurgeModule } from '../purge/purge.module';
 import { ApproveProposalCommand } from './approve-proposal.command';
+import { CreateAccountTokenCommand } from './create-account-token.command';
 import { CreateProjectCommand } from './create-project.command';
 import { CreateTokenCommand } from './create-token.command';
 import { EditProposalCommand } from './edit-proposal.command';
+import { ListAccountTokensCommand } from './list-account-tokens.command';
 import { ListProjectsCommand } from './list-projects.command';
 import { ListProposalsCommand } from './list-proposals.command';
 import { ListTokensCommand } from './list-tokens.command';
@@ -46,8 +48,10 @@ import { SeedMemoryCommand } from './seed-memory.command';
     CreateProjectCommand,
     RotateTokenCommand,
     CreateTokenCommand,
+    CreateAccountTokenCommand,
     RevokeTokenCommand,
     ListTokensCommand,
+    ListAccountTokensCommand,
     ListProjectsCommand,
     SeedMemoryCommand,
     ReembedCommand,

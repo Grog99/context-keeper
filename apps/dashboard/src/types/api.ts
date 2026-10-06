@@ -155,6 +155,9 @@ export interface TokenCounts {
 export interface ProjectListItem {
   id: string;
   name: string;
+  /** Slug do nagłówka `X-Context-Keeper-Project` w `.mcp.json` (roadmap v1.5) — edytowalny w
+   * `ProjectSettingsDialog` z ostrzeżeniem. */
+  slug: string;
   createdAt: string;
   memoryCount: number;
   tokenCounts: TokenCounts;
@@ -169,7 +172,8 @@ export interface ProjectListItem {
  * reveal, osobna ścieżka). */
 export interface ProjectTokenApi {
   id: string;
-  projectId: string;
+  /** `null` dla tokenu KONTA (roadmap v1.5) — działa we wszystkich projektach instancji. */
+  projectId: string | null;
   label: string;
   status: ProjectTokenState;
   effectiveStatus: EffectiveTokenStatus;
@@ -182,6 +186,10 @@ export interface ProjectTokenApi {
    * odłożone, to jest jedyna widoczna atrybucja w tym passie). */
   searches30d: number;
 }
+
+/** Lustro `AccountTokenDto` (`apps/server/src/dashboard/account-tokens.controller.ts`) — wiersz w sekcji
+ * "Tokeny konta"; ten sam kształt co token projektowy, `projectId` zawsze `null`. */
+export type AccountTokenApi = ProjectTokenApi;
 
 export interface CreatedProject {
   project: Omit<ProjectListItem, 'memoryCount' | 'tokenCounts'>;
@@ -313,4 +321,19 @@ export interface PurgeResult {
   revisionsRedacted: number;
   /** Roadmap v1.2 — krawędzie usunięte razem z tombstone'em. */
   relationsDeleted: number;
+}
+
+/** Lustro `DashboardOnboarding` (`apps/server/src/onboarding/onboarding.service.ts`, `GET /api/onboarding`)
+ * — bloki renderuje serwer (jedno źródło z narzędziami MCP). NIGDY nie niesie tokenów. */
+export interface OnboardingApi {
+  /** Nazwa serwera w `.mcp.json` (`context-keeper`). */
+  serverName: string;
+  /** URL powierzchni `/mcp` (z sufiksem) albo placeholder gdy `mcpUrlConfigured === false`. */
+  mcpUrl: string;
+  mcpUrlConfigured: boolean;
+  agentsMd: string;
+  claudeMd: string;
+  /** `.mcp.json` BEZ nagłówka projektu — wariant dla tokenu projektowego (CI / współpracownik). */
+  projectTokenMcpJson: string;
+  projects: Array<{ slug: string; name: string; mcpJson: string }>;
 }

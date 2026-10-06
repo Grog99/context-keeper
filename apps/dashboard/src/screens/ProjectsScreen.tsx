@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Folder, KeyRound, Plus, Settings } from 'lucide-react';
+import { Folder, KeyRound, Plus, Settings, ShieldAlert } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { Badge } from '../components/ui/badge';
@@ -10,6 +10,7 @@ import { Skeleton } from '../components/ui/skeleton';
 import { EmptyState } from '../components/EmptyState';
 import { MonoId } from '../components/MonoId';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { TokenManager } from '../components/TokenManager';
 import { TokenReveal } from '../components/TokenReveal';
 import { api } from '../lib/api';
 import { describeApiError } from '../lib/errors';
@@ -37,11 +38,14 @@ function tokenCountsBadge(counts: TokenCounts) {
 
 /** §9.3 design-systemu — poza ContextSwitcherem (widzi WSZYSTKIE projekty, §9.3: "Ten ekran ignoruje
  * ContextSwitcher"). CRUD projektów + zarządzanie tokenami (roadmap v1.3 — wiele tokenów per
- * projekt, graceful rotation przez `ProjectTokensDialog`); `TokenReveal` po utworzeniu projektu. */
+ * projekt, graceful rotation przez `ProjectTokensDialog`); `TokenReveal` po utworzeniu projektu.
+ * Roadmap v1.5: kolumna slug (edycja w `ProjectSettingsDialog`), opcjonalny slug przy tworzeniu i sekcja
+ * "Tokeny konta" (`TokenManager` — jeden token do wielu repo, projekt wskazuje nagłówek w `.mcp.json`). */
 export function ProjectsScreen() {
   const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
+  const [newSlug, setNewSlug] = useState('');
   const [newTokenLabel, setNewTokenLabel] = useState(DEFAULT_TOKEN_LABEL);
   const [reveal, setReveal] = useState<{ token: string; label: string; reason: 'created' } | null>(null);
   // Id, nie snapshot obiektu — po mutacji invaliduje `queryKeys.projects()`, dialog musi pokazać
@@ -55,11 +59,16 @@ export function ProjectsScreen() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (vars: { name: string; tokenLabel: string }) =>
-      api.post<CreatedProject>('/projects', { name: vars.name, tokenLabel: vars.tokenLabel }),
+    mutationFn: (vars: { name: string; tokenLabel: string; slug?: string }) =>
+      api.post<CreatedProject>('/projects', {
+        name: vars.name,
+        tokenLabel: vars.tokenLabel,
+        ...(vars.slug ? { slug: vars.slug } : {}),
+      }),
     onSuccess: (result) => {
       setCreateOpen(false);
       setNewName('');
+      setNewSlug('');
       setNewTokenLabel(DEFAULT_TOKEN_LABEL);
       setReveal({ token: result.token, label: result.tokenRow.label, reason: 'created' });
       queryClient.invalidateQueries({ queryKey: queryKeys.projects() });
@@ -75,9 +84,11 @@ export function ProjectsScreen() {
     <ScreenContainer width="wide">
       <h1 className="mb-1 text-xl font-semibold tracking-tight">Projekty i tokeny</h1>
       <p className="mb-5 max-w-2xl text-[13.5px] text-muted-foreground">
-        CRUD projektów oraz zarządzanie bearer tokenami <span className="font-mono">ck_…</span> — wiele tokenów per
-        projekt (jeden na agenta), graceful rotation (nowy token obok starego, stary wygasa po okresie karencji) i
-        natychmiastowe unieważnienie. Ten ekran żyje poza przełącznikiem kontekstu — widzi wszystkie projekty.
+        CRUD projektów (slug do nagłówka <span className="font-mono">X-Context-Keeper-Project</span>) oraz
+        zarządzanie bearer tokenami <span className="font-mono">ck_…</span> — wiele tokenów per projekt (jeden na
+        agenta), tokeny konta (jeden token do wielu repo), graceful rotation (nowy token obok starego, stary wygasa po
+        okresie karencji) i natychmiastowe unieważnienie. Ten ekran żyje poza przełącznikiem kontekstu — widzi
+        wszystkie projekty.
       </p>
 
       {isLoading ? (
@@ -99,6 +110,7 @@ export function ProjectsScreen() {
             <thead>
               <tr className="border-b border-border">
                 <Th>Projekt</Th>
+                <Th>slug</Th>
                 <Th>project_id</Th>
                 <Th>Pamięci</Th>
                 <Th>Tokeny</Th>
@@ -115,6 +127,9 @@ export function ProjectsScreen() {
                       <Folder className="size-3.5 text-faint" />
                       {project.name}
                     </span>
+                  </td>
+                  <td className="px-3.5 py-2.5">
+                    <MonoId value={project.slug} label="slug" />
                   </td>
                   <td className="px-3.5 py-2.5">
                     <MonoId value={project.id} />
@@ -139,7 +154,7 @@ export function ProjectsScreen() {
                 </tr>
               ))}
               <tr>
-                <td colSpan={5} className="px-3.5 py-3 text-center">
+                <td colSpan={6} className="px-3.5 py-3 text-center">
                   <Button variant="secondary" size="sm" onClick={() => setCreateOpen(true)}>
                     <Plus className="size-4" /> Nowy projekt
                   </Button>
@@ -162,6 +177,19 @@ export function ProjectsScreen() {
                 <Input value={newName} onChange={(e) => setNewName(e.target.value)} autoFocus placeholder="np. acme" />
               </label>
               <label className="mb-4 flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
+                Slug (opcjonalnie)
+                <Input
+                  value={newSlug}
+                  onChange={(e) => setNewSlug(e.target.value)}
+                  placeholder="z nazwy"
+                  className="font-mono"
+                />
+                <span className="font-normal text-faint">
+                  Trafia do nagłówka X-Context-Keeper-Project w .mcp.json (a–z, 0–9, myślniki; 2–48 znaków). Bez
+                  wartości slug powstaje z nazwy.
+                </span>
+              </label>
+              <label className="mb-4 flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
                 Etykieta pierwszego tokena
                 <Input
                   value={newTokenLabel}
@@ -177,7 +205,13 @@ export function ProjectsScreen() {
                 <Button
                   variant="primary"
                   disabled={newName.trim().length === 0 || newTokenLabel.trim().length === 0 || createMutation.isPending}
-                  onClick={() => createMutation.mutate({ name: newName.trim(), tokenLabel: newTokenLabel.trim() })}
+                  onClick={() =>
+                    createMutation.mutate({
+                      name: newName.trim(),
+                      tokenLabel: newTokenLabel.trim(),
+                      slug: newSlug.trim() || undefined,
+                    })
+                  }
                 >
                   {createMutation.isPending ? 'Tworzenie…' : 'Utwórz'}
                 </Button>
@@ -196,6 +230,23 @@ export function ProjectsScreen() {
           reason={reveal.reason}
         />
       )}
+
+      <section className="mt-10" aria-labelledby="account-tokens-heading">
+        <h2 id="account-tokens-heading" className="mb-1 text-base font-semibold tracking-tight">
+          Tokeny konta
+        </h2>
+        <p className="mb-3 max-w-2xl text-[13.5px] text-muted-foreground">
+          Jeden token do wielu repo — projekt wybiera nagłówek{' '}
+          <span className="font-mono">X-Context-Keeper-Project</span> w <span className="font-mono">.mcp.json</span>,
+          a token trzymasz raz globalnie w zmiennej <span className="font-mono">CONTEXT_KEEPER_TOKEN</span>.
+        </p>
+        <div className="mb-4 flex max-w-2xl items-start gap-2 rounded-md border border-warning bg-warning-subtle px-2.5 py-2 text-xs text-warning-foreground">
+          <ShieldAlert className="mt-0.5 size-[15px] shrink-0 text-warning" />
+          Token konta daje odczyt i zapis we wszystkich projektach instancji (także zakładanie projektów przez
+          kolejkę). Do CI i dla współpracowników używaj tokenów projektowych (przycisk „Tokeny” przy projekcie).
+        </div>
+        <TokenManager scope={{ kind: 'account' }} />
+      </section>
 
       <ProjectSettingsDialog project={settingsTarget} onOpenChange={(open) => !open && setSettingsTargetId(null)} />
       <ProjectTokensDialog project={tokensTarget} onOpenChange={(open) => !open && setTokensTargetId(null)} />

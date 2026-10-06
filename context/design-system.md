@@ -451,9 +451,9 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 
 ### 9.3 Projekty / tokeny (FR-D3) — poza context switcherem (lista wszystkich)
 
-- **Lista projektów:** nazwa, `project_id` (mono), liczba pamięci, data utworzenia, **liczniki tokenów**
+- **Lista projektów:** nazwa, **`slug`** (v1.5, mono, kopiowalny — wartość nagłówka `X-Context-Keeper-Project`), `project_id` (mono), liczba pamięci, data utworzenia, **liczniki tokenów**
   (v1.3 — badge „N aktywne" + „M karencja", zastępuje dawny 1:1 status tokena — patrz `ProjectListItem.tokenCounts`).
-- **Akcje:** `Nowy projekt` (z wymaganą etykietą pierwszego tokena, prefill `default`), `Tokeny` (ikona
+- **Akcje:** `Nowy projekt` (z wymaganą etykietą pierwszego tokena, prefill `default`, oraz opcjonalnym polem „Slug (opcjonalnie)" — placeholder „z nazwy", v1.5), `Tokeny` (ikona
   ⚙-sąsiad) → otwiera `ProjectTokensDialog` (v1.3), ikona ⚙ → `ProjectSettingsDialog`.
 - **`ProjectTokensDialog` (v1.3)** — dialog per projekt, sibling `ProjectSettingsDialog`: tabela
   tokenów (etykieta inline-editable z ołówkiem, `TokenStatusBadge`, `tok_…` mono, utworzony/wygasa/
@@ -461,12 +461,20 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
   `Rotuj` (tylko `active` — AlertDialog wyjaśnia okno karencji, potem `TokenReveal`) i `Unieważnij`
   (dowolny nie-`revoked` — AlertDialog destrukcyjny, dodatkowe ostrzeżenie gdy to ostatni usable token
   projektu, nie blokujące). Mutacje invalidują zarówno listę tokenów, jak i listę projektów (liczniki).
+- **Sekcja „Tokeny konta" (v1.5)** — pod tabelą projektów (renderowana także przy braku projektów): nagłówek `h2`, krótka
+  notka (jeden token do wielu repo, projekt wybiera nagłówek w `.mcp.json`), pole `warning` o zasięgu tokena (wszystkie
+  projekty instancji; do CI — tokeny projektowe) i ten sam `TokenManager` co w `ProjectTokensDialog` (tabela, `Nowy token`,
+  `Rotuj`/`Unieważnij`, rename), w wariancie `scope: account` (ostrzeżenie „ostatni działający token konta", `TokenReveal`
+  z tytułem „Nowy token konta" i czerwonym ostrzeżeniem o zasięgu).
 - **`TokenReveal`:** po utworzeniu projektu/tokena LUB rotacji — Dialog jednorazowy z `ck_…`, etykietą,
   `Kopiuj`; przy rotacji komunikat okna karencji zamiast hard-cutover (patrz §8.2).
 - **`ProjectSettingsDialog` (v1.2):** osobny dialog szczegółów projektu (NIE inline switch w wierszu
   tabeli) — dziś jedno pole: `Switch` „Dołączaj zdarzenia do domyślnego wyszukiwania"
   (`include_events_in_default_search`). Zmiana audytowana jako `project_settings_changed`, widoczna
-  na ekranie „Audyt" bez dodatkowej pracy UI.
+  na ekranie „Audyt" bez dodatkowej pracy UI. **Slug (v1.5):** wiersz „slug" w `dl` — wartość + `Edytuj` → input
+  + `Zapisz`/`Anuluj`; `Zapisz` otwiera `AlertDialog` „Zmienić slug „stary" → „nowy"?" z ostrzeżeniem, że repo ze starym
+  slugiem w `.mcp.json` przestaną się rozwiązywać (`project_not_found`), stary slug nie zostaje aliasem, a zmiana
+  trafia do audytu (`project_settings_changed`, `field: slug`).
 - Ten ekran **ignoruje** ContextSwitcher (zarządza kontekstami, nie żyje w jednym).
 - **Wejście do ekranu** stoi w dolnej sekcji railu (§9.0), przy toggle motywu i „Wyloguj" — wizualnie
   odcięte `border-t` od nawigacji kontekstowej (7 ekranów), bo dotyczy ustawień całego projektu, nie
@@ -504,6 +512,19 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
   otwiera pełny szczegół w „Pamięć" (`/pamiec?id=`).
 - **Tworzenie:** wyłącznie przez `HumanCreateDialog` (`kind=Zdarzenie`) — patrz §9.5.
 - **Puste/loading:** `EmptyState`/`Skeleton` jak reszta list (§10).
+
+### 9.8 Onboarding (v1.2, przebudowa v1.5) — bloki do wklejenia w zewnętrznym repo
+
+- **Źródło tekstów: serwer** (`GET /api/onboarding`) — `.mcp.json` z nagłówkiem projektu, `AGENTS.md`, `CLAUDE.md` i wariant
+  tokenu projektowego są renderowane po stronie serwera, identycznie jak w narzędziach MCP `list_projects`/`create_project`;
+  SPA nie trzyma kopii szablonów. Ekran **nigdy nie pokazuje wartości tokenu**.
+- **Układ (`CopyBlock` w sekcjach z linią-obramowaniem):** (1) *Setup globalny (raz na maszynę)* — status tokenów konta
+  (brak → CTA do Projekty → Tokeny konta + CLI `create-account-token`; są → etykiety aktywnych + „token widoczny raz, zgubiony
+  → zrotuj"), pole o zasięgu tokena, blok zmiennej `CONTEXT_KEEPER_TOKEN` (placeholder), adres MCP, opcjonalnie wpis
+  user-scope w Claude Code (nazwa dokładnie `context-keeper`, token jawnym tekstem w `~/.claude.json`, `.mcp.json` repo
+  zastępuje go w całości); (2) *Repo — wybrany projekt* — `Select` (`nazwa (slug)`, domyślnie projekt z przełącznika
+  kontekstu) + `.mcp.json` z nagłówkiem, `EmptyState` gdy brak projektów; (3) `AGENTS.md`; (4) `CLAUDE.md`;
+  (5) *Token projektowy (CI / współpracownik)* — `.mcp.json` bez nagłówka; (6) kroki końcowe + `curl /health`.
 
 ---
 

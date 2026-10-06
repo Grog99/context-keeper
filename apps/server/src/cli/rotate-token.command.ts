@@ -5,12 +5,15 @@ import { printTokenReveal } from './print';
 /**
  * Graceful rotation (roadmap v1.3, "Wiele tokenów per projekt + graceful rotation") — argument jest
  * teraz TOKEN id, nie project id (rotacja jest token-scoped, §Approach planu: N tokenów per projekt,
- * project id jest niejednoznaczny). Znajdź `<tokenId>` przez `list-tokens <projectId>` najpierw.
+ * project id jest niejednoznaczny). Znajdź `<tokenId>` przez `list-tokens <projectId>` (token projektowy)
+ * albo `list-account-tokens` (token konta, roadmap v1.5) najpierw.
  */
 @Command({
   name: 'rotate-token',
   arguments: '<tokenId>',
-  description: 'Rotuje token (graceful — stary działa jeszcze przez TOKEN_GRACE_PERIOD_HOURS). Id z: list-tokens <projectId>.',
+  description:
+    'Rotuje token (graceful — stary działa jeszcze przez TOKEN_GRACE_PERIOD_HOURS). ' +
+    'Id z: list-tokens <projectId> albo list-account-tokens.',
 })
 export class RotateTokenCommand extends CommandRunner {
   constructor(private readonly projects: ProjectsService) {
@@ -20,7 +23,7 @@ export class RotateTokenCommand extends CommandRunner {
   async run(inputs: string[]): Promise<void> {
     const tokenId = inputs[0]?.trim();
     if (!tokenId) {
-      throw new Error('Podaj id tokena: rotate-token <tokenId> (patrz: list-tokens <projectId>)');
+      throw new Error('Podaj id tokena: rotate-token <tokenId> (patrz: list-tokens <projectId> albo list-account-tokens)');
     }
     const { tokenRow, previousTokenRow, token } = await this.projects.rotateToken(tokenId);
     // Token konta (`projectId === null`, roadmap v1.5) nie ma projektu — reveal bez nazwy projektu.

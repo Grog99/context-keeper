@@ -222,6 +222,30 @@ describe('MCP e2e v1.5 — token konta + X-Context-Keeper-Project', () => {
     expect(await countRows()).toEqual(before);
   });
 
+  it('zmiana slugu (updateSlug): stary nagłówek -> project_not_found z nowym slugiem na liście, nowy działa (bez cache slugu)', async () => {
+    const projects = app.get(ProjectsService);
+    const { project } = await projects.createProject('mcp-e2e-rename');
+    expect(project.slug).toBe('mcp-e2e-rename');
+    await withClient(accountToken, 'mcp-e2e-rename', async (client) => {
+      const res = await client.callTool({ name: 'search_memory', arguments: { query: 'pgvector' } });
+      expect(res.isError).not.toBe(true);
+    });
+
+    await projects.updateSlug(project.id, 'renamed');
+
+    await withClient(accountToken, 'mcp-e2e-rename', async (client) => {
+      const res = await client.callTool({ name: 'search_memory', arguments: { query: 'pgvector' } });
+      expect(res.isError).toBe(true);
+      const envelope = envelopeOf(res);
+      expect(envelope.code).toBe('project_not_found');
+      expect(envelope.details?.projects?.some((p) => p.slug === 'renamed')).toBe(true);
+    });
+    await withClient(accountToken, 'renamed', async (client) => {
+      const res = await client.callTool({ name: 'search_memory', arguments: { query: 'pgvector' } });
+      expect(res.isError).not.toBe(true);
+    });
+  });
+
   it('token projektowy + własny slug: działa jak bez nagłówka', async () => {
     await withClient(token, 'mcp-e2e', async (client) => {
       const res = await client.callTool({ name: 'search_memory', arguments: { query: 'pgvector' } });

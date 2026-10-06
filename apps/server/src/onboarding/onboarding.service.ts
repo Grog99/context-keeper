@@ -5,12 +5,13 @@ import { resolveMcpPublicUrl } from './mcp-public-url';
 import {
   AGENTS_MD_BLOCK,
   CLAUDE_MD_BLOCK,
+  MCP_SERVER_NAME,
   MCP_URL_PLACEHOLDER,
   renderMcpJson,
   type OnboardingProject,
 } from './onboarding-templates';
 
-/** Gotowe bloki dla jednego projektu — to samo zwraca `create_project` (MCP) i (zakres C) endpoint `/api`. */
+/** Gotowe bloki dla jednego projektu — to samo zwraca narzędzie MCP `create_project`. */
 export interface OnboardingBlocks {
   mcpUrl: string;
   /** `false` ⇒ `mcpUrl` to placeholder (operator nie ustawił `PUBLIC_MCP_URL`/`ACME_DOMAIN`). */
@@ -30,13 +31,31 @@ export interface ListProjectsResult {
   hint: string;
 }
 
+/**
+ * Odpowiedź `GET /api/onboarding` (ekran "Onboarding" w dashboardzie, roadmap v1.5, ticket #19) —
+ * człowiek dostaje DOKŁADNIE te same teksty co agent z MCP: `projects` to `listProjects().projects`
+ * verbatim (wraz z `mcpJson` per projekt). Bez tokenów (nigdzie — to nie jest endpoint tokenów) i bez
+ * agent-facing `hint`. `projectTokenMcpJson` = wariant bez nagłówka (token projektowy / CI).
+ */
+export interface DashboardOnboarding {
+  /** Nazwa serwera w `.mcp.json` (`MCP_SERVER_NAME`) — SPA składa z niej komendę `claude mcp add`. */
+  serverName: string;
+  mcpUrl: string;
+  mcpUrlConfigured: boolean;
+  agentsMd: string;
+  claudeMd: string;
+  /** `.mcp.json` BEZ nagłówka projektu — projekt wynika z tokenu projektowego (CI / współpracownik). */
+  projectTokenMcpJson: string;
+  projects: ListProjectsResult['projects'];
+}
+
 export const URL_NOT_CONFIGURED_HINT =
   'The server does not know its public MCP URL, so mcpJson uses the placeholder ' +
   `"${MCP_URL_PLACEHOLDER}" — replace it with the URL from your client's global MCP configuration.`;
 
 /**
- * Backend narzędzi konta i (zakres C) endpointu onboardingu: rozwiązanie publicznego URL MCP +
- * złożenie bloków z czystych szablonów (`onboarding-templates.ts`).
+ * Backend narzędzi konta i endpointu onboardingu dashboardu (`forDashboard`): rozwiązanie publicznego
+ * URL MCP + złożenie bloków z czystych szablonów (`onboarding-templates.ts`).
  */
 @Injectable()
 export class OnboardingService {
@@ -82,6 +101,21 @@ export class OnboardingService {
       claudeMd: CLAUDE_MD_BLOCK,
       mcpUrlConfigured: configured,
       hint: configured ? base : `${base} ${URL_NOT_CONFIGURED_HINT}`,
+    };
+  }
+
+  /** Dane ekranu "Onboarding" (`GET /api/onboarding`) — jedno źródło z narzędziem `list_projects`. */
+  async forDashboard(): Promise<DashboardOnboarding> {
+    const listed = await this.listProjects();
+    const { url, configured } = this.mcpUrl();
+    return {
+      serverName: MCP_SERVER_NAME,
+      mcpUrl: url,
+      mcpUrlConfigured: configured,
+      agentsMd: listed.agentsMd,
+      claudeMd: listed.claudeMd,
+      projectTokenMcpJson: renderMcpJson(url),
+      projects: listed.projects,
     };
   }
 }
