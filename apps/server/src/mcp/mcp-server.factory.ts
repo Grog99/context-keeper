@@ -15,6 +15,7 @@ import {
 import type { ProjectProposalService } from '../onboarding/project-proposal.service';
 import type { ProjectSlugService } from '../projects/project-slug.service';
 import type { ProjectContext } from '../projects/projects.service';
+import { getReadScope, searchReadScope } from './read-scope-policy';
 import { buildScopeError } from './scope-errors';
 import {
   CREATE_PROJECT_DESCRIPTION,
@@ -57,6 +58,9 @@ async function runTool(fn: () => Promise<CallToolResult>): Promise<CallToolResul
  * (ticket #13): tokenowi konta dochodzą `list_projects`/`create_project` (z nagłówkiem i bez), tokenowi
  * projektowemu nie — `tools/list` zostaje wolne od zapytań do bazy. Prompt `onboard` idzie tą samą regułą
  * (tylko `tokenScope`): tokenowi konta dochodzi capability `prompts`, projektowemu nie.
+ *
+ * Zakres odczytu (`ReadScope`, roadmap v1.5) jest rozstrzygany TU z typu tokena (`read-scope-policy.ts`) —
+ * `MemoryService` nie zna typów tokenów.
  */
 export function createMcpServer(
   deps: {
@@ -138,12 +142,24 @@ export function createMcpServer(
             'Optional kind filter. Default is fact + document; event is excluded from the default ' +
               'unless enabled for your project by an operator. Pass kind="event" to target it explicitly.',
           ),
+        // Zawsze w schemacie (oba typy tokena, G3): token projektowy z `true` dostaje jawny
+        // `validation_error` zamiast cichego strip-u nieznanego klucza przez SDK.
+        all_projects: z
+          .boolean()
+          .optional()
+          .describe(
+            'Optional, default false. Account tokens only. true = search every project on this instance plus ' +
+              'global memories, not just your current project; each result then carries `project` (source ' +
+              'project slug, or null for global). With a project token, true returns validation_error.',
+          ),
       },
     },
-    async ({ query, tags, kind }) =>
+    async ({ query, tags, kind, all_projects }) =>
       runTool(async () => {
+        // `requireProject()` PIERWSZY (G1): token konta bez nagłówka + cross -> `project_required`.
         const ctx = await requireProject();
-        const results = await memory.search({ query, tags, kind }, ctx);
+        const readScope = searchReadScope(auth.tokenScope, all_projects === true);
+        const results = await memory.search({ query, tags, kind }, ctx, readScope);
         return jsonResult(results);
       }),
   );
@@ -159,7 +175,7 @@ export function createMcpServer(
     async ({ id }) =>
       runTool(async () => {
         const ctx = await requireProject();
-        const result = await memory.get(id, ctx);
+        const result = await memory.get(id, ctx, getReadScope(auth.tokenScope));
         return jsonResult(result);
       }),
   );

@@ -249,14 +249,23 @@ export interface UsageBucketPoint {
   searches: number;
   zeroResult: number;
   degraded: number;
+  /** Wyszukiwania z `all_projects` — podzbiór `searches`, wyłączony z zero-result. */
+  crossProject: number;
 }
 
 export interface ProjectSearchSeries {
   projectId: string;
   projectName: string;
   /** Headline "zero-result rate per projekt" — sumy dla całego zakresu. `degraded` WYŁĄCZONE
-   * z `zeroResult`/`zeroResultRate` (degradacja embeddingu ≠ "pamięć nie ma treści"). */
-  totals: { searches: number; zeroResult: number; degraded: number; zeroResultRate: number };
+   * z `zeroResult`/`zeroResultRate` (degradacja embeddingu ≠ "pamięć nie ma treści"); wyszukiwania
+   * cross-project (`crossProject`) wypadają z licznika i mianownika `zeroResultRate`, ale są w `searches`. */
+  totals: {
+    searches: number;
+    zeroResult: number;
+    degraded: number;
+    crossProject: number;
+    zeroResultRate: number;
+  };
   buckets: UsageBucketPoint[];
 }
 
@@ -271,7 +280,13 @@ export interface ProposalOutcomeBucketPoint {
 export interface UsageMetrics {
   range: { from: string; to: string; bucket: UsageBucket };
   searchSeries: ProjectSearchSeries[];
-  searchTotals: { searches: number; zeroResult: number; degraded: number; zeroResultRate: number };
+  searchTotals: {
+    searches: number;
+    zeroResult: number;
+    degraded: number;
+    crossProject: number;
+    zeroResultRate: number;
+  };
   proposalSeries: {
     buckets: ProposalOutcomeBucketPoint[];
     totals: { approved: number; rejected: number; approvedWithEdits: number };

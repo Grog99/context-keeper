@@ -15,14 +15,24 @@ export interface UsageBucketPointDto {
   searches: number;
   zeroResult: number;
   degraded: number;
+  /** Wyszukiwania z `all_projects` (roadmap v1.5) — PODZBIÓR `searches`, wyłączony z zero-result. */
+  crossProject: number;
 }
 
 export interface ProjectSearchSeriesDto {
   projectId: string;
   projectName: string;
   /** Headline "zero-result rate per project" (plan §5(i)) — sumy dla całego zakresu, `degraded`
-   * WYŁĄCZONE z `zeroResult`/`zeroResultRate` (degradacja embeddingu ≠ "pamięć nie ma treści"). */
-  totals: { searches: number; zeroResult: number; degraded: number; zeroResultRate: number };
+   * WYŁĄCZONE z `zeroResult`/`zeroResultRate` (degradacja embeddingu ≠ "pamięć nie ma treści");
+   * wyszukiwania cross-project (`crossProject`, roadmap v1.5) wyłączone z licznika I mianownika
+   * `zeroResultRate`, ale nadal wliczone w `searches`. */
+  totals: {
+    searches: number;
+    zeroResult: number;
+    degraded: number;
+    crossProject: number;
+    zeroResultRate: number;
+  };
   buckets: UsageBucketPointDto[];
 }
 
@@ -37,20 +47,29 @@ export interface ProposalBucketPointDto {
 export interface UsageMetricsDto {
   range: { from: string; to: string; bucket: UsageBucket };
   searchSeries: ProjectSearchSeriesDto[];
-  searchTotals: { searches: number; zeroResult: number; degraded: number; zeroResultRate: number };
+  searchTotals: {
+    searches: number;
+    zeroResult: number;
+    degraded: number;
+    crossProject: number;
+    zeroResultRate: number;
+  };
   proposalSeries: {
     buckets: ProposalBucketPointDto[];
     totals: { approved: number; rejected: number; approvedWithEdits: number };
   };
 }
 
-function zeroResultRate(searches: number, zeroResult: number): number {
-  return searches === 0 ? 0 : zeroResult / searches;
+/** Cross-project (`crossProject`) wypada z mianownika tak samo jak z licznika (`zeroResult` ich nie
+ * zawiera) — liczymy tylko zwykłe wyszukiwania; 0, gdy takich nie było. */
+function zeroResultRate(searches: number, zeroResult: number, crossProject: number): number {
+  const denominator = searches - crossProject;
+  return denominator === 0 ? 0 : zeroResult / denominator;
 }
 
 /**
  * Ekran "Pomiary" (roadmap v1.1, plan §5): `search_memory` per projekt w czasie, 0-result rate
- * (nagłówkowy sygnał §5(i), `degraded` wyłączone z tego sygnału) + accept/reject/edit proposali
+ * (nagłówkowy sygnał §5(i), `degraded` i wyszukiwania cross-project wyłączone z tego sygnału) + accept/reject/edit proposali
  * (`edit` = approved-with-edits, podzbiór accepted — §5(f)). Guardy DOKŁADNIE jak `MetricsController`
  * (kontroler-scoped, `SessionGuard`+`CsrfGuard`, NIGDY globalne — `/mcp` nie może dostać nowego
  * globalnego guarda).
@@ -98,7 +117,7 @@ export class UsageMetricsController {
         entry = {
           projectId: row.projectId,
           projectName: row.projectName,
-          totals: { searches: 0, zeroResult: 0, degraded: 0, zeroResultRate: 0 },
+          totals: { searches: 0, zeroResult: 0, degraded: 0, crossProject: 0, zeroResultRate: 0 },
           buckets: [],
         };
         byProject.set(row.projectId, entry);
@@ -108,13 +127,19 @@ export class UsageMetricsController {
         searches: row.searches,
         zeroResult: row.zeroResult,
         degraded: row.degraded,
+        crossProject: row.crossProject,
       });
       entry.totals.searches += row.searches;
       entry.totals.zeroResult += row.zeroResult;
       entry.totals.degraded += row.degraded;
+      entry.totals.crossProject += row.crossProject;
     }
     for (const entry of byProject.values()) {
-      entry.totals.zeroResultRate = zeroResultRate(entry.totals.searches, entry.totals.zeroResult);
+      entry.totals.zeroResultRate = zeroResultRate(
+        entry.totals.searches,
+        entry.totals.zeroResult,
+        entry.totals.crossProject,
+      );
     }
     return Array.from(byProject.values()).sort((a, b) => a.projectName.localeCompare(b.projectName));
   }
@@ -125,10 +150,14 @@ export class UsageMetricsController {
         searches: acc.searches + s.totals.searches,
         zeroResult: acc.zeroResult + s.totals.zeroResult,
         degraded: acc.degraded + s.totals.degraded,
+        crossProject: acc.crossProject + s.totals.crossProject,
       }),
-      { searches: 0, zeroResult: 0, degraded: 0 },
+      { searches: 0, zeroResult: 0, degraded: 0, crossProject: 0 },
     );
-    return { ...totals, zeroResultRate: zeroResultRate(totals.searches, totals.zeroResult) };
+    return {
+      ...totals,
+      zeroResultRate: zeroResultRate(totals.searches, totals.zeroResult, totals.crossProject),
+    };
   }
 
   private shapeProposalSeries(rows: ProposalBucketRow[]): UsageMetricsDto['proposalSeries'] {

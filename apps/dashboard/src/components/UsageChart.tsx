@@ -79,9 +79,11 @@ export interface ZeroResultTrendChartProps {
   bucket: UsageBucket;
 }
 
-/** Panel (b), trend — zero-result rate PER BUCKET per projekt (`degraded` już wyłączone przez
- * serwer z liczników `zeroResult`/`searches` — patrz `usage.service.ts` §5(i)). Bucket bez wyszukiwań
- * = `null` (gap w linii), nie 0% — "brak danych" to co innego niż "same trafienia". */
+/** Panel (b), trend — zero-result rate PER BUCKET per projekt. Serwer wyłącza `degraded` z licznika
+ * `zeroResult` (patrz `usage.service.ts` §5(i)), ale `searches` je zawiera; wyszukiwania cross-project
+ * (`crossProject`) wypadają tu z licznika (już w `zeroResult`) I z mianownika (`searches - crossProject`).
+ * Bucket bez zwykłych wyszukiwań = `null` (gap w linii), nie 0% — "brak danych" to co innego niż
+ * "same trafienia". */
 export function ZeroResultTrendChart({ series, bucket }: ZeroResultTrendChartProps) {
   const colors = assignProjectColors(series.map((s) => s.projectId));
   const byTs = new Map<string, Record<string, number | string | null>>();
@@ -92,7 +94,8 @@ export function ZeroResultTrendChart({ series, bucket }: ZeroResultTrendChartPro
         row = { ts: b.ts };
         byTs.set(b.ts, row);
       }
-      row[project.projectId] = b.searches === 0 ? null : Math.round((b.zeroResult / b.searches) * 1000) / 10;
+      const ordinary = b.searches - b.crossProject;
+      row[project.projectId] = ordinary === 0 ? null : Math.round((b.zeroResult / ordinary) * 1000) / 10;
     }
   }
   const data = Array.from(byTs.values()).sort((a, b) => String(a.ts).localeCompare(String(b.ts)));

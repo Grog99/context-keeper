@@ -34,13 +34,14 @@ function utcDayStart(daysBack: number): Date {
 
 async function insertSearchEvent(
   db: Database,
-  input: { projectId: string; resultCount: number; degraded?: boolean; createdAt: Date },
+  input: { projectId: string; resultCount: number; degraded?: boolean; crossProject?: boolean; createdAt: Date },
 ): Promise<void> {
   await db.insert(searchEvents).values({
     id: generateId(ID_PREFIX.searchEvent),
     projectId: input.projectId,
     resultCount: input.resultCount,
     degraded: input.degraded ?? false,
+    crossProject: input.crossProject ?? false,
     createdAt: input.createdAt,
   });
 }
@@ -101,6 +102,16 @@ describe('UsageService (integration, testcontainers) — ekran "Pomiary", roadma
       const inserted = rows.find((r) => r.resultCount === 3 && !r.degraded);
       expect(inserted).toBeDefined();
       expect(inserted!.id).toMatch(/^sev_/);
+      expect(inserted!.crossProject).toBe(false); // brak pola wejścia = zwykłe wyszukiwanie
+    });
+
+    it('crossProject: true zapisuje flagę cross_project na wierszu (roadmap v1.5)', async () => {
+      await usage.recordSearch({ projectId: projectA.projectId, resultCount: 7, degraded: false, crossProject: true });
+
+      const rows = await db.select().from(searchEvents).where(eq(searchEvents.projectId, projectA.projectId));
+      const inserted = rows.find((r) => r.resultCount === 7);
+      expect(inserted).toBeDefined();
+      expect(inserted!.crossProject).toBe(true);
     });
   });
 
@@ -140,6 +151,7 @@ describe('UsageService (integration, testcontainers) — ekran "Pomiary", roadma
       expect(aRow!.searches).toBe(4);
       expect(aRow!.zeroResult).toBe(1); // NIE 2 — degraded wyłączony
       expect(aRow!.degraded).toBe(1);
+      expect(aRow!.crossProject).toBe(0);
       expect(aRow!.ts.getTime()).toBe(day1.getTime());
 
       const bRow = rows.find((r) => r.projectId === pB);
@@ -169,6 +181,35 @@ describe('UsageService (integration, testcontainers) — ekran "Pomiary", roadma
 
       expect(rows.every((r) => r.projectId === pOther)).toBe(true);
       expect(rows.some((r) => r.projectId === projectA.projectId)).toBe(false);
+    });
+
+    it('wyszukiwanie cross-project: liczone w searches i crossProject, ale NIE w zeroResult (roadmap v1.5, G9a)', async () => {
+      const created = await projects.createProject('usage-series-cross');
+      const pCross = created.project.id;
+      const day = utcDayStart(2);
+
+      // Zwykłe zero-result (liczy się), zwykłe trafienie, cross z 0 wyników (NIE liczy się do zeroResult).
+      await insertSearchEvent(db, { projectId: pCross, resultCount: 0, createdAt: new Date(day.getTime() + HOUR_MS) });
+      await insertSearchEvent(db, { projectId: pCross, resultCount: 4, createdAt: new Date(day.getTime() + 2 * HOUR_MS) });
+      await insertSearchEvent(db, {
+        projectId: pCross,
+        resultCount: 0,
+        crossProject: true,
+        createdAt: new Date(day.getTime() + 3 * HOUR_MS),
+      });
+
+      const rows = await usage.searchSeries({
+        from: new Date(day.getTime() - HOUR_MS),
+        to: new Date(day.getTime() + DAY_MS),
+        bucket: 'day',
+        projectId: pCross,
+      });
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0].searches).toBe(3);
+      expect(rows[0].zeroResult).toBe(1); // NIE 2 — cross wyłączony
+      expect(rows[0].crossProject).toBe(1);
+      expect(rows[0].degraded).toBe(0);
     });
 
     it('bucket "hour" rozdziela wydarzenia z tej samej doby na osobne kubełki', async () => {

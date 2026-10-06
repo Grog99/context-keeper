@@ -35,6 +35,8 @@ export interface RecordSearchInput {
   tokenId?: string | null;
   resultCount: number;
   degraded: boolean;
+  /** Wyszukiwanie z `all_projects` (roadmap v1.5) — opcjonalne, brak = `false` (zwykłe wyszukiwanie). */
+  crossProject?: boolean;
 }
 
 export interface UsageSeriesFilter {
@@ -51,6 +53,7 @@ export interface SearchBucketRow {
   searches: number;
   zeroResult: number;
   degraded: number;
+  crossProject: number;
 }
 
 export interface ProposalBucketRow {
@@ -79,13 +82,15 @@ export class UsageService {
       tokenId: input.tokenId ?? null,
       resultCount: input.resultCount,
       degraded: input.degraded,
+      crossProject: input.crossProject ?? false,
     });
   }
 
   /**
    * Serie `search_events` per projekt (JOIN `projects` dla nazwy), zbucketowane `date_trunc(bucket, …)`.
    * `zeroResult` WYŁĄCZA zapytania `degraded` (plan §5(i) — degradacja embeddingu nie znaczy "pamięć
-   * nie ma treści"), `degraded` liczony osobno. `bucket` MUSI być zwalidowany przez wołającego
+   * nie ma treści") ORAZ `cross_project` (roadmap v1.5 — wyszukiwanie po całej instancji rzadziej daje
+   * 0 wyników i zaburzałoby ten sygnał); `degraded` i `crossProject` liczone osobno. `bucket` MUSI być zwalidowany przez wołającego
    * (whitelist 'day'|'hour') PRZED wywołaniem — tu ufamy typowi `UsageBucket`.
    */
   async searchSeries(filter: UsageSeriesFilter): Promise<SearchBucketRow[]> {
@@ -99,8 +104,9 @@ export class UsageService {
         projectName: projects.name,
         ts,
         searches: sql<number>`count(*)::int`,
-        zeroResult: sql<number>`count(*) FILTER (WHERE ${eq(searchEvents.resultCount, 0)} AND ${eq(searchEvents.degraded, false)})::int`,
+        zeroResult: sql<number>`count(*) FILTER (WHERE ${eq(searchEvents.resultCount, 0)} AND ${eq(searchEvents.degraded, false)} AND ${eq(searchEvents.crossProject, false)})::int`,
         degraded: sql<number>`count(*) FILTER (WHERE ${eq(searchEvents.degraded, true)})::int`,
+        crossProject: sql<number>`count(*) FILTER (WHERE ${eq(searchEvents.crossProject, true)})::int`,
       })
       .from(searchEvents)
       .innerJoin(projects, eq(projects.id, searchEvents.projectId))

@@ -58,6 +58,9 @@ export interface SearchResultItem {
   header: string;
   tags: string[];
   score: number;
+  /** Tylko w trybie cross-project (`all_projects`, roadmap v1.5): slug projektu-źródła wyniku, `null`
+   * dla pamięci `global`. W trybie domyślnym pola NIE MA — odpowiedź bajt w bajt jak przed v1.5. */
+  project?: string | null;
   /** Tylko `kind=document` (FR-M1): fragment najlepiej dopasowanego chunku wektorowego.
    * Nieobecny przy ramieniu FTS-only (embedding-down) — pole czysto addytywne. */
   excerpt?: string;

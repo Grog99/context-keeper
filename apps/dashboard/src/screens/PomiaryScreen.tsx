@@ -127,6 +127,12 @@ export function PomiaryScreen() {
           <section className="flex flex-wrap rounded-lg border border-border bg-surface px-1">
             <MetricStat label="Wyszukiwania" value={data.searchTotals.searches} />
             <MetricStat
+              label="Między projektami"
+              value={`${data.searchTotals.crossProject} (${formatPct(
+                data.searchTotals.searches === 0 ? 0 : data.searchTotals.crossProject / data.searchTotals.searches,
+              )})`}
+            />
+            <MetricStat
               label="Zero wyników"
               value={`${data.searchTotals.zeroResult} (${formatPct(data.searchTotals.zeroResultRate)})`}
               status={data.searchTotals.zeroResultRate >= 0.3 ? 'bad' : data.searchTotals.zeroResultRate >= 0.1 ? 'warn' : 'ok'}
@@ -151,7 +157,8 @@ export function PomiaryScreen() {
             <p className="mb-2.5 text-xs text-muted-foreground">
               Odsetek wyszukiwań bez trafień — główny sygnał "czy pamięć ma czym odpowiedzieć". Wyszukiwania
               zdegradowane (provider embeddingów niedostępny) są WYŁĄCZONE z tego wyliczenia, licznik degradacji
-              pokazany osobno powyżej.
+              pokazany osobno powyżej. Wyszukiwania między projektami (<code>all_projects</code>) też są
+              wyłączone — przeszukują całą instancję, więc rzadko dają zero wyników.
             </p>
             <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
               {data.searchSeries.map((s) => (
@@ -162,6 +169,7 @@ export function PomiaryScreen() {
                   </div>
                   <div className="mt-1 font-mono text-[11px] tabular-nums text-faint">
                     {s.totals.searches} wyszukiwań · {s.totals.zeroResult} bez wyniku · {s.totals.degraded} degradowanych
+                    {s.totals.crossProject > 0 && <> · {s.totals.crossProject} między projektami</>}
                   </div>
                 </div>
               ))}
