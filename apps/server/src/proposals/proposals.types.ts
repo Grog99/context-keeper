@@ -59,7 +59,35 @@ export interface DeletePayload {
   memoryId: string;
 }
 
-export type ProposalPayload = CreatePayload | UpdatePayload | MergePayload | DeletePayload;
+/** Payload `type=create_project` (roadmap v1.5, scope B) — propozycja założenia projektu przez agenta z
+ * tokenem konta. `slug` ZAWSZE znormalizowany (trim + lowercase, `normalizeProjectSlugInput`), `name`
+ * znormalizowany (`normalizeProjectName`). `affectedIds=[]`, `scope='global'`, `project_id=NULL`.
+ *
+ * NIEZMIENNIK (partial unique index `proposals_create_project_slug_pending_key`, migracja 0013, oraz
+ * `ProjectSlugService.isSlugPending`): WYŁĄCZNIE ten payload ma klucz `slug` na najwyższym poziomie.
+ * Predykat indeksu nie może odwołać się do wartości enuma (55P04), więc to klucz `slug` wyróżnia
+ * propozycje projektu — payload żadnego innego typu NIE MOŻE dostać pola `slug`. */
+export interface CreateProjectPayload {
+  name: string;
+  slug: string;
+}
+
+export type ProposalPayload =
+  | CreatePayload
+  | UpdatePayload
+  | MergePayload
+  | DeletePayload
+  | CreateProjectPayload;
+
+/** Typy propozycji będące mutacją PAMIĘCI (mają `header`/`body`/`memoryId`) — `create_project` jest poza
+ * tym zbiorem (tworzy projekt, nie dotyka `memories`). Używane tam, gdzie kod zakłada semantykę pamięci
+ * (np. `edit()`). */
+export const MEMORY_PROPOSAL_TYPES = ['create', 'update', 'merge', 'delete'] as const;
+export type MemoryProposalType = (typeof MEMORY_PROPOSAL_TYPES)[number];
+
+export function isMemoryProposalType(type: ProposalType): type is MemoryProposalType {
+  return (MEMORY_PROPOSAL_TYPES as readonly ProposalType[]).includes(type);
+}
 
 export type EmbeddingDisposition = 'promoted' | 'recomputed' | 'vectorless';
 
@@ -67,6 +95,9 @@ export interface ApproveResult {
   proposalId: string;
   /** Id nowo zmaterializowanej pamięci (create/merge) albo id zaktualizowanej (update). Brak dla delete. */
   materializedId?: string;
+  /** Id nowo utworzonego projektu — wyłącznie dla `type=create_project` (`materializedId` zostaje
+   * czysto memory-owe). */
+  projectId?: string;
   /** Id-y zarchiwizowane w ramach tej akceptacji (merge/delete/supersedes na create). */
   archivedIds: string[];
   embedding: EmbeddingDisposition;

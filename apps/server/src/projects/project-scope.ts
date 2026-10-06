@@ -17,6 +17,11 @@ export const PROJECT_HEADER_NAME = 'X-Context-Keeper-Project';
 /** Nagłówek wskazujący projekt (Node lowercase'uje nazwy nagłówków w `req.headers`). */
 export const PROJECT_HEADER = PROJECT_HEADER_NAME.toLowerCase();
 
+/** Actor audytu dla akcji tokenu konta BEZ projektu (`create_project` → `proposal_created`, ticket #18).
+ * Konwencja `agent:<zakres>`; token identyfikuje `metadata.{tokenId, tokenLabel}`. Akcje W projekcie
+ * mają actor `agent:<projectId>` (ticket #7). */
+export const ACCOUNT_ACTOR = 'agent:account';
+
 export type TokenScope = 'project' | 'account';
 
 /** Scope tokenu z jego `project_id`: `NULL` = token konta, inaczej projektowy (jedyne miejsce tej reguły). */

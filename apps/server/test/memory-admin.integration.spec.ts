@@ -27,7 +27,8 @@ import type { EmbeddingProvider } from '../src/embeddings/embedding-provider';
 import { EmbeddingService } from '../src/embeddings/embedding.service';
 import { MemoryAdminService } from '../src/memory/memory-admin.service';
 import type { ProjectContext } from '../src/projects/projects.service';
-import { ProjectsService } from '../src/projects/projects.service';
+import type { ProjectsService } from '../src/projects/projects.service';
+import { buildProjectsService } from './helpers/services';
 
 /** Jak w `proposals.integration.spec.ts` — wektor stały, testy tutaj sprawdzają MECHANIKĘ
  * (revisions/audit/embeddings/scope), nie trafność rankingu. */
@@ -92,7 +93,7 @@ describe('MemoryAdminService (integration, testcontainers) — przeglądarka pam
     db = drizzle(pool, { schema });
     await migrate(db, { migrationsFolder: resolve(process.cwd(), 'src/db/migrations') });
 
-    projects = new ProjectsService(db, new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' })));
+    projects = buildProjectsService(db, new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' })));
     audit = new AuditService(db);
     const createdA = await projects.createProject('memory-admin-test-a');
     projectA = { projectId: createdA.project.id, projectName: createdA.project.name };

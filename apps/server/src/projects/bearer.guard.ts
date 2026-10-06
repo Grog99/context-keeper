@@ -1,6 +1,13 @@
 import { CanActivate, ExecutionContext, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { extractBearer } from '../common/tokens';
-import { PROJECT_HEADER, readProjectHeader, tokenScopeOf, type RequestWithMcpAuth } from './project-scope';
+import {
+  PROJECT_HEADER,
+  readProjectHeader,
+  resolveProjectScope,
+  tokenScopeOf,
+  type RequestWithMcpAuth,
+} from './project-scope';
+import { ProjectSlugService } from './project-slug.service';
 import { ProjectsService } from './projects.service';
 
 type RequestLike = Pick<RequestWithMcpAuth, 'headers' | 'mcpAuth'>;
@@ -23,7 +30,10 @@ type RequestLike = Pick<RequestWithMcpAuth, 'headers' | 'mcpAuth'>;
 export class BearerGuard implements CanActivate {
   private readonly logger = new Logger(BearerGuard.name);
 
-  constructor(private readonly projects: ProjectsService) {}
+  constructor(
+    private readonly projects: ProjectsService,
+    private readonly slugs: ProjectSlugService,
+  ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const req = ctx.switchToHttp().getRequest<RequestLike>();
@@ -44,7 +54,14 @@ export class BearerGuard implements CanActivate {
       tokenLabel: lookup.token.label,
       // Scope rozstrzyga `projectId` tokena, nie "brak wiersza projektu" (FK cascade).
       tokenScope: tokenScopeOf(lookup.token.projectId),
-      project: await this.projects.resolveProjectScope(lookup, readProjectHeader(req.headers[PROJECT_HEADER])),
+      project: await resolveProjectScope(
+        {
+          token: lookup.token,
+          tokenProject: lookup.project,
+          slug: readProjectHeader(req.headers[PROJECT_HEADER]),
+        },
+        this.slugs,
+      ),
     };
     // Best-effort, fire-and-forget (§D3 planu) — NIGDY awaited na ścieżce auth. Oba typy tokenów.
     this.projects.touchTokenUsage(lookup.token.id);

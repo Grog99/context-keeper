@@ -18,7 +18,7 @@ export class CreateProjectCommand extends CommandRunner {
       throw new Error('Podaj nazwę projektu: create-project <name> [label]');
     }
     const label = inputs[1]?.trim();
-    const { project, token, tokenRow } = await this.projects.createProject(name, label);
+    const { project, token, tokenRow } = await this.projects.createProject(name, { label });
     printTokenReveal(project, token, 'utworzony', tokenRow.label);
   }
 }

@@ -6,7 +6,9 @@ export type MemoryScope = 'global' | 'project';
 export type MemoryStatus = 'approved' | 'archived' | 'purged';
 export type MemorySource = 'agent' | 'human' | 'nightly';
 
-export type ProposalType = 'create' | 'update' | 'merge' | 'delete';
+/** `create_project` (roadmap v1.5, onboarding przez MCP) — propozycja założenia PROJEKTU (payload `{name, slug}`),
+ * nie mutacja pamięci; lustro `proposalType` w `apps/server/src/db/schema/enums.ts`. */
+export type ProposalType = 'create' | 'update' | 'merge' | 'delete' | 'create_project';
 export type ProposalOrigin = 'agent' | 'human' | 'nightly';
 export type ProposalStatus = 'pending' | 'approved' | 'rejected';
 

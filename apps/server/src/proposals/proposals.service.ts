@@ -3,10 +3,19 @@ import { and, asc, eq, inArray, or, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { ToolError } from '../common/errors';
 import { generateId, ID_PREFIX } from '../common/ids';
+import { isUniqueViolation } from '../common/pg-errors';
 import { scanForSecrets } from '../common/secret-scanner';
 import { AppConfigService } from '../config/config.service';
 import { DB, type Database, type Tx } from '../db/db.tokens';
-import { embeddings, memories, memoryRelations, proposals, revisions, stagingEmbeddings } from '../db/schema';
+import {
+  embeddings,
+  memories,
+  memoryRelations,
+  projects,
+  proposals,
+  revisions,
+  stagingEmbeddings,
+} from '../db/schema';
 import type {
   MemoryKind,
   MemoryScope,
@@ -17,7 +26,9 @@ import type {
 import type { MemoryRelationRow, MemoryRow, ProposalRow } from '../db/schema';
 import { EmbeddingService } from '../embeddings/embedding.service';
 import { normalizeHeader, normalizeTags, validateBody } from '../memory/validation';
+import { insertProject } from '../projects/project-rows';
 import { ProposalError } from './proposals.errors';
+import { isMemoryProposalType } from './proposals.types';
 import type {
   ApproveOptions,
   ApproveResult,
@@ -26,6 +37,7 @@ import type {
   BulkDecisionResult,
   BulkRejectOptions,
   CreatePayload,
+  CreateProjectPayload,
   DeletePayload,
   EditInput,
   EditOptions,
@@ -306,6 +318,8 @@ export class ProposalsService {
 
       const archivedIds: string[] = [];
       let materializedId: string | undefined;
+      let createdProjectId: string | undefined;
+      let createdProjectMeta: { slug: string; name: string } | undefined;
       let embeddingDisposition: EmbeddingDisposition = 'vectorless';
 
       switch (propRow.type) {
@@ -450,6 +464,38 @@ export class ProposalsService {
           archivedIds.push(target.id);
           break;
         }
+        case 'create_project': {
+          // Projekt BEZ tokena (ticket #15): agent z tokenem konta tokena projektu nie potrzebuje;
+          // token projektowy dorabia człowiek w dashboardzie. Kolizja slugu (projekt założony
+          // równolegle, np. ręcznie) → `validation_error`, transakcja się cofa, propozycja zostaje
+          // `pending` (recenzent ją odrzuca). Konwersja na `ProposalError` jest potrzebna, żeby bulk
+          // approve nie raportował `unknown` (`toBulkItemError`).
+          const { name, slug } = payload as CreateProjectPayload;
+          const collision = new ProposalError(
+            'validation_error',
+            `Slug "${slug}" jest już zajęty przez istniejący projekt — odrzuć propozycję.`,
+          );
+          const [existing] = await tx
+            .select({ id: projects.id })
+            .from(projects)
+            .where(eq(projects.slug, slug))
+            .limit(1);
+          if (existing) throw collision;
+          try {
+            const project = await insertProject(tx, { name, slug });
+            createdProjectId = project.id;
+            createdProjectMeta = { slug: project.slug, name: project.name };
+          } catch (err) {
+            if (isUniqueViolation(err, 'projects_slug_key')) throw collision;
+            if (err instanceof ToolError) throw new ProposalError('validation_error', err.message);
+            throw err;
+          }
+          break;
+        }
+        default: {
+          const unhandled: never = propRow.type;
+          throw new Error(`Nieobsłużony typ proposala: ${String(unhandled)}`);
+        }
       }
 
       // Staging żyje 1:1 z proposalem — po materializacji (albo próbie, dla delete i tak zawsze pusty)
@@ -461,17 +507,28 @@ export class ProposalsService {
         {
           eventType: 'proposal_approved',
           actor,
-          affectedIds: materializedId ? [materializedId, ...archivedIds] : archivedIds,
+          affectedIds: createdProjectId
+            ? [createdProjectId]
+            : materializedId
+              ? [materializedId, ...archivedIds]
+              : archivedIds,
           metadata: {
             proposalId: id,
             type: propRow.type,
             ...(supersedeRow ? { supersededId: supersedeRow.id } : {}),
+            ...(createdProjectId ? { projectId: createdProjectId, ...createdProjectMeta } : {}),
           },
         },
         tx,
       );
 
-      return { proposalId: id, materializedId, archivedIds, embedding: embeddingDisposition };
+      return {
+        proposalId: id,
+        materializedId,
+        ...(createdProjectId ? { projectId: createdProjectId } : {}),
+        archivedIds,
+        embedding: embeddingDisposition,
+      };
     });
   }
 
@@ -518,6 +575,12 @@ export class ProposalsService {
         `Proposal ${id} ma już status ${preRow.status}`,
         undefined,
         preRow.status,
+      );
+    }
+    if (!isMemoryProposalType(preRow.type)) {
+      throw new ProposalError(
+        'validation_error',
+        `Proposal typu ${preRow.type} nie ma treści do edycji — zatwierdź go albo odrzuć.`,
       );
     }
     if (preRow.type === 'delete') {

@@ -1,6 +1,7 @@
 import { Controller, Get, Query, UseFilters, UseGuards } from '@nestjs/common';
 import { AppConfigService } from '../config/config.service';
 import { HEADER_MAX_LEN } from '../memory/validation';
+import { resolveMcpPublicUrl } from '../onboarding/mcp-public-url';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { CsrfGuard } from './auth/csrf.guard';
 import { SessionGuard } from './auth/session.guard';
@@ -44,17 +45,7 @@ export class ConfigController {
       bodyMaxEvent: this.config.get('BODY_MAX_EVENT'),
       tagsMax: this.config.get('TAGS_MAX'),
       tagMaxLen: this.config.get('TAG_MAX_LEN'),
-      mcpPublicUrl: this.resolveMcpPublicUrl(),
+      mcpPublicUrl: resolveMcpPublicUrl(this.config),
     };
-  }
-
-  /** Roadmap v1.2 (ekran "Onboarding") — `PUBLIC_MCP_URL` (już znormalizowany w `env.ts`) ma
-   * pierwszeństwo; inaczej `ACME_DOMAIN` (tylko tryb A, bundled Caddy); inaczej `null` — frontend
-   * wtedy renderuje placeholder `https://<your-mcp-host>` + polską notatkę. */
-  private resolveMcpPublicUrl(): string | null {
-    const explicit = this.config.get('PUBLIC_MCP_URL');
-    if (explicit) return explicit;
-    const acmeDomain = this.config.get('ACME_DOMAIN');
-    return acmeDomain ? `https://${acmeDomain}` : null;
   }
 }

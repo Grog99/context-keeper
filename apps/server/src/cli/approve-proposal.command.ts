@@ -42,6 +42,7 @@ export class ApproveProposalCommand extends CommandRunner {
       });
       console.log(
         `[approve-proposal] ${proposalId}: OK — materializedId=${result.materializedId ?? '-'}, ` +
+          `projectId=${result.projectId ?? '-'}, ` +
           `archivedIds=[${result.archivedIds.join(', ')}], embedding=${result.embedding}`,
       );
     } catch (err) {

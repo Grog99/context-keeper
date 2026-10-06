@@ -3,23 +3,25 @@
  * Źródło/baseline wersjonowane w `context/mcp-tool-contract.md` — te stringi są z nim
  * zsynchronizowane 1:1 (ręcznie; przy zmianie jednego zaktualizuj drugie).
  *
- * WYJĄTEK (stan na 2026-10-06): akapit błędów scope'u projektu v1.5 (`PROJECT_SCOPE_ERRORS`) oraz
- * zaktualizowane brzmienie o HTTP 429 (limit per token, per narzędzie, per projekt) NIE są jeszcze
- * w `context/mcp-tool-contract.md`. Synchronizacja kanonu to osobny krok po zakresach A/B/C
+ * WYJĄTEK (stan na 2026-10-06): akapit błędów scope'u projektu v1.5 (`PROJECT_SCOPE_ERRORS`), opisy
+ * narzędzi konta (`LIST_PROJECTS_DESCRIPTION`, `CREATE_PROJECT_DESCRIPTION`) oraz zaktualizowane
+ * brzmienie o HTTP 429 (limit per token, per narzędzie, per projekt) NIE są jeszcze w
+ * `context/mcp-tool-contract.md`. Synchronizacja kanonu to osobny krok po zakresach A/B/C
  * (ticket `.tickets/multi-repo-contract.md`, "Poza zakresem").
  */
 
 /**
  * Wspólny akapit o wyborze projektu i kodach błędów scope'u (roadmap v1.5, ticket #12/#21) —
- * doklejany do opisów WSZYSTKICH narzędzi pamięci. Celowo bez wzmianek o list_projects /
- * create_project (te narzędzia dochodzą w osobnym zakresie i dostaną własne opisy).
+ * doklejany do opisów WSZYSTKICH narzędzi pamięci. Wzmianki o list_projects / create_project to
+ * statyczny tekst (opis jest taki sam dla każdego tokena) — same narzędzia rejestruje fabryka wyłącznie
+ * dla tokenu konta, więc token projektowy nie dostaje ich na `tools/list`.
  */
 const PROJECT_SCOPE_ERRORS = `Project selection: your project is determined by your token. A project token is bound to one project. An account token works in any project of the instance — the project is then chosen by the \`X-Context-Keeper-Project: <slug>\` HTTP header configured in the repo's .mcp.json (a lowercase slug such as "my-project").
 
 Project errors (returned as a tool error {code, message, details?} — the MCP connection itself stays healthy):
-- project_required: you use an account token but no project header was sent. \`details.projects\` lists every project as {slug, name}; pick the right slug and add the header to .mcp.json.
-- project_not_found: the header slug matches no project. \`details.projects\` lists the known projects; fix the header value (the usual cause is a typo).
-- project_pending: the slug belongs to a project that is still awaiting human approval — try again after a human approves it.
+- project_required: you use an account token but no project header was sent. \`details.projects\` lists every project as {slug, name}; pick the right slug and add the header to .mcp.json. With an account token, call list_projects for ready-made .mcp.json blocks.
+- project_not_found: the header slug matches no project. \`details.projects\` lists the known projects; fix the header value (the usual cause is a typo). If the project does not exist yet, propose it with create_project({name, slug}) (account tokens only; a human approves it).
+- project_pending: the slug belongs to a project that is still awaiting human approval — try again after a human approves it. Do not call create_project again for it.
 - project_forbidden: your token is bound to a different project than the header names. Remove the header or use a token valid for that project; no list is returned.
 These are configuration problems, not transient failures: do not retry them in a loop — fix the configuration or tell the user.`;
 
@@ -76,3 +78,34 @@ None of these statuses are errors. This is fire-and-forget — do not poll or wa
 If a call is rejected with HTTP 429 (rate limited per token and per tool — with an account token, separately for each project), back off and retry after the indicated delay — do not retry in a tight loop.
 
 ${PROJECT_SCOPE_ERRORS}`;
+
+/**
+ * Narzędzia konta (roadmap v1.5, scope B) — rejestrowane WYŁĄCZNIE dla tokenu konta (zawsze, z
+ * nagłówkiem i bez; tokenowi projektowemu nie ma ich na `tools/list`, a bezpośrednie wywołanie daje
+ * "Tool not found" z SDK). Nigdy nie zwracają tokena: `Authorization` w blokach to placeholder
+ * `${CONTEXT_KEEPER_TOKEN}`.
+ */
+export const LIST_PROJECTS_DESCRIPTION = `List the projects on this Context Keeper instance together with ready-to-use configuration blocks. Available to account tokens only.
+
+Returns {projects, agentsMd, claudeMd, mcpUrlConfigured, hint}:
+- projects: [{slug, name, mcpJson}] sorted by slug. \`mcpJson\` is the complete .mcp.json for that project — it carries the \`X-Context-Keeper-Project: <slug>\` header. Copy the entry that matches the current repo into the repo's .mcp.json and commit it.
+- agentsMd / claudeMd: the shared blocks to add to the repo's AGENTS.md and CLAUDE.md (identical for every project, so they appear once).
+- mcpUrlConfigured: false means the server does not know its public URL and mcpJson uses a placeholder URL — take the real one from your client's global MCP configuration.
+
+The token is NEVER returned: mcpJson refers to it only as the \`\${CONTEXT_KEEPER_TOKEN}\` environment variable of the user's machine. Do not write a token into any file.
+
+This is a read-only call and is not human-gated. If the repo's project is not listed, propose it with create_project.`;
+
+export const CREATE_PROJECT_DESCRIPTION = `Propose a new project for this Context Keeper instance. Available to account tokens only.
+
+IMPORTANT — human-gated: this does NOT create the project immediately. It creates a pending proposal that a human must approve in the dashboard queue; rejection frees the slug again. This is fire-and-forget — do not poll or wait for approval.
+
+Parameters:
+- name: human-readable project name (1-200 chars, single line).
+- slug: identifier that becomes the \`X-Context-Keeper-Project\` header value. Whitespace is trimmed and the value is lowercased; the result must match ^[a-z0-9]+(-[a-z0-9]+)*$ and be 2-48 characters. Suggest the repository or directory name (for example "my-service").
+
+Return value: {status: "pending", proposalId, project: {slug, name}, mcpJson, agentsMd, claudeMd, mcpUrlConfigured, next}. Commit mcpJson as the repo's .mcp.json right away (and add agentsMd / claudeMd to AGENTS.md / CLAUDE.md): once a human approves, the same configuration starts working with no further change. Until then memory tools with this header return project_pending — a configuration state, not a failure; do not retry in a loop and do not call create_project again for the same slug. The token is never returned: mcpJson uses the \`\${CONTEXT_KEEPER_TOKEN}\` placeholder.
+
+Errors: validation_error when the slug is malformed, when a project with that slug already exists (use list_projects and its mcpJson instead), or when a proposal for that slug is already pending. secret_blocked when the name looks like a credential.
+
+If a call is rejected with HTTP 429, create_project has its own low per-token rate limit — back off and retry after the indicated delay.`;

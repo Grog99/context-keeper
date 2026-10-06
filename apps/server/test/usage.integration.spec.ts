@@ -13,8 +13,9 @@ import type { Database } from '../src/db/db.tokens';
 import * as schema from '../src/db/schema';
 import { proposals, searchEvents, type NewProposalRow } from '../src/db/schema';
 import type { ProjectContext } from '../src/projects/projects.service';
-import { ProjectsService } from '../src/projects/projects.service';
+import type { ProjectsService } from '../src/projects/projects.service';
 import { UsageService } from '../src/usage/usage.service';
+import { buildProjectsService } from './helpers/services';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -78,7 +79,7 @@ describe('UsageService (integration, testcontainers) — ekran "Pomiary", roadma
     await migrate(db, { migrationsFolder: resolve(process.cwd(), 'src/db/migrations') });
 
     const config = new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' }));
-    projects = new ProjectsService(db, config);
+    projects = buildProjectsService(db, config);
     usage = new UsageService(db);
 
     const createdA = await projects.createProject('usage-test-a');

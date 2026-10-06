@@ -87,6 +87,10 @@ export interface ProposalActionsProps {
   busy?: boolean;
   /** "1 / N" — pozycja w liście (spring po prawej, jak w makiecie). */
   position?: string;
+  /** `false` ukrywa "Edytuj" (typ bez treści do edycji, np. `create_project`) — `lib/proposals.ts`. */
+  canEdit?: boolean;
+  /** `false` ukrywa split-button "Zatwierdź jako zamiennik" (supersession dotyczy tylko `create`). */
+  canSupersede?: boolean;
 }
 
 /** §8.2 — sticky bar u dołu detalu: Zatwierdź(A)/Odrzuć(R)/Edytuj(E)/split-button "…jako
@@ -101,6 +105,8 @@ export function ProposalActions({
   staleReason,
   busy,
   position,
+  canEdit = true,
+  canSupersede = true,
 }: ProposalActionsProps) {
   return (
     <div className="flex flex-none flex-col border-t border-border bg-surface">
@@ -123,11 +129,15 @@ export function ProposalActions({
           <X className="size-[15px]" /> Odrzuć
           <kbd className="ml-0.5 rounded border border-current px-1 text-[10px] opacity-70">R</kbd>
         </Button>
-        <Button variant="secondary" disabled={busy} onClick={onEdit}>
-          <Pencil className="size-[15px]" /> Edytuj
-          <kbd className="ml-0.5 rounded border border-current px-1 text-[10px] opacity-70">E</kbd>
-        </Button>
-        <SupersedeSplitButton onSelect={onApproveAsReplacement} search={searchSupersedeCandidates} disabled={busy} />
+        {canEdit && (
+          <Button variant="secondary" disabled={busy} onClick={onEdit}>
+            <Pencil className="size-[15px]" /> Edytuj
+            <kbd className="ml-0.5 rounded border border-current px-1 text-[10px] opacity-70">E</kbd>
+          </Button>
+        )}
+        {canSupersede && (
+          <SupersedeSplitButton onSelect={onApproveAsReplacement} search={searchSupersedeCandidates} disabled={busy} />
+        )}
         {position && <span className="ml-auto font-mono text-[11px] text-faint">{position}</span>}
       </div>
     </div>

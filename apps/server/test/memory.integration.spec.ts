@@ -19,9 +19,10 @@ import type { EmbeddingProvider } from '../src/embeddings/embedding-provider';
 import { EmbeddingService } from '../src/embeddings/embedding.service';
 import { MemoryService } from '../src/memory/memory.service';
 import type { ProjectContext } from '../src/projects/projects.service';
-import { ProjectsService } from '../src/projects/projects.service';
+import type { ProjectsService } from '../src/projects/projects.service';
 import { ProposalsService } from '../src/proposals/proposals.service';
 import { UsageService } from '../src/usage/usage.service';
+import { buildProjectsService } from './helpers/services';
 
 /**
  * Testcontainers nie potrafi odpalić prawdziwego sidecara TEI — port `EmbeddingProvider` istnieje
@@ -96,7 +97,7 @@ describe('MemoryService (integration, testcontainers)', () => {
 
     audit = new AuditService(db);
     config = new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' }));
-    projects = new ProjectsService(db, config);
+    projects = buildProjectsService(db, config);
     // Provider "zawsze down" dla WSZYSTKICH istniejących (sprzed Fazy 3) testów poniżej — embedQuery
     // zawsze zwraca null, embedMemoryBestEffort zawsze null -> hybrid degeneruje się dokładnie do
     // starego zachowania FTS-only, więc te testy zostają nietknięte przez dodanie ramienia wektorowego.
