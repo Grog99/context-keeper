@@ -139,6 +139,7 @@ nowe repo to jeden plik, bez nowego tokena i bez przestawiania zmiennych.
    nieskonfigurowanym repo dosięgnął `list_projects` / `create_project`:
    `claude mcp add --transport http --scope user context-keeper <adres>/mcp --header "Authorization: Bearer <ck_…>"`.
    Nazwa serwera musi być dokładnie `context-keeper`, a token ląduje w `~/.claude.json` jako zwykły tekst.
+   Potem w nowym repo wpisz `/context-keeper:onboard` (alias `/mcp__context-keeper__onboard`) — agent dobierze projekt przez `list_projects` / `create_project`, scali `.mcp.json` i dopisze bloki `AGENTS.md` / `CLAUDE.md`, pokazując diff przed zapisem.
 5. Zrestartuj terminal i klienta MCP, a przy pierwszym uruchomieniu zaakceptuj serwer
    `context-keeper`.
 

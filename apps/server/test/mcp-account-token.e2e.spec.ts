@@ -8,6 +8,7 @@ import { DB, type Database } from '../src/db/db.tokens';
 import { auditLog, projectTokens, proposals, searchEvents } from '../src/db/schema';
 import { rateLimitKey } from '../src/mcp/mcp-rate-limit.guard';
 import { MemoryService } from '../src/memory/memory.service';
+import { ONBOARD_PROMPT_TEXT, ONBOARDING_SETUP_STEPS } from '../src/onboarding/onboarding-templates';
 import { ProjectsService } from '../src/projects/projects.service';
 import { ProposalsService } from '../src/proposals/proposals.service';
 import { MEMORY_TOOLS, RateLimiterService } from '../src/rate-limit/rate-limiter.service';
@@ -470,6 +471,7 @@ describe('MCP e2e v1.5 — token konta + X-Context-Keeper-Project', () => {
         expect(body.agentsMd).toContain('search_memory');
         expect(body.claudeMd).toContain('@AGENTS.md');
         expect(typeof body.hint).toBe('string');
+        expect(body.hint).toContain(ONBOARDING_SETUP_STEPS);
         expect(text).not.toContain(accountToken);
         expect(text).not.toMatch(TOKEN_LIKE);
       });
@@ -487,6 +489,7 @@ describe('MCP e2e v1.5 — token konta + X-Context-Keeper-Project', () => {
         expect(body.project).toEqual({ slug: 'e2e-new', name: 'E2E New' });
         expect(body.mcpJson).toContain('"X-Context-Keeper-Project": "e2e-new"');
         expect(body.next).toContain('project_pending');
+        expect(body.next).toContain(ONBOARDING_SETUP_STEPS);
         expect(text).not.toContain(acc.token);
         expect(text).not.toMatch(TOKEN_LIKE);
 
@@ -695,6 +698,50 @@ describe('MCP e2e v1.5 — token konta + X-Context-Keeper-Project', () => {
         const res = await createProjectCall(client, { name: 'Not limited', slug: 'e2e-not-limited' });
         expect(res.isError).not.toBe(true);
       });
+    });
+  });
+
+  describe('prompt MCP onboard (ticket mcp-onboard-prompt)', () => {
+    it('prompts/list: token konta (bez nagłówka, z nagłówkiem, ze złym slugiem) -> capability prompts + dokładnie [onboard] bez argumentów', async () => {
+      for (const [bearer, slug] of [
+        [accountToken, undefined],
+        [accountToken, 'mcp-e2e'],
+        [accountToken, 'nope-zzz'], // prompt nie zależy od stanu projektu
+      ] as const) {
+        await withClient(bearer, slug, async (client) => {
+          expect(client.getServerCapabilities()?.prompts, `${slug ?? 'no header'}`).toBeDefined();
+          const { prompts } = await client.listPrompts();
+          expect(prompts.map((p) => p.name)).toEqual(['onboard']);
+          expect(prompts[0].arguments ?? []).toEqual([]);
+        });
+      }
+    });
+
+    it('token projektowy (bez i z własnym nagłówkiem): brak capability prompts; prompts/list i prompts/get odrzucone', async () => {
+      for (const slug of [undefined, 'mcp-e2e'] as const) {
+        await withClient(token, slug, async (client) => {
+          expect(client.getServerCapabilities()?.prompts, `${slug ?? 'no header'}`).toBeUndefined();
+          await expect(client.listPrompts()).rejects.toThrow();
+          await expect(client.getPrompt({ name: 'onboard' })).rejects.toThrow();
+        });
+      }
+    });
+
+    it('prompts/get onboard: jedna wiadomość user/text = statyczny tekst, bez tokena, bez skutków w bazie', async () => {
+      const before = await countRows();
+      await withClient(accountToken, undefined, async (client) => {
+        const res = await client.getPrompt({ name: 'onboard' });
+        expect(res.messages).toHaveLength(1);
+        const [message] = res.messages;
+        expect(message.role).toBe('user');
+        expect(message.content.type).toBe('text');
+        const text = message.content.type === 'text' ? message.content.text : '';
+        expect(text).toBe(ONBOARD_PROMPT_TEXT);
+        expect(text).toContain(ONBOARDING_SETUP_STEPS);
+        expect(text).not.toContain(accountToken);
+        expect(text).not.toMatch(/ck_/);
+      });
+      expect(await countRows()).toEqual(before);
     });
   });
 });

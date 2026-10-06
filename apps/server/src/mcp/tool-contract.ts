@@ -88,7 +88,7 @@ ${PROJECT_SCOPE_ERRORS}`;
 export const LIST_PROJECTS_DESCRIPTION = `List the projects on this Context Keeper instance together with ready-to-use configuration blocks. Available to account tokens only.
 
 Returns {projects, agentsMd, claudeMd, mcpUrlConfigured, hint}:
-- projects: [{slug, name, mcpJson}] sorted by slug. \`mcpJson\` is the complete .mcp.json for that project — it carries the \`X-Context-Keeper-Project: <slug>\` header. Copy the entry that matches the current repo into the repo's .mcp.json and commit it.
+- projects: [{slug, name, mcpJson}] sorted by slug. \`mcpJson\` is the complete .mcp.json for that project — it carries the \`X-Context-Keeper-Project: <slug>\` header. Merge the entry that matches the current repo into the repo's .mcp.json (only the context-keeper server; other servers stay) following the steps in \`hint\`.
 - agentsMd / claudeMd: the shared blocks to add to the repo's AGENTS.md and CLAUDE.md (identical for every project, so they appear once).
 - mcpUrlConfigured: false means the server does not know its public URL and mcpJson uses a placeholder URL — take the real one from your client's global MCP configuration.
 
@@ -104,7 +104,7 @@ Parameters:
 - name: human-readable project name (1-200 chars, single line).
 - slug: identifier that becomes the \`X-Context-Keeper-Project\` header value. Whitespace is trimmed and the value is lowercased; the result must match ^[a-z0-9]+(-[a-z0-9]+)*$ and be 2-48 characters. Suggest the repository or directory name (for example "my-service").
 
-Return value: {status: "pending", proposalId, project: {slug, name}, mcpJson, agentsMd, claudeMd, mcpUrlConfigured, next}. Commit mcpJson as the repo's .mcp.json right away (and add agentsMd / claudeMd to AGENTS.md / CLAUDE.md): once a human approves, the same configuration starts working with no further change. Until then memory tools with this header return project_pending — a configuration state, not a failure; do not retry in a loop and do not call create_project again for the same slug. The token is never returned: mcpJson uses the \`\${CONTEXT_KEEPER_TOKEN}\` placeholder.
+Return value: {status: "pending", proposalId, project: {slug, name}, mcpJson, agentsMd, claudeMd, mcpUrlConfigured, next}. Set up the repo right away following \`next\` (merge .mcp.json — only the context-keeper entry — and add agentsMd / claudeMd idempotently): once a human approves, the same configuration starts working with no further change. Until then memory tools with this header return project_pending — a configuration state, not a failure; do not retry in a loop and do not call create_project again for the same slug. The token is never returned: mcpJson uses the \`\${CONTEXT_KEEPER_TOKEN}\` placeholder.
 
 Errors: validation_error when the slug is malformed, when a project with that slug already exists (use list_projects and its mcpJson instead), or when a proposal for that slug is already pending. secret_blocked when the name looks like a credential.
 

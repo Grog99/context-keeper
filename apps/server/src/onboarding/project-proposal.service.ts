@@ -19,6 +19,7 @@ import {
 } from '../projects/slug';
 import type { CreateProjectPayload } from '../proposals/proposals.types';
 import { OnboardingService, URL_NOT_CONFIGURED_HINT } from './onboarding.service';
+import { ONBOARDING_SETUP_STEPS } from './onboarding-templates';
 
 /** Odpowiedź narzędzia `create_project` (agent-facing; NIGDY nie zawiera tokena). */
 export interface CreateProjectResult {
@@ -137,9 +138,10 @@ export class ProjectProposalService {
       claudeMd: blocks.claudeMd,
       mcpUrlConfigured: blocks.mcpUrlConfigured,
       next:
-        'Commit mcpJson as .mcp.json now. Until a human approves the proposal in the dashboard queue, memory ' +
-        'tools with this header return project_pending — do not call create_project again or poll.' +
-        (blocks.mcpUrlConfigured ? '' : ` ${URL_NOT_CONFIGURED_HINT}`),
+        'Set up the repo now: once a human approves the proposal in the dashboard queue, the same configuration ' +
+        'starts working with no further change. Until then memory tools with this header return project_pending — ' +
+        `do not call create_project again or poll.\n${ONBOARDING_SETUP_STEPS}` +
+        (blocks.mcpUrlConfigured ? '' : `\n${URL_NOT_CONFIGURED_HINT}`),
     };
   }
 
