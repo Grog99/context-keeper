@@ -5,6 +5,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AuditService } from '../src/audit/audit.service';
 import { AppConfigService } from '../src/config/config.service';
+import { AccountTokensController } from '../src/dashboard/account-tokens.controller';
 import { AuditController } from '../src/dashboard/audit.controller';
 import { CsrfGuard } from '../src/dashboard/auth/csrf.guard';
 import { SessionGuard } from '../src/dashboard/auth/session.guard';
@@ -12,11 +13,13 @@ import { ConfigController } from '../src/dashboard/config.controller';
 import { DashboardErrorFilter } from '../src/dashboard/dashboard-error.filter';
 import { MemoriesController } from '../src/dashboard/memories.controller';
 import { NightlyController } from '../src/dashboard/nightly.controller';
+import { OnboardingController } from '../src/dashboard/onboarding.controller';
 import { ProjectsController } from '../src/dashboard/projects.controller';
 import { ProposalsController } from '../src/dashboard/proposals.controller';
 import { UsageMetricsController } from '../src/dashboard/usage-metrics.controller';
 import { MemoryAdminService } from '../src/memory/memory-admin.service';
 import { NightlyService } from '../src/nightly/nightly.service';
+import { OnboardingService } from '../src/onboarding/onboarding.service';
 import { ProjectsService } from '../src/projects/projects.service';
 import { ProposalsService } from '../src/proposals/proposals.service';
 import { PurgeService } from '../src/purge/purge.service';
@@ -84,8 +87,11 @@ function fakeProjects(): ProjectsService {
     countMemoriesByProject: async () => new Map(),
     countTokensByProject: async () => new Map(),
     createProject: async () => (track('projects.createProject'), { project: { id: 'proj_1', name: 'x' }, token: 't', tokenRow: { id: 'tok_1', label: 'default' } }),
-    findById: async () => ({ id: 'proj_1', includeEventsInDefaultSearch: false }),
+    findById: async () => ({ id: 'proj_1', slug: 'proj-one', includeEventsInDefaultSearch: false }),
     updateProject: async () => (track('projects.updateProject'), { id: 'proj_1', includeEventsInDefaultSearch: true }),
+    updateSlug: async (_id: string, slug: string) => (track(`projects.updateSlug:${slug}`), { id: 'proj_1', slug, includeEventsInDefaultSearch: false }),
+    listAccountTokens: async () => [{ id: 'tok_acc1', projectId: null, label: 'laptop', status: 'active' }],
+    createAccountToken: async () => (track('projects.createAccountToken'), { token: 't', tokenRow: { id: 'tok_accnew', label: 'x' } }),
     listTokens: async () => [{ id: 'tok_1', projectId: 'proj_1', label: 'default', status: 'active' }],
     createToken: async () => (track('projects.createToken'), { token: 't', tokenRow: { id: 'tok_new', label: 'x' } }),
     rotateToken: async () => (track('projects.rotateToken'), { token: 't', tokenRow: { id: 'tok_new' }, previousTokenRow: { id: 'tok_1' } }),
@@ -99,7 +105,14 @@ function fakeUsage(): UsageService {
     searchSeries: async () => (track('usage.searchSeries'), []),
     proposalOutcomeSeries: async () => (track('usage.proposalOutcomeSeries'), []),
     countSearchesByToken: async () => new Map(),
+    countSearchesByAccountTokens: async () => new Map(),
   } as unknown as UsageService;
+}
+
+function fakeOnboarding(): OnboardingService {
+  return {
+    forDashboard: async () => (track('onboarding.forDashboard'), { projects: [] }),
+  } as unknown as OnboardingService;
 }
 
 function fakeNightly(): NightlyService {
@@ -133,6 +146,8 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
         AuditController,
         ProposalsController,
         ProjectsController,
+        AccountTokensController,
+        OnboardingController,
         UsageMetricsController,
         ConfigController,
         NightlyController,
@@ -145,6 +160,7 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
         { provide: ProjectsService, useValue: fakeProjects() },
         { provide: UsageService, useValue: fakeUsage() },
         { provide: NightlyService, useValue: fakeNightly() },
+        { provide: OnboardingService, useValue: fakeOnboarding() },
         { provide: AppConfigService, useValue: fakeConfig() },
         DashboardErrorFilter,
       ],
@@ -238,6 +254,37 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
 
     it('PATCH /api/projects/proj_1 {includeEventsInDefaultSearch:"yes"}', async () => {
       const { status } = await req('PATCH', '/api/projects/proj_1', { includeEventsInDefaultSearch: 'yes' });
+      expect(status).toBe(400);
+      expect(calls).toEqual([]);
+    });
+
+    it('PATCH /api/projects/proj_1 {slug: 5} (slug nie-string)', async () => {
+      const { status } = await req('PATCH', '/api/projects/proj_1', { slug: 5 });
+      expect(status).toBe(400);
+      expect(calls).toEqual([]);
+    });
+
+    it('POST /api/projects {name:"a\tb"} (tab w nazwie — kontrakt TSV list-projects)', async () => {
+      const { status, json } = await req('POST', '/api/projects', { name: 'a\tb' });
+      expect(status).toBe(400);
+      expect(json.message).toContain('name');
+      expect(calls).toEqual([]);
+    });
+
+    it('POST /api/account-tokens/tok_1/rotate {x:1} (body bezciałowego POST wciąż strict)', async () => {
+      const { status } = await req('POST', '/api/account-tokens/tok_1/rotate', { x: 1 });
+      expect(status).toBe(400);
+      expect(calls).toEqual([]);
+    });
+
+    it('POST /api/account-tokens {label: 1} (label nie-string)', async () => {
+      const { status } = await req('POST', '/api/account-tokens', { label: 1 });
+      expect(status).toBe(400);
+      expect(calls).toEqual([]);
+    });
+
+    it('GET /api/onboarding?x=1 (endpoint bez filtrów, query wciąż strict)', async () => {
+      const { status } = await req('GET', '/api/onboarding?x=1');
       expect(status).toBe(400);
       expect(calls).toEqual([]);
     });
@@ -342,6 +389,25 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
       const { status } = await req('POST', '/api/nightly/run');
       expect(status).not.toBe(400);
       expect(calls).toEqual(['nightly.run']);
+    });
+
+    it('PATCH /api/projects/proj_1 {slug} -> serwis dostaje slug; nie 400', async () => {
+      const { status, json } = await req('PATCH', '/api/projects/proj_1', { slug: 'proj-renamed' });
+      expect(status).toBe(200);
+      expect(json).toMatchObject({ slug: 'proj-renamed' });
+      expect(calls).toContain('projects.updateSlug:proj-renamed');
+    });
+
+    it('GET /api/onboarding -> 200, wywołuje OnboardingService.forDashboard', async () => {
+      const { status } = await req('GET', '/api/onboarding');
+      expect(status).toBe(200);
+      expect(calls).toEqual(['onboarding.forDashboard']);
+    });
+
+    it('POST /api/account-tokens {label} -> 201, createAccountToken wywołany', async () => {
+      const { status } = await req('POST', '/api/account-tokens', { label: 'laptop' });
+      expect(status).toBe(201);
+      expect(calls).toContain('projects.createAccountToken');
     });
 
     it('POST /api/memories/mem_1/archive bez body -> nie 400', async () => {

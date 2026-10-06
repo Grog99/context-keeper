@@ -3,11 +3,14 @@ import { ProjectsService } from '../projects/projects.service';
 
 /** Unieważnienie natychmiastowe (roadmap v1.3, "Wiele tokenów per projekt + graceful rotation") —
  * odrębne od `rotate-token` (graceful, nakładka stary+nowy): tu stary token przestaje działać
- * NATYCHMIAST, bez zamiennika. Użyj dla skompromitowanego credentiala. Id z: `list-tokens <projectId>`. */
+ * NATYCHMIAST, bez zamiennika. Użyj dla skompromitowanego credentiala. Id z: `list-tokens <projectId>`
+ * albo `list-account-tokens` (token konta). */
 @Command({
   name: 'revoke-token',
   arguments: '<tokenId>',
-  description: 'Unieważnia token NATYCHMIAST i nieodwracalnie (bez okresu karencji). Id z: list-tokens <projectId>.',
+  description:
+    'Unieważnia token NATYCHMIAST i nieodwracalnie (bez okresu karencji). ' +
+    'Id z: list-tokens <projectId> albo list-account-tokens.',
 })
 export class RevokeTokenCommand extends CommandRunner {
   constructor(private readonly projects: ProjectsService) {
@@ -17,7 +20,7 @@ export class RevokeTokenCommand extends CommandRunner {
   async run(inputs: string[]): Promise<void> {
     const tokenId = inputs[0]?.trim();
     if (!tokenId) {
-      throw new Error('Podaj id tokena: revoke-token <tokenId> (patrz: list-tokens <projectId>)');
+      throw new Error('Podaj id tokena: revoke-token <tokenId> (patrz: list-tokens <projectId> albo list-account-tokens)');
     }
     console.log('');
     console.log('UWAGA: unieważnienie jest natychmiastowe i nieodwracalne — bez okresu karencji.');

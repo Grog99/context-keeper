@@ -2,11 +2,13 @@ import 'reflect-metadata';
 import { METHOD_METADATA, PATH_METADATA, ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
 import { describe, expect, it } from 'vitest';
 import { ZodValidationPipe } from '../src/common/zod-validation.pipe';
+import { AccountTokensController } from '../src/dashboard/account-tokens.controller';
 import { AuditController } from '../src/dashboard/audit.controller';
 import { ConfigController } from '../src/dashboard/config.controller';
 import { MemoriesController } from '../src/dashboard/memories.controller';
 import { MetricsController } from '../src/dashboard/metrics.controller';
 import { NightlyController } from '../src/dashboard/nightly.controller';
+import { OnboardingController } from '../src/dashboard/onboarding.controller';
 import { ProjectsController } from '../src/dashboard/projects.controller';
 import { ProposalsController } from '../src/dashboard/proposals.controller';
 import { UsageMetricsController } from '../src/dashboard/usage-metrics.controller';
@@ -31,6 +33,8 @@ const DASHBOARD_CONTROLLERS: Ctor[] = [
   AuditController,
   ProposalsController,
   ProjectsController,
+  AccountTokensController,
+  OnboardingController,
   UsageMetricsController,
   ConfigController,
   MetricsController,

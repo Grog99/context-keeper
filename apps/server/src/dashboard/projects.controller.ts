@@ -92,7 +92,7 @@ export class ProjectsController {
     @Body(new ZodValidationPipe(createProjectBody)) body: CreateProjectBody,
     @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never>,
   ): Promise<CreatedProject> {
-    const created = await this.projects.createProject(body.name, { label: body.tokenLabel });
+    const created = await this.projects.createProject(body.name, { label: body.tokenLabel, slug: body.slug });
     await this.audit.log({
       eventType: 'token_created',
       actor: DASHBOARD_ACTOR,
@@ -106,12 +106,14 @@ export class ProjectsController {
     return created;
   }
 
-  /** Dialog szczegółów projektu (roadmap v1.2, "kind=event episodic") — dziś jedyne pole jest
-   * `includeEventsInDefaultSearch`. `ProjectsService.updateProject` sam nie audytuje (§M1 planu Fazy
-   * 5, wzorem create/rotate) — audyt `project_settings_changed` dopisany TUTAJ, z `from`/`to` żeby
-   * ekran "Audyt" mógł pokazać co się zmieniło bez osobnego zapytania. `NotFoundException` rzucony
-   * przez serwis leci dalej nietknięty (Nest mapuje wbudowane HttpException na 404 samodzielnie —
-   * poza `DashboardErrorFilter`, który łapie tylko `ProposalError`/`ToolError`/`PurgeError`). */
+  /** Dialog szczegółów projektu — `includeEventsInDefaultSearch` (roadmap v1.2, "kind=event
+   * episodic") i `slug` (roadmap v1.5, edycja z ostrzeżeniem w SPA). `ProjectsService` sam nie audytuje
+   * (§M1 planu Fazy 5, wzorem create/rotate) — audyt `project_settings_changed` dopisany TUTAJ, z
+   * `from`/`to` żeby ekran "Audyt" mógł pokazać co się zmieniło bez osobnego zapytania; zmiana slugu
+   * (`field: 'slug'`) loguje się tylko gdy slug faktycznie się zmienił (ten sam slug = no-op bez wpisu).
+   * `NotFoundException` rzucony przez serwis/kontroler leci dalej nietknięty (Nest mapuje wbudowane
+   * HttpException na 404 samodzielnie — poza `DashboardErrorFilter`, który łapie tylko
+   * `ProposalError`/`ToolError`/`PurgeError`). */
   @Patch(':id')
   async update(
     @Param('id', new ZodValidationPipe(opaqueId)) id: string,
@@ -119,17 +121,31 @@ export class ProjectsController {
     @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never>,
   ): Promise<ProjectRow> {
     const before = await this.projects.findById(id);
-    const updated = await this.projects.updateProject(id, {
-      includeEventsInDefaultSearch: body.includeEventsInDefaultSearch,
-    });
+    if (!before) {
+      throw new NotFoundException(`Projekt nie istnieje: ${id}`);
+    }
+    let updated = before;
+    if (body.slug !== undefined) {
+      updated = await this.projects.updateSlug(id, body.slug);
+      if (updated.slug !== before.slug) {
+        await this.audit.log({
+          eventType: 'project_settings_changed',
+          actor: DASHBOARD_ACTOR,
+          metadata: { projectId: id, field: 'slug', from: before.slug, to: updated.slug },
+        });
+      }
+    }
     if (body.includeEventsInDefaultSearch !== undefined) {
+      updated = await this.projects.updateProject(id, {
+        includeEventsInDefaultSearch: body.includeEventsInDefaultSearch,
+      });
       await this.audit.log({
         eventType: 'project_settings_changed',
         actor: DASHBOARD_ACTOR,
         metadata: {
           projectId: id,
           field: 'includeEventsInDefaultSearch',
-          from: before?.includeEventsInDefaultSearch ?? null,
+          from: before.includeEventsInDefaultSearch,
           to: updated.includeEventsInDefaultSearch,
         },
       });

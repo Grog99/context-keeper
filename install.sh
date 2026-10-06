@@ -593,6 +593,8 @@ start_stack() {
   fi
 
   printf '[install] checking for an existing project named "%s" ...\n' "$PROJECT_NAME"
+  # list-projects output is tab-separated: ID, TOKENS, NAZWA, SLUG — the project name is field 3
+  # (new columns are only ever appended after it, so the $3 match below stays valid).
   LIST_OUTPUT=$(docker compose run --rm app node dist/cli.js list-projects) || LIST_OUTPUT=''
   if printf '%s\n' "$LIST_OUTPUT" | awk -F'\t' -v want="$PROJECT_NAME" '$3==want{found=1} END{exit !found}'; then
     printf '[install] project "%s" already exists — skipping create-project (avoids minting a duplicate; project names are not unique). For a fresh token: "list-tokens <projectId>" (id from list-projects field 1) to find a token id, then "rotate-token <tokenId>" (graceful) or "create-token <projectId> <label>" (new token alongside existing ones).\n' "$PROJECT_NAME"

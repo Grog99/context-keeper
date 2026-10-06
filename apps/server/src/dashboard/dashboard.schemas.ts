@@ -180,16 +180,28 @@ export type EditProposalBody = z.output<typeof editProposalBody>;
 // ---- POST /api/projects ------------------------------------------------------------
 
 /** Zastępuje ręczny `body?.name?.trim()`/`if (!name)` w kontrolerze — `.trim().min(1)` daje 400
- * PRZED wejściem w serwis, dokładnie ten sam efekt. */
+ * PRZED wejściem w serwis, dokładnie ten sam efekt. Tab/CR/LF w nazwie odrzucane (roadmap v1.5):
+ * `list-projects` (CLI) to TSV parsowany przez `install.sh` po polu 3 — nazwa z tabulatorem przesunęłaby
+ * kolumny. `slug` opcjonalny (tylko kształt; format/unikalność egzekwuje `ProjectsService`, jak przy
+ * `tokenLabelBody`) — bez niego slug wyprowadzany z nazwy. */
 export const createProjectBody = z.strictObject({
-  name: z.string().trim().min(1),
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .regex(/^[^\t\r\n]*$/, 'Project name must not contain tabs or line breaks'),
   tokenLabel: z.string().optional(),
+  slug: z.string().max(200).optional(),
 });
 export type CreateProjectBody = z.output<typeof createProjectBody>;
 
 // ---- PATCH /api/projects/:id --------------------------------------------------------
 
-export const updateProjectBody = z.strictObject({ includeEventsInDefaultSearch: z.boolean().optional() });
+/** `slug` — tylko kształt (string ≤200); normalizacja, format i unikalność w `ProjectsService.updateSlug`. */
+export const updateProjectBody = z.strictObject({
+  includeEventsInDefaultSearch: z.boolean().optional(),
+  slug: z.string().max(200).optional(),
+});
 export type UpdateProjectBody = z.output<typeof updateProjectBody>;
 
 // ---- POST /api/projects/:id/tokens, PATCH .../tokens/:tokenId ------------------------

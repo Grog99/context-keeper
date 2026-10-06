@@ -104,6 +104,18 @@ describe('dashboard.schemas — happy paths kształtowane dokładnie jak SPA wys
     });
   });
 
+  it('updateProjectBody: {slug} (v1.5, edycja slugu w ProjectSettingsDialog) i oba pola naraz', () => {
+    expect(updateProjectBody.parse({ slug: 'My-Slug' })).toEqual({ slug: 'My-Slug' });
+    expect(updateProjectBody.parse({ slug: 'x', includeEventsInDefaultSearch: false })).toEqual({
+      slug: 'x',
+      includeEventsInDefaultSearch: false,
+    });
+  });
+
+  it('createProjectBody: opcjonalny slug (v1.5) — kształt, nie format', () => {
+    expect(createProjectBody.parse({ name: 'X', slug: 'Bad_Slug' })).toEqual({ name: 'X', slug: 'Bad_Slug' });
+  });
+
   it('tokenLabelBody: {label} jak ProjectTokensDialog create/rename', () => {
     expect(tokenLabelBody.parse({ label: 'agent-two' })).toEqual({ label: 'agent-two' });
   });
@@ -218,6 +230,25 @@ describe('dashboard.schemas — body: brakujące wymagane pole / zły typ / unde
 
   it('updateProjectBody: includeEventsInDefaultSearch="true" (string, nie boolean) -> invalid', () => {
     expect(updateProjectBody.safeParse({ includeEventsInDefaultSearch: 'true' }).success).toBe(false);
+  });
+
+  it('updateProjectBody: slug nie-string / za długi / nieznany klucz -> invalid', () => {
+    expect(updateProjectBody.safeParse({ slug: 1 }).success).toBe(false);
+    expect(updateProjectBody.safeParse({ slug: 'x'.repeat(201) }).success).toBe(false);
+    expect(updateProjectBody.safeParse({ slug: 'x', extra: true }).success).toBe(false);
+  });
+
+  it('createProjectBody: slug nie-string -> invalid', () => {
+    expect(createProjectBody.safeParse({ name: 'X', slug: 5 }).success).toBe(false);
+  });
+
+  it('createProjectBody: tab / CR / LF w nazwie -> invalid (kontrakt TSV list-projects); zwykła spacja OK', () => {
+    expect(createProjectBody.safeParse({ name: 'a\tb' }).success).toBe(false);
+    expect(createProjectBody.safeParse({ name: 'a\nb' }).success).toBe(false);
+    expect(createProjectBody.safeParse({ name: 'a\rb' }).success).toBe(false);
+    expect(createProjectBody.safeParse({ name: 'a b' }).success).toBe(true);
+    // tab/CR/LF na brzegach zjada .trim() przed regexem — wynik nie zawiera znaków sterujących
+    expect(createProjectBody.parse({ name: '\tProjekt\n' }).name).toBe('Projekt');
   });
 
   it('bulkApproveBody: undefined body -> invalid (ids wymagane)', () => {

@@ -44,6 +44,13 @@ export function printTokenReveal(
   console.log('  "headers": { "Authorization": "Bearer ${CONTEXT_KEEPER_TOKEN}" }');
   if (!project) {
     console.log('Token konta wymaga też nagłówka projektu: "X-Context-Keeper-Project": "<slug>".');
+    console.log('');
+    console.log('Ustaw raz globalnie (zmienna środowiskowa użytkownika, nie w repo):');
+    console.log('  CONTEXT_KEEPER_TOKEN=<token>');
+    console.log(
+      'UWAGA: ten token daje odczyt i zapis we WSZYSTKICH projektach instancji — nie używaj go w CI ani ' +
+        'nie dawaj współpracownikom; do tego służą tokeny projektowe (create-token).',
+    );
   }
   console.log(line);
   console.log('');

@@ -22,9 +22,20 @@ export interface TokenRevealProps {
   reason?: 'created' | 'rotated';
   /** Deadline okresu karencji STAREGO tokena — obecny WYŁĄCZNIE przy `reason:'rotated'`. */
   graceUntil?: string | null;
+  /** `'account'` (roadmap v1.5) — token KONTA: inne tytuły + ostrzeżenie o zasięgu (wszystkie projekty
+   * instancji). Domyślnie `'project'` (dotychczasowe copy). */
+  scope?: 'project' | 'account';
 }
 
-export function TokenReveal({ open, onOpenChange, token, label, reason = 'created', graceUntil }: TokenRevealProps) {
+export function TokenReveal({
+  open,
+  onOpenChange,
+  token,
+  label,
+  reason = 'created',
+  graceUntil,
+  scope = 'project',
+}: TokenRevealProps) {
   async function handleCopy() {
     try {
       await navigator.clipboard.writeText(token);
@@ -39,7 +50,15 @@ export function TokenReveal({ open, onOpenChange, token, label, reason = 'create
       <DialogContent>
         <DialogHeader>
           <KeyRound className="size-[19px] text-primary" />
-          <DialogTitle>{reason === 'rotated' ? 'Token zrotowany' : 'Nowy token projektu'}</DialogTitle>
+          <DialogTitle>
+            {scope === 'account'
+              ? reason === 'rotated'
+                ? 'Token konta zrotowany'
+                : 'Nowy token konta'
+              : reason === 'rotated'
+                ? 'Token zrotowany'
+                : 'Nowy token projektu'}
+          </DialogTitle>
         </DialogHeader>
         <DialogDescription>
           Skopiuj teraz — pokazujemy go tylko raz. W bazie trzymamy wyłącznie <span className="font-mono">SHA-256</span>{' '}
@@ -65,6 +84,13 @@ export function TokenReveal({ open, onOpenChange, token, label, reason = 'create
               : 'Stary token wszedł w okres karencji i wkrótce wygaśnie — zaktualizuj konfigurację klientów MCP.'
             : 'Zapisz token w bezpiecznym miejscu — nie da się go odzyskać po zamknięciu tego okna.'}
         </div>
+        {scope === 'account' && (
+          <div className="mb-4 flex items-start gap-2 rounded-md border border-danger bg-danger-subtle px-2.5 py-2 text-xs text-danger-foreground">
+            <ShieldAlert className="mt-0.5 size-[15px] shrink-0 text-danger" />
+            Ten token daje odczyt i zapis we wszystkich projektach instancji — nie używaj go w CI ani nie dawaj
+            współpracownikom; do tego są tokeny projektowe.
+          </div>
+        )}
         <div className="flex justify-end">
           <Button variant="primary" onClick={() => onOpenChange(false)}>
             Zapisałem token

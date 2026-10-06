@@ -1,8 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, type AnyColumn, eq, gte, inArray, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, asc, type AnyColumn, eq, gte, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 import { generateId, ID_PREFIX } from '../common/ids';
 import { DB, type Database } from '../db/db.tokens';
-import { projects, proposals, searchEvents } from '../db/schema';
+import { projects, projectTokens, proposals, searchEvents } from '../db/schema';
 
 /** Jedno źródło prawdy dla `bucket` (tech-review #3, roadmap v1.4) — `ZodValidationPipe`
  * (`dashboard.schemas.ts`) waliduje query po tej samej liście, zamiast po ręcznie przepisanej. */
@@ -167,6 +167,22 @@ export class UsageService {
           gte(searchEvents.createdAt, since),
         ),
       )
+      .groupBy(searchEvents.tokenId);
+    return new Map(rows.map((r) => [r.tokenId as string, r.count]));
+  }
+
+  /**
+   * Odpowiednik `countSearchesByToken` dla TOKENÓW KONTA (roadmap v1.5, sekcja "Tokeny konta" na
+   * ekranie Projekty) — token konta nie należy do projektu, więc nie ma filtra po `project_id`;
+   * wyszukania z WSZYSTKICH projektów (`search_events.project_id` pochodzi z nagłówka) są sumowane per
+   * `token_id`. INNER JOIN z `project_tokens` ogranicza wynik do tokenów konta (`project_id IS NULL`).
+   */
+  async countSearchesByAccountTokens(since: Date): Promise<Map<string, number>> {
+    const rows = await this.db
+      .select({ tokenId: searchEvents.tokenId, count: sql<number>`count(*)::int` })
+      .from(searchEvents)
+      .innerJoin(projectTokens, eq(projectTokens.id, searchEvents.tokenId))
+      .where(and(isNull(projectTokens.projectId), gte(searchEvents.createdAt, since)))
       .groupBy(searchEvents.tokenId);
     return new Map(rows.map((r) => [r.tokenId as string, r.count]));
   }
