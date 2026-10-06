@@ -1,17 +1,13 @@
 /**
- * Warstwa 1 kontraktu z agentem (§14 tech-stack) — opisy narzędzi MCP niesione przez `tools/list`.
- * Źródło/baseline wersjonowane w `context/mcp-tool-contract.md` — te stringi są z nim
- * zsynchronizowane 1:1 (ręcznie; przy zmianie jednego zaktualizuj drugie).
- *
- * WYJĄTEK (stan na 2026-10-06): akapit błędów scope'u projektu v1.5 (`PROJECT_SCOPE_ERRORS`), opisy
- * narzędzi konta (`LIST_PROJECTS_DESCRIPTION`, `CREATE_PROJECT_DESCRIPTION`) oraz zaktualizowane
- * brzmienie o HTTP 429 (limit per token, per narzędzie, per projekt) NIE są jeszcze w
- * `context/mcp-tool-contract.md`. Synchronizacja kanonu to osobny krok po zakresach A/B/C
- * (ticket `.tickets/multi-repo-contract.md`, "Poza zakresem"). Także wyszukiwanie między projektami —
- * parametr `all_projects` i pole `project` w `SEARCH_MEMORY_DESCRIPTION`, odczyt pamięci dowolnego
- * projektu tokenem konta w `GET_MEMORY_DESCRIPTION` (ticket `.tickets/cross-project-search.md`, G11) —
- * czeka na tę samą zbiorczą synchronizację kanonu po v1.5 (`context/mcp-tool-contract.md`, tech-stack
- * §5/§6/§10, prd FR-M1/FR-M2/NFR-1).
+ * Warstwa 1 kontraktu z agentem (§14 tech-stack) — opisy narzędzi MCP niesione przez
+ * `tools/list`. ŹRÓDŁEM tekstu opisów jest TEN plik (synchronizacja kanonu v1.5): opisy
+ * docierają do agentów przez `tools/list` i są pokryte testami e2e.
+ * `context/mcp-tool-contract.md` nie trzyma ich kopii — opisuje zasady (widoczność narzędzi i
+ * promptu per typ tokena, nagłówek projektu, zakres odczytu, taksonomię błędów, uzasadnienia) i
+ * odsyła tu po nazwach stałych. Zmiana brzmienia opisu nie wymaga zmiany markdownu; zmiana ZASADY
+ * (nowe narzędzie, kod błędu, reguła widoczności) — tak.
+ * Tekst promptu `onboard` i kroki zapisu konfiguracji repo żyją w
+ * `onboarding/onboarding-templates.ts`.
  */
 
 /**
