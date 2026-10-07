@@ -937,6 +937,10 @@ function ProposalDiff({
         data={{
           before: { header: beforeMemory.header, body: beforeMemory.body },
           after: { header: effective.header ?? beforeMemory.header, body: effective.body ?? beforeMemory.body },
+          tags: { before: beforeMemory.tags, after: effective.tags ?? beforeMemory.tags },
+          rationale: effective.rationale
+            ? { category: effective.rationale.category, reason: effective.rationale.reason }
+            : undefined,
         }}
       />
     );
@@ -959,7 +963,14 @@ function ProposalDiff({
   return (
     <DiffView
       type="delete"
-      data={{ memoryId: effective.memoryId ?? beforeMemory.id, header: beforeMemory.header, body: beforeMemory.body }}
+      data={{
+        memoryId: effective.memoryId ?? beforeMemory.id,
+        header: beforeMemory.header,
+        body: beforeMemory.body,
+        rationale: effective.rationale
+          ? { category: effective.rationale.category, reason: effective.rationale.reason }
+          : undefined,
+      }}
     />
   );
 }

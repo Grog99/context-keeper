@@ -532,6 +532,7 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
       model: null,
       callCap: 100,
       timeoutMs: 30000,
+      scanWindowDays: 1,
       apiKey: { action: 'keep' },
     };
 
@@ -561,6 +562,7 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
     it.each([
       ['cap poza zakresem', { callCap: 0 }],
       ['timeout poza zakresem', { timeoutMs: 100 }],
+      ['okno poza zakresem', { scanWindowDays: 0 }],
       ['nieznana akcja klucza', { apiKey: { action: 'reveal' } }],
       ['set bez wartości', { apiKey: { action: 'set' } }],
     ])('%s -> 400', async (_label, patch) => {

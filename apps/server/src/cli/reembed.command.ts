@@ -119,7 +119,7 @@ export class ReembedCommand extends CommandRunner {
     // UWAGA (odkryte przy weryfikacji): nest-commander@3.20.1 połyka błąd rzucony z `run()` —
     // nie propaguje go do `CommandFactory.run()` ani nie ustawia `process.exitCode` (zweryfikowane
     // izolowanym repro; ten sam efekt ma już istniejący `seed-memory.command.ts`). `cli.ts` i tak
-    // woła `process.exit(0)` po sukcesie, więc rzucanie stąd NIE dałoby niezerowego exit code —
+    // ustawia `process.exitCode = 0` po sukcesie, więc rzucanie stąd NIE dałoby niezerowego exit code —
     // zostaje więc czytelny log; niezerowy exit code dla `reembed` to pre-existing ograniczenie
     // frameworka CLI, poza zakresem tej zmiany (dotyczy wszystkich komend, nie tylko tej).
     if (failed > 0) {

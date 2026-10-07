@@ -77,6 +77,8 @@ export interface LlmSettingsDto {
   model: string | null;
   callCap: number;
   timeoutMs: number;
+  /** Okno przeglądu detektorów LLM w dniach (G6, ticket `nightly-llm-prune`). */
+  scanWindowDays: number;
   apiKey: LlmApiKeyState;
   /** `false` → serwer nie ma `SECRETS_ENCRYPTION_KEY`: zapis klucza API jest odrzucany (G5). */
   encryptionKeyConfigured: boolean;
@@ -95,6 +97,7 @@ export interface LlmSettingsUpdate {
   model: string | null;
   callCap: number;
   timeoutMs: number;
+  scanWindowDays: number;
   apiKey: LlmApiKeyAction;
 }
 

@@ -117,6 +117,24 @@ describe('envSchema — RATE_LIMIT_CREATE_PROJECT_PER_MIN (roadmap v1.5)', () =>
   });
 });
 
+describe('envSchema — pusty string w opcjonalnych polach z formatem = nieustawione', () => {
+  // `X=` z `.env.example` (process.loadEnvFile) i `${X:-}` w compose dają `''`, nie brak klucza.
+  it('PUBLIC_MCP_URL="" -> undefined (zamiast "Invalid URL")', () => {
+    expect(envSchema.parse({ ...BASE, PUBLIC_MCP_URL: '' }).PUBLIC_MCP_URL).toBeUndefined();
+  });
+
+  it('EMBEDDING_PRESET="" -> undefined (zamiast błędu enuma)', () => {
+    expect(envSchema.parse({ ...BASE, EMBEDDING_PRESET: '' }).EMBEDDING_PRESET).toBeUndefined();
+  });
+
+  it('niepusty PUBLIC_MCP_URL nadal jest walidowany i normalizowany', () => {
+    expect(envSchema.parse({ ...BASE, PUBLIC_MCP_URL: 'https://ck.example.com/mcp/' }).PUBLIC_MCP_URL).toBe(
+      'https://ck.example.com',
+    );
+    expect(() => envSchema.parse({ ...BASE, PUBLIC_MCP_URL: 'nie-url' })).toThrow();
+  });
+});
+
 describe('envSchema — SECRETS_ENCRYPTION_KEY (roadmap v1.6, G5)', () => {
   const KEY_44 = Buffer.alloc(32, 3).toString('base64'); // 44 znaki, padding '='
   const KEY_43 = Buffer.alloc(32, 250).toString('base64url'); // 43 znaki, url-safe bez paddingu

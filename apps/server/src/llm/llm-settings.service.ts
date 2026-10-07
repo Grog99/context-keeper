@@ -11,8 +11,11 @@ import {
   LLM_CALL_CAP_MAX,
   LLM_CALL_CAP_MIN,
   LLM_DEFAULT_CALL_CAP,
+  LLM_DEFAULT_SCAN_WINDOW_DAYS,
   LLM_DEFAULT_TIMEOUT_MS,
   LLM_GLOBAL_SETTINGS_ID,
+  LLM_SCAN_WINDOW_MAX_DAYS,
+  LLM_SCAN_WINDOW_MIN_DAYS,
   LLM_TIMEOUT_MAX_MS,
   LLM_TIMEOUT_MIN_MS,
 } from './llm.constants';
@@ -22,7 +25,7 @@ import type { LlmApiKeyState, LlmEndpoint, LlmSettingsDto, LlmSettingsUpdate } f
 export type LlmRunConfig =
   | { state: 'disabled' }
   | { state: 'key_unreadable' }
-  | { state: 'ready'; endpoint: LlmEndpoint; callCap: number };
+  | { state: 'ready'; endpoint: LlmEndpoint; callCap: number; scanWindowDays: number };
 
 /** Konfiguracja dla „Sprawdź połączenie" / `check-llm`: ZAPISANA konfiguracja, także gdy krok jest wyłączony. */
 export type LlmCheckConfig =
@@ -75,6 +78,7 @@ export class LlmSettingsService {
       model: row?.model ?? null,
       callCap: row?.callCap ?? LLM_DEFAULT_CALL_CAP,
       timeoutMs: row?.timeoutMs ?? LLM_DEFAULT_TIMEOUT_MS,
+      scanWindowDays: row?.scanWindowDays ?? LLM_DEFAULT_SCAN_WINDOW_DAYS,
       apiKey: this.apiKeyState(row),
       encryptionKeyConfigured: this.box.configured,
       updatedAt: row?.updatedAt.toISOString() ?? null,
@@ -113,6 +117,16 @@ export class LlmSettingsService {
         `Timeout musi być liczbą całkowitą z zakresu ${LLM_TIMEOUT_MIN_MS}–${LLM_TIMEOUT_MAX_MS} ms.`,
       );
     }
+    if (
+      !Number.isInteger(input.scanWindowDays) ||
+      input.scanWindowDays < LLM_SCAN_WINDOW_MIN_DAYS ||
+      input.scanWindowDays > LLM_SCAN_WINDOW_MAX_DAYS
+    ) {
+      throw new ToolError(
+        'validation_error',
+        `Okno przeglądu musi być liczbą całkowitą od ${LLM_SCAN_WINDOW_MIN_DAYS} do ${LLM_SCAN_WINDOW_MAX_DAYS} dni.`,
+      );
+    }
     let newKey: string | null = null;
     if (input.apiKey.action === 'set') {
       if (!this.box.configured) {
@@ -140,16 +154,24 @@ export class LlmSettingsService {
         apiKeyChange = 'cleared';
       }
 
-      const next = { enabled: input.enabled, endpoint, model, callCap: input.callCap, timeoutMs: input.timeoutMs };
+      const next = {
+        enabled: input.enabled,
+        endpoint,
+        model,
+        callCap: input.callCap,
+        timeoutMs: input.timeoutMs,
+        scanWindowDays: input.scanWindowDays,
+      };
       const before = {
         enabled: existing?.enabled ?? false,
         endpoint: existing?.endpoint ?? null,
         model: existing?.model ?? null,
         callCap: existing?.callCap ?? LLM_DEFAULT_CALL_CAP,
         timeoutMs: existing?.timeoutMs ?? LLM_DEFAULT_TIMEOUT_MS,
+        scanWindowDays: existing?.scanWindowDays ?? LLM_DEFAULT_SCAN_WINDOW_DAYS,
       };
       const changes: Record<string, unknown> = {};
-      for (const field of ['enabled', 'endpoint', 'model', 'callCap', 'timeoutMs'] as const) {
+      for (const field of ['enabled', 'endpoint', 'model', 'callCap', 'timeoutMs', 'scanWindowDays'] as const) {
         if (before[field] !== next[field]) changes[field] = { from: before[field], to: next[field] };
       }
       if (apiKeyChange) changes.apiKey = apiKeyChange;
@@ -184,6 +206,7 @@ export class LlmSettingsService {
     return {
       state: 'ready',
       callCap: row.callCap,
+      scanWindowDays: row.scanWindowDays,
       endpoint: { url: row.endpoint, model: row.model, apiKey: key, timeoutMs: row.timeoutMs },
     };
   }

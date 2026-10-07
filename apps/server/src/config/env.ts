@@ -18,6 +18,15 @@ function zBool(defaultValue = false) {
 }
 
 /**
+ * Pusty string -> `undefined` dla opcjonalnych pól z formatem (URL, enum). Compose mapuje
+ * nieustawioną zmienną jako `${X:-}` = `''`, a `process.loadEnvFile` robi to samo dla `X=` z
+ * `.env.example` — bez tego `''` oblewa `.url()`/`z.enum` i appka nie wstaje mimo braku wartości.
+ */
+function emptyAsUndefined<T extends z.ZodType>(schema: T) {
+  return z.preprocess((v) => (v === '' ? undefined : v), schema);
+}
+
+/**
  * Dekoduje `SECRETS_ENCRYPTION_KEY` do 32 bajtów (AES-256) albo zwraca `null`. Akceptuje base64 i
  * base64url (z paddingiem — 44 znaki — i bez — 43 znaki), czyli wyjście `openssl rand -base64 32`.
  * Czysta funkcja: współdzielona przez walidację env (fail-fast przy starcie) i `common/secret-box.ts`.
@@ -75,7 +84,7 @@ export const envSchema = z
     EMBEDDING_DIM: z.coerce.number().int().positive().default(1024),
     EMBEDDING_API_KEY: z.string().optional(),
     EMBEDDING_SAVE_TIMEOUT_MS: z.coerce.number().int().positive().default(1500),
-    EMBEDDING_PRESET: z.enum(['multilingual', 'english', 'api']).optional(),
+    EMBEDDING_PRESET: emptyAsUndefined(z.enum(['multilingual', 'english', 'api']).optional()),
     // TEI sidecar (provider=local); zewnętrzne API (provider=api) — osobny URL, bo różne kontrakty HTTP.
     EMBEDDING_BASE_URL: z.string().min(1).default('http://embeddings:80'),
     EMBEDDING_API_URL: z.string().optional(),
@@ -221,11 +230,13 @@ export const envSchema = z
     // `https://<your-mcp-host>/mcp` z `mcpUrlConfigured: false` (MCP).
     // Trailing `/` i trailing `/mcp` są tu przycinane, żeby frontend mógł bezpiecznie doklejać
     // `/mcp`/`/health` bez ryzyka `//mcp` albo `/mcp/mcp`.
-    PUBLIC_MCP_URL: z
-      .string()
-      .url()
-      .optional()
-      .transform((v) => v?.replace(/\/+$/, '').replace(/\/mcp$/, '')),
+    PUBLIC_MCP_URL: emptyAsUndefined(
+      z
+        .string()
+        .url()
+        .optional()
+        .transform((v) => v?.replace(/\/+$/, '').replace(/\/mcp$/, '')),
+    ),
   })
   .superRefine((env, ctx) => {
     if (env.EMBEDDING_PROVIDER === 'api' && !env.EMBEDDING_API_KEY) {
@@ -291,8 +302,9 @@ export type Env = z.infer<typeof envSchema>;
 /**
  * Kandydaci na `.env` w kolejności prób, gdy `DOTENV_PATH` NIE jest ustawiony jawnie.
  *
- * `.env` — cwd procesu. Trafia w produkcji (kontener ma `.env` w WORKDIR) i przy uruchomieniu
- * z korzenia repo.
+ * `.env` — cwd procesu. Trafia przy uruchomieniu z korzenia repo. Obraz Dockera `.env` NIE ma
+ * (`.dockerignore`) — w kontenerze env przychodzi wyłącznie z listy `environment:` w compose
+ * (parytet z tym schematem pilnuje `test/compose-env-parity.spec.ts`).
  *
  * `../../.env` — korzeń monorepo widziany z katalogu pakietu. Potrzebne, bo `pnpm --filter <pkg>`
  * (czyli rootowy skrypt `pnpm dev`) uruchamia skrypt z cwd = `apps/server`, a `.env` repo leży
@@ -310,7 +322,7 @@ export function resolveDotenvCandidates(dotenvPath = process.env.DOTENV_PATH): s
   return dotenvPath ? [dotenvPath] : [...DOTENV_FALLBACKS];
 }
 
-/** Ładuje .env do process.env jeśli plik istnieje (dev). W produkcji env wstrzykuje Compose. */
+/** Ładuje .env do process.env jeśli plik istnieje (dev). W kontenerze env wstrzykuje Compose. */
 function loadDotenvIfPresent(): void {
   const loader = (process as unknown as { loadEnvFile?: (p: string) => void }).loadEnvFile;
   if (typeof loader !== 'function') return;

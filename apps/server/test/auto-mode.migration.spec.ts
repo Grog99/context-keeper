@@ -7,12 +7,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { migrateUpTo, REAL_MIGRATIONS_FOLDER } from './helpers/migrations';
 
 /**
- * Migracja 0018 (roadmap v1.6, A2 „auto mode": `projects.auto_mode`/`auto_mode_daily_limit`,
+ * Migracja 0019 (roadmap v1.6, A2 „auto mode": `projects.auto_mode`/`auto_mode_daily_limit`,
  * `proposals.auto_hold_reasons`/`auto_approved_at`, `memories.auto_approved_at` + indeksy częściowe + CHECK-i)
- * jako REALNY UPGRADE z 0017 na bazie z danymi. Wiersze sprzed migracji muszą dostać wartości domyślne
+ * jako REALNY UPGRADE z 0018 na bazie z danymi. Wiersze sprzed migracji muszą dostać wartości domyślne
  * (auto mode wyłączony, limit 50) i NULL-e w nowych kolumnach, a CHECK-i muszą działać po upgrade'dzie.
  */
-describe('migracja 0018 — upgrade 0017 → 0018 na niepustej bazie (testcontainers)', () => {
+describe('migracja 0019 — upgrade 0018 → 0019 na niepustej bazie (testcontainers)', () => {
   let container: StartedPostgreSqlContainer;
   let pool: Pool;
   let tmpFolder: string | undefined;
@@ -21,7 +21,7 @@ describe('migracja 0018 — upgrade 0017 → 0018 na niepustej bazie (testcontai
     container = await new PostgreSqlContainer('pgvector/pgvector:pg18-trixie').start();
     pool = new Pool({ connectionString: container.getConnectionUri() });
 
-    tmpFolder = await migrateUpTo(pool, '0018_');
+    tmpFolder = await migrateUpTo(pool, '0019_');
 
     await pool.query("INSERT INTO projects (id, name, slug) VALUES ('proj_a', 'A', 'proj-a')");
     await pool.query(
@@ -33,7 +33,7 @@ describe('migracja 0018 — upgrade 0017 → 0018 na niepustej bazie (testcontai
        VALUES ('prop_a', 'create', 'agent', 'pending', '{}'::jsonb, 'project', 'proj_a')`,
     );
 
-    // Realny upgrade: tylko wpis 0018 (osobna transakcja drizzle) nad istniejącymi wierszami.
+    // Realny upgrade: tylko wpis 0019 (osobna transakcja drizzle) nad istniejącymi wierszami.
     await migrate(drizzle(pool), { migrationsFolder: REAL_MIGRATIONS_FOLDER });
   });
 

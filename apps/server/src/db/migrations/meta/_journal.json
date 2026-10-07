@@ -131,8 +131,15 @@
     {
       "idx": 18,
       "version": "7",
-      "when": 1791396456151,
-      "tag": "0018_auto_mode",
+      "when": 1791389999937,
+      "tag": "0018_llm_settings_scan_window",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791408691812,
+      "tag": "0019_auto_mode",
       "breakpoints": true
     }
   ]

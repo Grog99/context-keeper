@@ -26,8 +26,12 @@ export function OperacjeScreen() {
         toast.info('Nocny job już trwa (pominięto) — poczekaj na zakończenie równoległego przebiegu.');
       } else {
         const c = result.counters;
+        const llmPruneProposed = c.llmPruneDeleteProposed + c.llmPruneUpdateProposed;
         toast.success(
-          `+${c.created} propozycji · merge ${c.mergeProposed} · prune ${c.pruneProposed} · wycofano ${c.withdrawn}`,
+          `+${c.created} propozycji · merge ${c.mergeProposed} · prune ${c.pruneProposed} · wycofano ${c.withdrawn}` +
+            (llmPruneProposed > 0
+              ? ` · LLM: usuń ${c.llmPruneDeleteProposed} · skróć ${c.llmPruneUpdateProposed}`
+              : ''),
         );
       }
       queryClient.invalidateQueries({ queryKey: ['proposals'] });
@@ -47,7 +51,8 @@ export function OperacjeScreen() {
         <h2 className="mb-1 text-sm font-semibold text-foreground">Nocny job</h2>
         <p className="mb-3.5 text-xs leading-relaxed text-muted-foreground">
           Proposer dedup/merge + prune — skanuje zatwierdzone fakty, wykrywa duplikaty (ANN) i kandydatów do
-          usunięcia (recency). Wynik ląduje w Kolejce jak każda inna propozycja — nic nie jest zatwierdzane
+          usunięcia (recency); gdy w Ustawieniach włączono krok LLM, model dodatkowo ocenia świeże fakty
+          (usunięcie efemerycznych i pustych, skrócenie rozwlekłych). Wynik ląduje w Kolejce jak każda inna propozycja — nic nie jest zatwierdzane
           automatycznie. Normalnie odpalany przez zewnętrzny scheduler; ten przycisk uruchamia przebieg
           ręcznie i czeka na wynik.
         </p>

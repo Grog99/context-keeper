@@ -8,6 +8,11 @@ export interface ExistingNightlyProposal {
   type: NightlyConditionType;
   affectedIds: string[];
   stale: boolean;
+  /** `true` dla proposala z detektora LLM (`payload.rationale`, wyliczone przez wołającego). Taki detektor
+   * pracuje na OKNIE, nie na pełnym stanie bazy, więc „niewykryty ponownie" znaczy „detektor przestał
+   * patrzeć", nie „warunek ustał" (ust. 13) — proposal zostaje pending do decyzji człowieka. Gdyby okno
+   * kiedyś zniknęło (pełny skan LLM), to wyłączenie trzeba cofnąć. */
+  exemptFromOrphanWithdraw: boolean;
 }
 
 export interface ReconcileResult {
@@ -37,7 +42,9 @@ export interface ReconcileResult {
  *    `toCreate` (treść/wersje się zmieniły) — para do zastosowania atomowo przez wołającego
  *  - brak dopasowania w `existing`     -> create (nowo wykryty warunek)
  *  - istniejący bez dopasowania w `detected` (orphan — warunek już nie zachodzi, np. archiwizacja
- *    członka poza kolejką, albo politeness gate go odfiltrował) -> `toWithdraw` (bezwarunkowo)
+ *    członka poza kolejką, albo politeness gate go odfiltrował) -> `toWithdraw` (bezwarunkowo),
+ *    WYJĄTEK: proposal z detektora LLM (`exemptFromOrphanWithdraw`) zostaje pending (ust. 13) — jeśli
+ *    jednak dopasuje wykryty warunek, zachowuje się jak każdy inny (skip / replace)
  *
  * Każdy `existing` proposal dopasowuje się do co najwyżej jednego `detected` (klucz jest unikalny
  * z definicji — jeden warunek = jeden `conditionKey`), więc `toWithdraw`/`replacements`/`toCreate`/
@@ -76,7 +83,7 @@ export function reconcile(
   }
 
   for (const e of existing) {
-    if (!matchedIds.has(e.id)) {
+    if (!matchedIds.has(e.id) && !e.exemptFromOrphanWithdraw) {
       toWithdraw.push(e.id);
     }
   }

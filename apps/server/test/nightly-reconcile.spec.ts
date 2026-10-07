@@ -7,6 +7,7 @@ function condition(overrides: Partial<DetectedCondition> = {}): DetectedConditio
   const type = overrides.type ?? 'merge';
   return {
     type,
+    detector: 'dedup',
     scope: 'project',
     projectId: 'proj_x',
     affectedIds,
@@ -23,6 +24,7 @@ function existing(overrides: Partial<ExistingNightlyProposal> = {}): ExistingNig
     type: 'merge',
     affectedIds: ['mem_a', 'mem_b'],
     stale: false,
+    exemptFromOrphanWithdraw: false,
     ...overrides,
   };
 }
@@ -144,5 +146,61 @@ describe('reconcile (Faza 6 — tabela decyzji self-cleaning re-scan)', () => {
 
     expect(pairedWithdraw).toEqual([]);
     expect(allToWithdraw).toEqual([]); // stary "prop_stale" NIE jest wycofywany ten przebieg
+  });
+
+  describe('wyjątek orphan-withdraw dla detektora LLM (ust. 13)', () => {
+    it('exempt bez dopasowania -> NIE trafia do toWithdraw (zostaje pending)', () => {
+      const llmExisting = existing({ id: 'prop_llm', type: 'delete', affectedIds: ['mem_x'], exemptFromOrphanWithdraw: true });
+
+      const result = reconcile([], [llmExisting]);
+
+      expect(result.toWithdraw).toEqual([]);
+      expect(result.toCreate).toEqual([]);
+      expect(result.replacements.size).toBe(0);
+      expect(result.skipped).toEqual([]);
+    });
+
+    it('non-exempt bez dopasowania nadal jest wycofywany (regresja: dedup/recency)', () => {
+      const plain = existing({ id: 'prop_plain', type: 'delete', affectedIds: ['mem_x'], exemptFromOrphanWithdraw: false });
+      const llmExisting = existing({ id: 'prop_llm', type: 'delete', affectedIds: ['mem_y'], exemptFromOrphanWithdraw: true });
+
+      const result = reconcile([], [plain, llmExisting]);
+
+      expect(result.toWithdraw).toEqual(['prop_plain']);
+    });
+
+    it('exempt + dopasowany + stale -> replacement jak zawsze', () => {
+      const cond = condition({ type: 'delete', affectedIds: ['mem_x'] });
+      const llmExisting = existing({
+        id: 'prop_llm',
+        type: 'delete',
+        affectedIds: ['mem_x'],
+        stale: true,
+        exemptFromOrphanWithdraw: true,
+      });
+
+      const result = reconcile([cond], [llmExisting]);
+
+      expect(result.replacements.get(cond.conditionKey)).toBe('prop_llm');
+      expect(result.toCreate).toEqual([cond]);
+      expect(result.toWithdraw).toEqual([]);
+    });
+
+    it('exempt + dopasowany + aktualny -> skip', () => {
+      const cond = condition({ type: 'delete', affectedIds: ['mem_x'] });
+      const llmExisting = existing({
+        id: 'prop_llm',
+        type: 'delete',
+        affectedIds: ['mem_x'],
+        stale: false,
+        exemptFromOrphanWithdraw: true,
+      });
+
+      const result = reconcile([cond], [llmExisting]);
+
+      expect(result.skipped).toEqual(['prop_llm']);
+      expect(result.toCreate).toEqual([]);
+      expect(result.toWithdraw).toEqual([]);
+    });
   });
 });

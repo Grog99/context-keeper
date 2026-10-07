@@ -1,6 +1,6 @@
 {
-  "id": "b8aa4236-3d4b-485e-9522-6873a360ad18",
-  "prevId": "4a728040-ea92-4a7f-acef-7599ad678126",
+  "id": "aa80fe26-f8ce-45c2-9a60-192f79fa859a",
+  "prevId": "b8aa4236-3d4b-485e-9522-6873a360ad18",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -39,6 +39,20 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "auto_mode": {
+          "name": "auto_mode",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "auto_mode_daily_limit": {
+          "name": "auto_mode_daily_limit",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 50
         }
       },
       "indexes": {
@@ -81,6 +95,10 @@
         "projects_slug_format_check": {
           "name": "projects_slug_format_check",
           "value": "\"projects\".\"slug\" ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND char_length(\"projects\".\"slug\") BETWEEN 2 AND 48"
+        },
+        "projects_auto_mode_daily_limit_check": {
+          "name": "projects_auto_mode_daily_limit_check",
+          "value": "\"projects\".\"auto_mode_daily_limit\" BETWEEN 1 AND 10000"
         }
       },
       "isRLSEnabled": false
@@ -353,6 +371,12 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "auto_approved_at": {
+          "name": "auto_approved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -427,6 +451,22 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "memories_auto_approved_at_idx": {
+          "name": "memories_auto_approved_at_idx",
+          "columns": [
+            {
+              "expression": "auto_approved_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"memories\".\"auto_approved_at\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -874,6 +914,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "auto_hold_reasons": {
+          "name": "auto_hold_reasons",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "auto_approved_at": {
+          "name": "auto_approved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "scope": {
           "name": "scope",
           "type": "memory_scope",
@@ -1002,6 +1054,28 @@
           "method": "btree",
           "with": {}
         },
+        "proposals_project_auto_approved_idx": {
+          "name": "proposals_project_auto_approved_idx",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "auto_approved_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"proposals\".\"auto_approved_at\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "proposals_create_project_slug_pending_key": {
           "name": "proposals_create_project_slug_pending_key",
           "columns": [
@@ -1037,7 +1111,16 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "proposals_auto_hold_reasons_check": {
+          "name": "proposals_auto_hold_reasons_check",
+          "value": "\"proposals\".\"auto_hold_reasons\" IS NULL OR (cardinality(\"proposals\".\"auto_hold_reasons\") > 0 AND \"proposals\".\"auto_hold_reasons\" <@ ARRAY['near_duplicate','not_computed','human_target','daily_limit','auto_failed']::text[])"
+        },
+        "proposals_auto_state_check": {
+          "name": "proposals_auto_state_check",
+          "value": "\"proposals\".\"auto_approved_at\" IS NULL OR \"proposals\".\"auto_hold_reasons\" IS NULL"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.revisions": {
