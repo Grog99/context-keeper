@@ -18,7 +18,14 @@ const SUCCESS_RESULT: NightlyRunResult = {
     skippedPoliteness: 0,
     skippedCap: 0,
     searchEventsPruned: 5,
+    llmCalls: 12,
+    llmErrors: 1,
+    llmSkippedCap: 0,
+    llmSkippedBreaker: 0,
+    llmSkippedSecret: 2,
+    llmSkippedKeyUnreadable: 0,
   },
+  llm: { state: 'ready', skippedSecret: [{ memoryId: 'mem_abc', secretType: 'aws_access_key' }] },
 };
 
 /** Fake `NightlyService` — kontroler jest cienkim wrapperem, więc test sprawdza WYŁĄCZNIE że
@@ -54,6 +61,8 @@ describe('NightlyController.run — ręczny trigger z dashboardu (roadmap v1.1)'
 
     expect(result).toBe(SUCCESS_RESULT);
     expect(result.counters.searchEventsPruned).toBe(5);
+    expect(result.counters.llmCalls).toBe(12);
+    expect(result.llm?.skippedSecret).toEqual([{ memoryId: 'mem_abc', secretType: 'aws_access_key' }]);
   });
 
   it('"skipped-locked" przechodzi jako zwykłe dane 200, nie błąd', async () => {
@@ -71,12 +80,20 @@ describe('NightlyController.run — ręczny trigger z dashboardu (roadmap v1.1)'
         skippedPoliteness: 0,
         skippedCap: 0,
         searchEventsPruned: 0,
+        llmCalls: 0,
+        llmErrors: 0,
+        llmSkippedCap: 0,
+        llmSkippedBreaker: 0,
+        llmSkippedSecret: 0,
+        llmSkippedKeyUnreadable: 0,
       },
+      llm: null,
     };
     const controller = new NightlyController(fakeNightly({ result: skippedResult }));
 
     const result = await controller.run();
 
     expect(result.status).toBe('skipped-locked');
+    expect(result.llm).toBeNull();
   });
 });

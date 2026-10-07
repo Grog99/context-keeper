@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { withTimeout } from '../common/with-timeout';
 import { AppConfigService } from '../config/config.service';
 import type { MemoryKind } from '../db/schema/enums';
 import { chunk, type MemoryChunk } from './chunker';
@@ -15,18 +16,6 @@ export interface EmbedMemoryResult {
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  let timer!: ReturnType<typeof setTimeout>;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`timed out after ${timeoutMs}ms`)), timeoutMs);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 /** Formatuje wektor JS jako literal pgvector (`'[0.1,0.2,...]'`) do wklejenia w surowe SQL

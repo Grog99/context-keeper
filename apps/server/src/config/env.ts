@@ -27,6 +27,23 @@ function emptyAsUndefined<T extends z.ZodType>(schema: T) {
 }
 
 /**
+ * Dekoduje `SECRETS_ENCRYPTION_KEY` do 32 bajtów (AES-256) albo zwraca `null`. Akceptuje base64 i
+ * base64url (z paddingiem — 44 znaki — i bez — 43 znaki), czyli wyjście `openssl rand -base64 32`.
+ * Czysta funkcja: współdzielona przez walidację env (fail-fast przy starcie) i `common/secret-box.ts`.
+ * NIGDY nie loguje ani nie zwraca samej wartości w komunikacie — wołający dostaje bufor albo `null`.
+ */
+export function decodeSecretsKey(value: string): Buffer | null {
+  const s = value.trim();
+  if (!/^[A-Za-z0-9+/_-]+={0,2}$/.test(s)) return null;
+  const unpadded = s.replace(/=+$/, '');
+  // 32 bajty = 43 znaki base64 bez paddingu (44 z jednym '='); inne długości to nie ten rozmiar klucza.
+  if (unpadded.length !== 43) return null;
+  if (s.length !== unpadded.length && s.length !== 44) return null;
+  const buf = Buffer.from(unpadded, 'base64');
+  return buf.length === 32 ? buf : null;
+}
+
+/**
  * Trójka implikowana przez preset (§7 tech-stack) — PRESET jest tylko wygodą instalatora,
  * PROVIDER/MODEL/DIM zostają autorytatywne (walidacja w superRefine niżej).
  * `api` celuje w DIM=1024 (Matryoshka — `text-embedding-3-*` zwraca skrócony/renormalizowany
@@ -101,6 +118,18 @@ export const envSchema = z
     TAGS_MAX: z.coerce.number().int().positive().default(10),
     TAG_MAX_LEN: z.coerce.number().int().positive().default(40),
 
+    // Detekcja prawie-duplikatów przy zapisie (roadmap v1.6, A1). Próg "podejrzanego duplikatu" —
+    // dystans kosinusowy `<=>` między nową propozycją agenta a zatwierdzoną pamięcią: poniżej/równo =
+    // wpis w podpowiedzi „podobne do istniejących" (`proposals.similar_memories`), a później (A2)
+    // sygnał bezpiecznika auto mode. NIEZALEŻNY od NIGHTLY_DEDUP_DISTANCE (tamten celowo wąski, "scal
+    // wąsko"; ten ma łapać parafrazy). Wartość jest SPECYFICZNA DLA MODELU embeddingów:
+    // - domyślne 0.20 zmierzone dla bge-m3 (domyślny preset `multilingual`, 2026-10-07): łapie 86%
+    //   parafraz (36/42), 0% niepowiązanych próbek (najbliższa niepowiązana: 0.311);
+    // - preset `api` z text-embedding-3-small (żywa instancja dogfood) MUSI jawnie ustawić
+    //   NEAR_DUPLICATE_DISTANCE=0.13 w env (Coolify): 79% parafraz PL→PL (23/29), 0 fałszywych
+    //   alarmów w tle (kolejne różne pary dopiero od 0.138); przy 0.20 ten model dawałby szum.
+    NEAR_DUPLICATE_DISTANCE: z.coerce.number().positive().max(2).default(0.2),
+
     // Nocny job (§8, Faza 6). NIGHTLY_CRON/NIGHTLY_TZ to kontrakt dla ZEWNĘTRZNEGO schedulera
     // (Faza 8, installer/infra) — `run-nightly` CLI ich nie czyta, odpala się natychmiast po
     // wywołaniu. Progi poniżej to knoby dostrajane na realnych danych (PRD §11), wartości domyślne
@@ -174,6 +203,17 @@ export const envSchema = z
     SESSION_SECRET: z.string().optional(),
     SESSION_TTL_HOURS: z.coerce.number().int().positive().default(12),
     DASHBOARD_COOKIE_NAME: z.string().min(1).default('ck_session'),
+    // Klucz szyfrujący sekrety trzymane w bazie (roadmap v1.6, `llm_settings.api_key_ciphertext`) —
+    // AES-256-GCM, 32 bajty w base64/base64url (`openssl rand -base64 32`). OPCJONALNY: bez niego appka
+    // startuje normalnie, a zapis klucza API w Ustawieniach jest odrzucany czytelnym komunikatem (G5).
+    // Pusty string (`SECRETS_ENCRYPTION_KEY=` z compose/.env) = brak. Ustawiony, ale nie-32-bajtowy =
+    // twardy fail przy starcie (literówka nie może po cichu zamienić się w "klucz nieczytelny" w UI);
+    // komunikat NIE niesie wartości. Zmiana klucza unieważnia zapisane szyfrogramy (G7: wpisz ponownie).
+    SECRETS_ENCRYPTION_KEY: z
+      .preprocess((v) => (v === '' ? undefined : v), z.string().optional())
+      .refine((v) => v === undefined || decodeSecretsKey(v) !== null, {
+        message: 'musi być 32-bajtowym kluczem w base64/base64url (openssl rand -base64 32)',
+      }),
 
     // Compose / edge
     COMPOSE_PROFILES: z.string().optional(),

@@ -4,6 +4,7 @@ import { Test } from '@nestjs/testing';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AuditService } from '../src/audit/audit.service';
+import { encodeKeysetCursor } from '../src/common/keyset-cursor';
 import { AppConfigService } from '../src/config/config.service';
 import { AccountTokensController } from '../src/dashboard/account-tokens.controller';
 import { AuditController } from '../src/dashboard/audit.controller';
@@ -16,7 +17,10 @@ import { NightlyController } from '../src/dashboard/nightly.controller';
 import { OnboardingController } from '../src/dashboard/onboarding.controller';
 import { ProjectsController } from '../src/dashboard/projects.controller';
 import { ProposalsController } from '../src/dashboard/proposals.controller';
+import { SettingsController } from '../src/dashboard/settings.controller';
 import { UsageMetricsController } from '../src/dashboard/usage-metrics.controller';
+import { LlmSettingsService } from '../src/llm/llm-settings.service';
+import { LlmService } from '../src/llm/llm.service';
 import { MemoryAdminService } from '../src/memory/memory-admin.service';
 import { NightlyService } from '../src/nightly/nightly.service';
 import { OnboardingService } from '../src/onboarding/onboarding.service';
@@ -36,6 +40,10 @@ let calls: string[] = [];
 function track(name: string) {
   calls.push(name);
 }
+
+/** Ostatnie argumenty przekazane do fake'ów list (audyt/propozycje) — dowód, co faktycznie dotarło do serwisu. */
+let lastAuditFilter: unknown;
+let lastProposalsPageFilter: unknown;
 
 function fakeMemoryAdmin(): MemoryAdminService {
   return {
@@ -62,7 +70,11 @@ function fakePurge(): PurgeService {
 
 function fakeAudit(): AuditService {
   return {
-    query: async () => (track('audit.query'), []),
+    query: async (filter: unknown) => (
+      track('audit.query'),
+      (lastAuditFilter = filter),
+      { items: [], nextCursor: null }
+    ),
     log: async () => track('audit.log'),
     countSince: async () => 0,
     latestByEventType: async () => null,
@@ -72,6 +84,11 @@ function fakeAudit(): AuditService {
 function fakeProposals(): ProposalsService {
   return {
     listPending: async () => (track('proposals.listPending'), []),
+    listPendingPage: async (filter: unknown) => (
+      track('proposals.listPendingPage'),
+      (lastProposalsPageFilter = filter),
+      { items: [], nextCursor: null, total: 0 }
+    ),
     getProposal: async () => (track('proposals.getProposal'), { id: 'prop_1' }),
     approve: async () => (track('proposals.approve'), { proposalId: 'prop_1', archivedIds: [], embedding: 'vectorless' }),
     reject: async () => track('proposals.reject'),
@@ -121,6 +138,21 @@ function fakeNightly(): NightlyService {
   } as unknown as NightlyService;
 }
 
+const LLM_SENTINEL = 'sk-sentinel-DO-NOT-LEAK-http-77777';
+
+function fakeLlmSettings(): LlmSettingsService {
+  return {
+    getPublic: async () => (track('llmSettings.getPublic'), {}),
+    update: async () => (track('llmSettings.update'), {}),
+  } as unknown as LlmSettingsService;
+}
+
+function fakeLlm(): LlmService {
+  return {
+    checkConnection: async () => (track('llm.checkConnection'), { ok: false, error: 'x' }),
+  } as unknown as LlmService;
+}
+
 const CONFIG_DEFAULTS: Record<string, unknown> = {
   BODY_MAX_FACT: 8192,
   BODY_MAX_DOCUMENT: 262144,
@@ -151,6 +183,7 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
         UsageMetricsController,
         ConfigController,
         NightlyController,
+        SettingsController,
       ],
       providers: [
         { provide: MemoryAdminService, useValue: fakeMemoryAdmin() },
@@ -160,6 +193,8 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
         { provide: ProjectsService, useValue: fakeProjects() },
         { provide: UsageService, useValue: fakeUsage() },
         { provide: NightlyService, useValue: fakeNightly() },
+        { provide: LlmSettingsService, useValue: fakeLlmSettings() },
+        { provide: LlmService, useValue: fakeLlm() },
         { provide: OnboardingService, useValue: fakeOnboarding() },
         { provide: AppConfigService, useValue: fakeConfig() },
         DashboardErrorFilter,
@@ -224,6 +259,52 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
       expect(json.message).toContain('bucket');
       expect(calls).toEqual([]);
     });
+
+    it('GET /api/proposals?limit=501 (powyżej maksimum)', async () => {
+      const { status, json } = await req('GET', '/api/proposals?limit=501');
+      expect(status).toBe(400);
+      expect(json).toMatchObject({ code: 'validation_error' });
+      expect(json.message).toContain('limit');
+      expect(calls).toEqual([]);
+    });
+
+    it('GET /api/proposals?limit=abc (niecyfrowy limit)', async () => {
+      const { status, json } = await req('GET', '/api/proposals?limit=abc');
+      expect(status).toBe(400);
+      expect(json.message).toContain('limit');
+      expect(calls).toEqual([]);
+    });
+
+    it('GET /api/proposals?cursor=garbage (nie jest kursorem keyset)', async () => {
+      const { status, json } = await req('GET', '/api/proposals?cursor=garbage');
+      expect(status).toBe(400);
+      expect(json.message).toContain('cursor');
+      expect(calls).toEqual([]);
+    });
+
+    it('GET /api/audit?cursor=<ISO> (stary format kursora) -> 400', async () => {
+      const { status, json } = await req('GET', '/api/audit?cursor=2026-01-02T00%3A00%3A00.000Z');
+      expect(status).toBe(400);
+      expect(json.message).toContain('cursor');
+      expect(calls).toEqual([]);
+    });
+
+    // Kształt zgodny z regexem, ale data kalendarzowo niepoprawna — bez walidacji Postgres rzuciłby 22008
+    // na `::timestamptz` (500 zamiast 400).
+    const calendarInvalidCursor = Buffer.from(
+      JSON.stringify(['2026-13-45T25:61:61.000000Z', 'abc']),
+    ).toString('base64url');
+
+    it.each(['/api/audit', '/api/proposals'])(
+      'GET %s?cursor=<kalendarzowo niepoprawny ts> -> 400 validation_error',
+      async (path) => {
+        const { status, json } = await req('GET', `${path}?cursor=${calendarInvalidCursor}`);
+        expect(status).toBe(400);
+        expect(json).toMatchObject({ code: 'validation_error' });
+        expect(json.message).toContain('cursor');
+        expect(calls).toEqual([]);
+      },
+    );
 
     it('GET /api/proposals?foo=1 (nieznany klucz query)', async () => {
       const { status, json } = await req('GET', '/api/proposals?foo=1');
@@ -370,13 +451,28 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
       expect(calls).toEqual(['memoryAdmin.listMemories']);
     });
 
-    it('GET /api/audit?from=<iso>&cursor=<iso> -> fake dostaje from jako Date, cursor jako string', async () => {
-      const { status } = await req(
+    it('GET /api/audit?from=<iso>&cursor=<keyset> -> fake dostaje from jako Date, cursor jako { ts, id }', async () => {
+      const pos = { ts: '2026-01-02T00:00:00.123456Z', id: 'evt_abc123' };
+      const { status, json } = await req(
         'GET',
-        '/api/audit?from=2026-01-01T00%3A00%3A00.000Z&cursor=2026-01-02T00%3A00%3A00.000Z',
+        `/api/audit?from=2026-01-01T00%3A00%3A00.000Z&cursor=${encodeKeysetCursor(pos)}`,
       );
       expect(status).toBe(200);
+      expect(json).toEqual({ items: [], nextCursor: null });
       expect(calls).toEqual(['audit.query']);
+      expect(lastAuditFilter).toMatchObject({ from: new Date('2026-01-01T00:00:00.000Z'), cursor: pos });
+    });
+
+    it('GET /api/proposals?limit=50&type=merge&scope=global&cursor=<keyset> -> listPendingPage dostaje sparsowane filtry', async () => {
+      const pos = { ts: '2026-01-02T00:00:00.123456Z', id: 'prop_abc123' };
+      const { status, json } = await req(
+        'GET',
+        `/api/proposals?limit=50&type=merge&scope=global&cursor=${encodeKeysetCursor(pos)}`,
+      );
+      expect(status).toBe(200);
+      expect(json).toEqual({ items: [], nextCursor: null, total: 0 });
+      expect(calls).toEqual(['proposals.listPendingPage']);
+      expect(lastProposalsPageFilter).toMatchObject({ limit: 50, type: 'merge', scope: 'global', cursor: pos });
     });
 
     it('POST /api/proposals/p1/approve bez body -> nie 400 (domyślny status Nesta dla POST to 201)', async () => {
@@ -414,6 +510,65 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
       const { status } = await req('POST', '/api/memories/mem_1/archive');
       expect(status).not.toBe(400);
       expect(calls).toEqual(['memoryAdmin.archiveMemory']);
+    });
+  });
+
+  describe('PUT /api/settings/llm (roadmap v1.6) — walidacja i brak klucza API w odpowiedziach', () => {
+    const VALID = {
+      enabled: false,
+      endpoint: null,
+      model: null,
+      callCap: 100,
+      timeoutMs: 30000,
+      apiKey: { action: 'keep' },
+    };
+
+    it('niepoprawne body niosące klucz-wartownik -> 400, a JSON odpowiedzi NIE zawiera wartownika; serwis niewołany', async () => {
+      const { status, json } = await req('PUT', '/api/settings/llm', {
+        ...VALID,
+        callCap: 'dużo',
+        apiKey: { action: 'set', value: LLM_SENTINEL },
+        nieznane: LLM_SENTINEL,
+      });
+      expect(status).toBe(400);
+      expect(json).toMatchObject({ code: 'validation_error' });
+      expect(JSON.stringify(json)).not.toContain(LLM_SENTINEL);
+      expect(calls).toEqual([]);
+    });
+
+    it('endpoint z loginem/hasłem w URL-u -> 400 bez echa wartości', async () => {
+      const { status, json } = await req('PUT', '/api/settings/llm', {
+        ...VALID,
+        endpoint: `https://user:${LLM_SENTINEL}@host/v1/chat/completions`,
+      });
+      expect(status).toBe(400);
+      expect(JSON.stringify(json)).not.toContain(LLM_SENTINEL);
+      expect(calls).toEqual([]);
+    });
+
+    it.each([
+      ['cap poza zakresem', { callCap: 0 }],
+      ['timeout poza zakresem', { timeoutMs: 100 }],
+      ['nieznana akcja klucza', { apiKey: { action: 'reveal' } }],
+      ['set bez wartości', { apiKey: { action: 'set' } }],
+    ])('%s -> 400', async (_label, patch) => {
+      const { status } = await req('PUT', '/api/settings/llm', { ...VALID, ...patch });
+      expect(status).toBe(400);
+      expect(calls).toEqual([]);
+    });
+
+    it('poprawne body przechodzi do serwisu', async () => {
+      const { status } = await req('PUT', '/api/settings/llm', VALID);
+      expect(status).toBe(200);
+      expect(calls).toEqual(['llmSettings.update']);
+    });
+
+    it('GET i POST /check: nieznany klucz query -> 400; poprawne -> 200', async () => {
+      expect((await req('GET', '/api/settings/llm?foo=1')).status).toBe(400);
+      expect((await req('POST', '/api/settings/llm/check', { x: 1 })).status).toBe(400);
+      expect(calls).toEqual([]);
+      expect((await req('POST', '/api/settings/llm/check')).status).toBe(200);
+      expect(calls).toEqual(['llm.checkConnection']);
     });
   });
 });

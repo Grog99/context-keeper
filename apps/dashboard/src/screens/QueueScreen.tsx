@@ -1,6 +1,7 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowUpRight, RefreshCw } from 'lucide-react';
+import { ArrowUpRight, RefreshCw, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   AlertDialog,
@@ -21,6 +22,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Textarea } from '../components/ui/textarea';
 import { Input } from '../components/ui/input';
 import { BulkFailuresDialog } from '../components/BulkFailuresDialog';
+import { DedupHint } from '../components/DedupHint';
 import { DiffView } from '../components/DiffView';
 import { EmptyState } from '../components/EmptyState';
 import { KindMarker } from '../components/KindMarker';
@@ -46,6 +48,8 @@ import type {
   EditProposalResult,
   MemoryDetail,
   ProjectListItem,
+  ProposalListItem,
+  ProposalListPage,
   ProposalView,
 } from '../types/api';
 import type { ProposalOrigin, ProposalType, RelationType } from '../types/domain';
@@ -53,19 +57,24 @@ import type { ProposalOrigin, ProposalType, RelationType } from '../types/domain
 type OriginFilter = 'all' | ProposalOrigin;
 type TypeFilter = 'all' | ProposalType;
 
-/** Tytuł propozycji `create_project` (roadmap v1.5) — wiersz kolejki i nagłówek detalu. */
-function projectProposalTitle(effective: ProposalView['payload']): string {
+/** Tytuł propozycji `create_project` (roadmap v1.5) — wiersz kolejki i nagłówek detalu. Przyjmuje
+ * zarówno efektywny payload detalu (`undefined`), jak i `summary` lekkiej listy (`null`). */
+function projectProposalTitle(effective: { name?: string | null; slug?: string | null }): string {
   return `Nowy projekt: ${effective.name ?? '?'} (${effective.slug ?? '?'})`;
 }
 
-function rowTitle(p: ProposalView): string {
-  const effective = p.editedPayload ?? p.payload;
-  if (p.type === 'create_project') return projectProposalTitle(effective);
-  if (effective.header) return effective.header;
-  if (p.type === 'delete') return `Archiwizacja pamięci ${effective.memoryId ?? ''}`.trim();
-  if (p.type === 'update') return `Aktualizacja pamięci ${effective.memoryId ?? ''}`.trim();
+/** Tytuł wiersza z `summary` lekkiej listy (nightly-scale G3) — serwer wylicza je z EFEKTYWNEGO payloadu
+ * (`coalesce(edited_payload, payload)`), więc te same Polskie stringi co wcześniej z pełnego payloadu. */
+function rowTitle(p: ProposalListItem): string {
+  const { summary } = p;
+  if (p.type === 'create_project') return projectProposalTitle(summary);
+  if (summary.header) return summary.header;
+  if (p.type === 'delete') return `Archiwizacja pamięci ${summary.memoryId ?? ''}`.trim();
+  if (p.type === 'update') return `Aktualizacja pamięci ${summary.memoryId ?? ''}`.trim();
   return `(propozycja ${p.id})`;
 }
+
+const fetchProposalDetail = (id: string): Promise<ProposalView> => api.get<ProposalView>(`/proposals/${id}`);
 
 function projectNameFor(projectId: string | null, projects: ProjectListItem[] | undefined): string | null {
   if (!projectId || !projects) return null;
@@ -167,7 +176,7 @@ export function QueueScreen() {
     refetch,
   } = useQuery({
     queryKey: queryKeys.proposals(filterParams),
-    queryFn: () => api.get<ProposalView[]>(`/proposals${toQueryString(filterParams)}`),
+    queryFn: () => api.get<ProposalListPage>(`/proposals${toQueryString(filterParams)}`),
     refetchInterval: 15_000,
   });
 
@@ -176,7 +185,11 @@ export function QueueScreen() {
     queryFn: () => api.get<ProjectListItem[]>('/projects'),
   });
 
-  const proposalsList = data ?? [];
+  // Jedna strona NAJSTARSZYCH (serwer: domyślnie 100, FIFO) + `total` z tymi samymi filtrami co lista
+  // (nightly-scale G4) — bez doładowywania; zatwierdzone znikają, następne same wskakują przy pollingu.
+  const proposalsList = data?.items ?? [];
+  const totalCount = data ? Math.max(data.total, proposalsList.length) : 0;
+  const truncated = proposalsList.length < totalCount;
 
   // Fallback na pierwszy element listy gdy `selectedId` zniknął (zatwierdzone/odrzucone/przefiltrowane)
   // — liczone na bieżąco w renderze, bez efektu synchronizującego stan (patrz komentarz przy stanie wyżej).
@@ -188,7 +201,32 @@ export function QueueScreen() {
   function setTab(next: string): void {
     if (selected) setTabState({ id: selected.id, tab: next });
   }
-  const { beforeMemory, beforeLoading, mergeMemories, mergeLoading, relationHeaders } = useProposalDetailData(selected);
+
+  // Detal (payload, staleIds, affectedIds) NIE jest w lekkiej liście (G3) — dociągany po wyborze wiersza
+  // z `GET /api/proposals/:id` pod `queryKeys.proposal(id)`. `detail` to wynik TYLKO gdy jego id == id
+  // zaznaczonego wiersza (pas bezpieczeństwa: `A`/`E`/`S`/reject nigdy nie trafią w cudzy detal). Akcje
+  // poniżej działają wyłącznie na `detail` (wczesny return, gdy niezaładowany); do tego czasu szkielet.
+  const detailId = selected?.id;
+  const detailQuery = useQuery({
+    queryKey: queryKeys.proposal(detailId ?? ''),
+    queryFn: () => fetchProposalDetail(detailId ?? ''),
+    enabled: detailId !== undefined,
+    refetchInterval: 15_000,
+  });
+  const detail = detailQuery.data && detailQuery.data.id === selected?.id ? detailQuery.data : undefined;
+
+  // Prefetch detalu sąsiadów (±1) przy zmianie zaznaczenia — `j/k` po kolejce nie czeka na sieć.
+  // `prefetchQuery` nie rzuca (błąd = brak cache; detal dociągnie się zwykłą ścieżką po wyborze).
+  const prevNeighborId = selectedIndex > 0 ? proposalsList[selectedIndex - 1]?.id : undefined;
+  const nextNeighborId = selectedIndex >= 0 ? proposalsList[selectedIndex + 1]?.id : undefined;
+  useEffect(() => {
+    for (const id of [prevNeighborId, nextNeighborId]) {
+      if (!id) continue;
+      void queryClient.prefetchQuery({ queryKey: queryKeys.proposal(id), queryFn: () => fetchProposalDetail(id) });
+    }
+  }, [prevNeighborId, nextNeighborId, queryClient]);
+
+  const { beforeMemory, beforeLoading, mergeMemories, mergeLoading, relationHeaders } = useProposalDetailData(detail);
 
   // Bulk selection — przecięcie z `proposalsList` w renderze (patrz komentarz przy stanie wyżej).
   // Inwariant bezpieczeństwa: bulk działa WYŁĄCZNIE na tym, co licznik pokazuje — zniknięcie propozycji
@@ -196,6 +234,8 @@ export function QueueScreen() {
   const selectedProposals = proposalsList.filter((p) => selectedIds.has(p.id));
   const selectedCount = selectedProposals.length;
   const selectedStaleCount = selectedProposals.filter((p) => p.stale).length;
+  // A1 (G10): zaznaczone propozycje z podpowiedzią „podobne do istniejących" — bulk approve nie otwiera detalu.
+  const selectedSimilarCount = selectedProposals.filter((p) => p.hasSimilar).length;
   const allSelected = proposalsList.length > 0 && proposalsList.every((p) => selectedIds.has(p.id));
   const selectAllState: boolean | 'indeterminate' = allSelected ? true : selectedCount > 0 ? 'indeterminate' : false;
   const bulkFailuresOpen = bulkFailures !== null;
@@ -323,47 +363,50 @@ export function QueueScreen() {
   });
 
   async function searchSupersedeCandidates(query: string): Promise<SupersedeCandidate[]> {
-    if (!selected) return [];
+    if (!detail) return [];
     const params: Record<string, string> = { q: query, status: 'approved' };
-    if (selected.scope === 'project' && selected.projectId) {
+    if (detail.scope === 'project' && detail.projectId) {
       params.scope = 'project';
-      params.projectId = selected.projectId;
-    } else if (selected.scope === 'global') {
+      params.projectId = detail.projectId;
+    } else if (detail.scope === 'global') {
       params.scope = 'global';
     }
     const results = await api.get<{ id: string; header: string }[]>(`/memories${toQueryString(params)}`);
     return results.map((m) => ({ id: m.id, header: m.header }));
   }
 
+  // Akcje na pojedynczej propozycji (A/R/E/S + przyciski detalu) działają WYŁĄCZNIE na załadowanym
+  // detalu zaznaczonego wiersza (`detail`) — przy niezaładowanym (`j` i od razu `A`) nic się nie dzieje,
+  // zamiast działać na lekkim elemencie listy bez payloadu.
   function handleApprove(): void {
-    if (!selected) return;
-    approveMutation.mutate({ id: selected.id });
+    if (!detail) return;
+    approveMutation.mutate({ id: detail.id });
   }
 
   function handleApproveAsReplacement(targetId: string): void {
-    if (!selected) return;
-    if (!PROPOSAL_CAPABILITIES[selected.type].supersede) return; // np. create_project — brak akcji (skrót S)
-    if (selected.type !== 'create') {
+    if (!detail) return;
+    if (!PROPOSAL_CAPABILITIES[detail.type].supersede) return; // np. create_project — brak akcji (skrót S)
+    if (detail.type !== 'create') {
       toast.error('Zamiennik dostępny tylko dla propozycji typu create.');
       return;
     }
-    approveMutation.mutate({ id: selected.id, supersedes: targetId });
+    approveMutation.mutate({ id: detail.id, supersedes: targetId });
   }
 
   function handleReject(): void {
-    if (!selected) return;
+    if (!detail) return;
     setRejectOpen(true);
   }
 
   function confirmReject(): void {
-    if (!selected) return;
-    rejectMutation.mutate({ id: selected.id, reason: rejectReason.trim() || undefined });
+    if (!detail) return;
+    rejectMutation.mutate({ id: detail.id, reason: rejectReason.trim() || undefined });
   }
 
   function handleEdit(): void {
-    if (!selected) return;
-    if (!PROPOSAL_CAPABILITIES[selected.type].edit) return; // np. create_project — skrót E nic nie robi
-    setEditingForId(selected.id);
+    if (!detail) return;
+    if (!PROPOSAL_CAPABILITIES[detail.type].edit) return; // np. create_project — skrót E nic nie robi
+    setEditingForId(detail.id);
     setTab('diff');
   }
 
@@ -412,7 +455,7 @@ export function QueueScreen() {
             checked={selectAllState}
             onCheckedChange={toggleSelectAll}
             disabled={proposalsList.length === 0}
-            aria-label="Zaznacz wszystkie widoczne propozycje"
+            aria-label={`Zaznacz wszystkie widoczne propozycje (${proposalsList.length})`}
           />
           <Select value={origin} onValueChange={(v) => setOrigin(v as OriginFilter)}>
             <SelectTrigger className="h-7 gap-1.5 px-2 text-[12px]">
@@ -438,10 +481,23 @@ export function QueueScreen() {
               <SelectItem value="create_project">create_project</SelectItem>
             </SelectContent>
           </Select>
+          {/* Licznik zgodny z AKTYWNYM filtrem (serwer liczy `total` tymi samymi warunkami co listę, G4):
+              "100 z 342" gdy lista obcięta do strony najstarszych, samo "342" gdy mieści się w całości. */}
+          {data && (
+            <span
+              className="ml-auto flex-none whitespace-nowrap font-mono text-[11px] tabular-nums text-faint"
+              title={truncated ? `Widoczne: ${proposalsList.length} najstarszych z ${totalCount} oczekujących` : `Oczekujące: ${totalCount}`}
+            >
+              {truncated ? `${proposalsList.length} z ${totalCount}` : totalCount}
+            </span>
+          )}
           <button
             type="button"
             onClick={() => refetch()}
-            className="ml-auto flex items-center gap-1.5 text-[11px] text-faint hover:text-muted-foreground"
+            className={cn(
+              'flex flex-none items-center gap-1.5 text-[11px] text-faint hover:text-muted-foreground',
+              !data && 'ml-auto',
+            )}
           >
             <RefreshCw className={isFetching ? 'size-3 animate-spin' : 'size-3'} />
             {lastUpdatedLabel}
@@ -470,26 +526,35 @@ export function QueueScreen() {
               description="Nowe zapisy agentów i propozycje nocnego jobu pojawią się tutaj."
             />
           ) : (
-            proposalsList.map((p) => (
-              <ProposalRow
-                key={p.id}
-                type={p.type}
-                status="pending"
-                kind={(p.editedPayload ?? p.payload).kind}
-                title={rowTitle(p)}
-                origin={p.origin}
-                scope={p.scope}
-                projectName={projectNameFor(p.projectId, projects)}
-                tags={(p.editedPayload ?? p.payload).tags ?? []}
-                createdAt={p.createdAt}
-                stale={p.stale}
-                selected={p.id === selectedId}
-                onClick={() => setSelectedId(p.id)}
-                selectable
-                checked={selectedIds.has(p.id)}
-                onCheckedChange={() => toggleSelected(p.id)}
-              />
-            ))
+            <>
+              {proposalsList.map((p) => (
+                <ProposalRow
+                  key={p.id}
+                  type={p.type}
+                  status="pending"
+                  kind={p.summary.kind ?? undefined}
+                  title={rowTitle(p)}
+                  origin={p.origin}
+                  scope={p.scope}
+                  projectName={projectNameFor(p.projectId, projects)}
+                  tags={p.summary.tags}
+                  createdAt={p.createdAt}
+                  stale={p.stale}
+                  similarHint={p.hasSimilar}
+                  selected={p.id === selectedId}
+                  onClick={() => setSelectedId(p.id)}
+                  selectable
+                  checked={selectedIds.has(p.id)}
+                  onCheckedChange={() => toggleSelected(p.id)}
+                />
+              ))}
+              {truncated && (
+                <p className="px-3.5 py-3 text-center text-[11px] leading-snug text-faint">
+                  Pokazano {proposalsList.length} najstarszych z {totalCount} — kolejne pojawią się po rozstrzygnięciu
+                  widocznych.
+                </p>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -497,10 +562,25 @@ export function QueueScreen() {
       <div className="flex min-w-0 flex-col bg-surface" ref={detailRef} tabIndex={-1}>
         {!selected ? (
           <EmptyState title="Wybierz propozycję z listy" description="Szczegóły pojawią się tutaj." />
+        ) : !detail ? (
+          detailQuery.isError ? (
+            <EmptyState
+              icon={TriangleAlert}
+              title="Nie udało się wczytać szczegółów propozycji"
+              description={describeApiError(detailQuery.error)}
+              action={
+                <Button variant="secondary" size="sm" onClick={() => detailQuery.refetch()} disabled={detailQuery.isFetching}>
+                  Spróbuj ponownie
+                </Button>
+              }
+            />
+          ) : (
+            <DetailSkeleton />
+          )
         ) : (
           <ProposalDetail
-            proposal={selected}
-            projectName={projectNameFor(selected.projectId, projects)}
+            proposal={detail}
+            projectName={projectNameFor(detail.projectId, projects)}
             beforeMemory={beforeMemory}
             beforeLoading={beforeLoading}
             mergeMemories={mergeMemories}
@@ -508,7 +588,7 @@ export function QueueScreen() {
             relationHeaders={relationHeaders}
             editing={editing}
             onCancelEdit={() => setEditingForId(null)}
-            onSaveEdit={(vars) => editMutation.mutate({ id: selected.id, ...vars })}
+            onSaveEdit={(vars) => editMutation.mutate({ id: detail.id, ...vars })}
             savingEdit={editMutation.isPending}
             tab={tab}
             onTabChange={setTab}
@@ -517,9 +597,9 @@ export function QueueScreen() {
             onReject={handleReject}
             onEdit={handleEdit}
             onApproveAsReplacement={handleApproveAsReplacement}
-            searchSupersedeCandidates={selected.type === 'create' ? searchSupersedeCandidates : undefined}
+            searchSupersedeCandidates={detail.type === 'create' ? searchSupersedeCandidates : undefined}
             busy={approveMutation.isPending || rejectMutation.isPending}
-            position={`${selectedIndex + 1} / ${proposalsList.length}`}
+            position={`${selectedIndex + 1} / ${totalCount}`}
           />
         )}
       </div>
@@ -568,6 +648,16 @@ export function QueueScreen() {
                   {selectedStaleCount} {pluralProposals(selectedStaleCount)} nieaktualnych (stale)
                 </b>{' '}
                 — ich zatwierdzenie się nie powiedzie; zostaną wskazane w podsumowaniu i zostaną zaznaczone.
+              </>
+            )}
+            {selectedSimilarCount > 0 && (
+              <>
+                {' '}
+                <b className="font-semibold text-info">
+                  {selectedSimilarCount} {pluralProposals(selectedSimilarCount)} z podpowiedzią „podobne do
+                  istniejących"
+                </b>{' '}
+                — zatwierdzenie bez otwarcia detalu może wprowadzić prawie-duplikat.
               </>
             )}
           </AlertDialogDescription>
@@ -691,6 +781,10 @@ function ProposalDetail({
   const tags = effective.tags ?? beforeMemory?.tags ?? [];
   // Patch `update` bez zmiany kind i `delete` nie niosą `kind` — wtedy kind pamięci, której dotyczą.
   const kind = effective.kind ?? beforeMemory?.kind;
+  const navigate = useNavigate();
+  // A1: tylko wciąż dostępne (approved) pamięci z podpowiedzi — zarchiwizowane/usunięte znikają po cichu;
+  // null (nie policzono) i [] (brak podobnych) → pusta lista → blok się nie renderuje.
+  const similar = (proposal.similarMemories ?? []).filter((s) => s.available);
 
   return (
     <>
@@ -723,6 +817,9 @@ function ProposalDetail({
             </>
           )}
         </div>
+
+        {/* Podpowiedź A1 pod nagłówkiem, PRZED relacjami i zakładkami (§9.1); klik w id → podgląd pamięci. */}
+        <DedupHint similarIds={similar.map((s) => s.id)} onSelect={(id) => navigate(`/pamiec?id=${id}`)} />
 
         {effective.relations && effective.relations.length > 0 && (
           <ProposalRelations relations={effective.relations} headers={relationHeaders} />
@@ -776,6 +873,11 @@ function ProposalDetail({
           onEdit={onEdit}
           onApproveAsReplacement={onApproveAsReplacement}
           searchSupersedeCandidates={searchSupersedeCandidates}
+          supersedeSuggestions={
+            proposal.type === 'create'
+              ? similar.map((s) => ({ id: s.id, header: s.header ?? s.id, scope: s.scope ?? undefined }))
+              : undefined
+          }
           stale={proposal.stale}
           staleReason={proposal.stale ? `Zmienione od utworzenia propozycji: ${proposal.staleIds.join(', ')}.` : undefined}
           busy={busy}
@@ -981,6 +1083,18 @@ function ProposalRelations({
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+/** Szkielet prawego panelu do czasu załadowania detalu (`GET /api/proposals/:id`) — bez przycisków akcji,
+ * więc nie ma czego kliknąć na lekkim wierszu bez payloadu. */
+function DetailSkeleton() {
+  return (
+    <div className="flex-1 px-6 py-5" aria-busy="true" aria-label="Ładowanie szczegółów propozycji">
+      <Skeleton className="mb-3 h-6 w-2/3" />
+      <Skeleton className="mb-4 h-4 w-1/2" />
+      <Skeleton className="h-40 w-full" />
     </div>
   );
 }

@@ -74,6 +74,7 @@ services:
       BODY_MAX_EVENT: ${BODY_MAX_EVENT:-8192}
       TAGS_MAX: ${TAGS_MAX:-10}
       TAG_MAX_LEN: ${TAG_MAX_LEN:-40}
+      NEAR_DUPLICATE_DISTANCE: ${NEAR_DUPLICATE_DISTANCE:-0.2} # 0.2 = bge-m3; text-embedding-3-small → 0.13
       NIGHTLY_DEDUP_DISTANCE: ${NIGHTLY_DEDUP_DISTANCE:-0.05}
       NIGHTLY_ANN_NEIGHBORS: ${NIGHTLY_ANN_NEIGHBORS:-5}
       NIGHTLY_BATCH_SIZE: ${NIGHTLY_BATCH_SIZE:-50}
@@ -90,6 +91,8 @@ services:
       RATE_LIMIT_MCP_IP_PER_MIN: ${RATE_LIMIT_MCP_IP_PER_MIN:-300}
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
       DASHBOARD_COOKIE_NAME: ${DASHBOARD_COOKIE_NAME:-ck_session}
+      # Opcjonalny: klucz szyfrujący sekrety w bazie (klucz API modelu LLM z Ustawień). `openssl rand -base64 32`.
+      SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:-}
     expose:
       - "3000"
       - "3001"

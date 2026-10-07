@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { encodeKeysetCursor } from '../src/common/keyset-cursor';
 import {
   approveBody,
   auditListQuery,
@@ -9,6 +10,7 @@ import {
   emptyBody,
   emptyQuery,
   humanCreateBody,
+  llmSettingsBody,
   memoriesListQuery,
   memoryEventsQuery,
   opaqueId,
@@ -42,18 +44,25 @@ describe('dashboard.schemas — happy paths kształtowane dokładnie jak SPA wys
     expect(memoriesListQuery.parse({})).toEqual({});
   });
 
-  it('auditListQuery: from/to/cursor ISO, limit cyfrowy -> Date/number', () => {
+  it('auditListQuery: from/to ISO, cursor keyset, limit cyfrowy -> Date/{ts,id}/number', () => {
+    const pos = { ts: '2026-01-15T00:00:00.123456Z', id: 'evt_a1b2c3d4e5f6' };
     const result = auditListQuery.parse({
       eventType: 'human_edit',
       from: '2026-01-01T00:00:00.000Z',
       to: '2026-02-01T00:00:00.000Z',
-      cursor: '2026-01-15T00:00:00.000Z',
+      cursor: encodeKeysetCursor(pos),
       limit: '250',
     });
     expect(result.from).toBeInstanceOf(Date);
     expect(result.to).toBeInstanceOf(Date);
     expect(result.limit).toBe(250);
-    expect(typeof result.cursor).toBe('string'); // cursor ZOSTAJE stringiem (serwis re-parsuje)
+    expect(result.cursor).toEqual(pos); // cursor docieka do serwisu zdekodowany
+  });
+
+  it('auditListQuery.cursor: stary ISO i śmieci -> invalid (nightly-scale G6)', () => {
+    for (const cursor of ['2026-01-15T00:00:00.000Z', 'garbage', 'A'.repeat(300)]) {
+      expect(auditListQuery.safeParse({ cursor }).success).toBe(false);
+    }
   });
 
   it('usageQuery: bucket=hour, from/to ISO', () => {
@@ -65,6 +74,13 @@ describe('dashboard.schemas — happy paths kształtowane dokładnie jak SPA wys
   it('proposalsListQuery: status/origin/type/scope=global', () => {
     const result = proposalsListQuery.parse({ status: 'pending', origin: 'agent', type: 'create', scope: 'global' });
     expect(result).toEqual({ status: 'pending', origin: 'agent', type: 'create', scope: 'global' });
+  });
+
+  it('proposalsListQuery: limit (cyfrowy 1..500) i cursor keyset', () => {
+    const pos = { ts: '2026-01-15T00:00:00.123456Z', id: 'prop_a1b2c3d4e5f6' };
+    const result = proposalsListQuery.parse({ limit: '100', cursor: encodeKeysetCursor(pos) });
+    expect(result).toEqual({ limit: 100, cursor: pos });
+    expect(proposalsListQuery.safeParse({ limit: '500' }).success).toBe(true);
   });
 
   it('createRelationBody: {toId, type} jak wysyła RelationsPanel/MemoryBrowserScreen', () => {
@@ -176,6 +192,20 @@ describe('dashboard.schemas — limitQuery (via auditListQuery.limit)', () => {
   });
 });
 
+describe('dashboard.schemas — proposalsListQuery.limit/cursor złe -> 400', () => {
+  for (const limit of ['abc', '0', '501', '5.5', '1e2', '']) {
+    it(`limit="${limit}" -> invalid`, () => {
+      expect(proposalsListQuery.safeParse({ limit }).success).toBe(false);
+    });
+  }
+
+  for (const cursor of ['garbage', '2026-01-15T00:00:00.000Z', '']) {
+    it(`cursor="${cursor}" -> invalid`, () => {
+      expect(proposalsListQuery.safeParse({ cursor }).success).toBe(false);
+    });
+  }
+});
+
 describe('dashboard.schemas — daty złe -> 400', () => {
   const badDates = ['wczoraj', '2026-13-01T00:00:00Z', '2026-01-01', 'not-a-date'];
   for (const value of badDates) {
@@ -262,5 +292,59 @@ describe('dashboard.schemas — body: brakujące wymagane pole / zły typ / unde
     expect(approveBody.safeParse({ expectedSupersedeVersion: -1 }).success).toBe(false);
     expect(rejectBody.safeParse(undefined).success).toBe(true);
     expect(rejectBody.safeParse({ reason: 'dup' }).success).toBe(true);
+  });
+});
+
+describe('llmSettingsBody (roadmap v1.6) — PUT /api/settings/llm', () => {
+  const VALID = {
+    enabled: true,
+    endpoint: 'http://localhost:11434/v1/chat/completions',
+    model: 'llama3',
+    callCap: 100,
+    timeoutMs: 30000,
+    apiKey: { action: 'keep' as const },
+  };
+
+  it('poprawne body przechodzi; endpoint/model są przycinane', () => {
+    const r = llmSettingsBody.parse({ ...VALID, endpoint: '  https://api.openai.com/v1/chat/completions  ', model: ' gpt ' });
+    expect(r.endpoint).toBe('https://api.openai.com/v1/chat/completions');
+    expect(r.model).toBe('gpt');
+  });
+
+  it('endpoint/model mogą być null albo pustym stringiem (serwis zamienia "" na null)', () => {
+    expect(llmSettingsBody.safeParse({ ...VALID, enabled: false, endpoint: null, model: null }).success).toBe(true);
+    expect(llmSettingsBody.safeParse({ ...VALID, enabled: false, endpoint: '', model: '' }).success).toBe(true);
+  });
+
+  it('strict: nieznany klucz na wierzchu i w apiKey -> invalid', () => {
+    expect(llmSettingsBody.safeParse({ ...VALID, extra: 1 }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, apiKey: { action: 'keep', value: 'x' } }).success).toBe(false);
+  });
+
+  it.each(['ftp://host/v1/chat/completions', 'nie-url', 'https://user:pass@host/v1/chat/completions', 'https://user@host/x'])(
+    'endpoint %j jest odrzucany (nie-http(s) albo login/hasło w URL-u)',
+    (endpoint) => {
+      expect(llmSettingsBody.safeParse({ ...VALID, endpoint }).success).toBe(false);
+    },
+  );
+
+  it('callCap i timeoutMs: granice 1..10000 i 1000..300000, tylko całkowite', () => {
+    expect(llmSettingsBody.safeParse({ ...VALID, callCap: 0 }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, callCap: 10001 }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, callCap: 1.5 }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, callCap: 1 }).success).toBe(true);
+    expect(llmSettingsBody.safeParse({ ...VALID, callCap: 10000 }).success).toBe(true);
+    expect(llmSettingsBody.safeParse({ ...VALID, timeoutMs: 999 }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, timeoutMs: 300001 }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, timeoutMs: 1000 }).success).toBe(true);
+  });
+
+  it('apiKey: unia keep | set(value niepusty) | clear; inne akcje i pusta wartość odrzucane', () => {
+    expect(llmSettingsBody.safeParse({ ...VALID, apiKey: { action: 'set', value: 'sk-x' } }).success).toBe(true);
+    expect(llmSettingsBody.safeParse({ ...VALID, apiKey: { action: 'clear' } }).success).toBe(true);
+    expect(llmSettingsBody.safeParse({ ...VALID, apiKey: { action: 'set', value: '   ' } }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, apiKey: { action: 'set' } }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, apiKey: { action: 'reveal' } }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, apiKey: undefined }).success).toBe(false);
   });
 });

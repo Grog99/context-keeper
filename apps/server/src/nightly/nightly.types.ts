@@ -1,4 +1,5 @@
 import type { MemoryScope } from '../db/schema/enums';
+import type { LlmCounters, NightlyLlmReport } from '../llm/llm.types';
 import type { DeletePayload, MergePayload } from '../proposals/proposals.types';
 
 /**
@@ -75,7 +76,7 @@ export const PRUNE_SCORER = Symbol('PRUNE_SCORER');
  * truncation" z §5 pkt 5-6 planu (politeness gate i flood backstop muszą być POLICZALNE, nie tylko
  * zalogowane jednym zdaniem).
  */
-export interface NightlyCounters {
+export interface NightlyCounters extends LlmCounters {
   created: number;
   withdrawn: number;
   /** Wykryty warunek dopasował istniejący pending nightly proposal, wciąż aktualny — brak akcji. */
@@ -92,6 +93,10 @@ export interface NightlyCounters {
    * jak `skippedPoliteness`/`skippedCap` powyżej — nie jest częścią oryginalnego kontraktu §2 planu
    * Fazy 6. */
   searchEventsPruned: number;
+  // + pola `LlmCounters` (roadmap v1.6, opcjonalny krok LLM — `llmCalls`, `llmErrors`, `llmSkippedCap`,
+  // `llmSkippedBreaker`, `llmSkippedSecret`, `llmSkippedKeyUnreadable`): płaskie, addytywne, więc trafiają do
+  // `nightly_run.metadata`, podsumowania CLI i lustra typów dashboardu bez osobnej ścieżki. Przy wyłączonym
+  // kroku (domyślnie) wszystkie wynoszą 0.
 }
 
 export interface NightlyRunResult {
@@ -100,4 +105,7 @@ export interface NightlyRunResult {
   finishedAt: string;
   durationMs: number;
   counters: NightlyCounters;
+  /** Stan kroku LLM i lista wpisów pominiętych przez skaner sekretów (G13) — `null` przy `skipped-locked`
+   * (przebieg się nie odbył, budżet nie został otwarty). Trafia do `nightly_run.metadata.llm`. */
+  llm: NightlyLlmReport | null;
 }

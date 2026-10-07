@@ -12,6 +12,13 @@ import {
 import { memoryScope, proposalOrigin, proposalStatus, proposalType } from './enums';
 import { projects } from './projects';
 
+/** Jedna pozycja podpowiedzi „podobne do istniejących" (roadmap v1.6, A1) — id zatwierdzonej pamięci
+ * i jej odległość kosinusowa (`<=>`) od nowej propozycji. */
+export interface SimilarMemoryHit {
+  id: string;
+  distance: number;
+}
+
 /**
  * Kolejka akceptacji — każda treściowa mutacja (§4). Kolejka to tabela, nie flaga na dokumencie
  * (merge A+B→C nie da się wyrazić flagą).
@@ -35,6 +42,14 @@ export const proposals = pgTable(
     baseVersions: jsonb('base_versions').notNull().default(sql`'{}'::jsonb`),
     // Idempotencja/dedup exact-match: hash(header+body+scope+project) (§5).
     contentHash: text('content_hash'),
+    // Podpowiedź „podobne do istniejących" (roadmap v1.6, A1) — wynik detekcji prawie-duplikatów przy
+    // save_memory, trzy stany: NULL = nie policzono (provider down / budżet czasu / inny typ propozycji),
+    // `[]` = policzono, brak podobnych, lista = ≤3 pozycje `{id, distance}` rosnąco po odległości.
+    // Wypełniana wyłącznie dla `origin='agent'` + `type='create'` + kind fact/document, JEDNORAZOWO przy
+    // zapisie (UPDATE po embeddingu); edit-before-approve jej nie zmienia (opisuje oryginał agenta).
+    // Bez backfillu — stare propozycje zostają NULL. Zapis `supersedes` (type='update'), eventy i
+    // propozycje nocnego joba: zawsze NULL.
+    similarMemories: jsonb('similar_memories').$type<SimilarMemoryHit[]>(),
 
     scope: memoryScope('scope').notNull(),
     projectId: text('project_id').references(() => projects.id, { onDelete: 'restrict' }),
@@ -48,6 +63,8 @@ export const proposals = pgTable(
   },
   (t) => [
     index('proposals_status_idx').on(t.status),
+    // Keyset listy kolejki (nightly-scale #5): `WHERE status = … ORDER BY created_at, id` bez sortowania.
+    index('proposals_status_created_id_idx').on(t.status, t.createdAt, t.id),
     index('proposals_origin_idx').on(t.origin),
     index('proposals_project_idx').on(t.projectId),
     index('proposals_content_hash_idx').on(t.contentHash),

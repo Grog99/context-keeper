@@ -22,7 +22,8 @@ export interface AnnSearchParams {
    * `undefined` dozwolone tak jak wszędzie w Drizzle `and()`/`or()` — po prostu pomijane. */
   scopeCondition: SQL | undefined;
   /** Dodatkowe predykaty specyficzne dla wołającego (retrieval: `kind`/tag filter; nightly:
-   * `kind='fact'`, zawężenie do snapshotu id-ów, wykluczenie samego siebie). */
+   * `kind='fact'`, wykluczenie samego siebie; członkostwo w snapshocie sprawdza nightly w JS, nie listą
+   * id w SQL — stała liczba bind-parametrów). */
   extraConditions?: (SQL | undefined)[];
   /** `true` = kolapsuj multi-chunk dokumenty do `MIN(dist)` per `memoryId` (`vectorArm` — dokumenty
    * mają wiele chunków, FR-R3). `false` = jeden wiersz na embedding, bez agregacji (nightly — fakty
@@ -40,7 +41,9 @@ export interface AnnSearchParams {
  * predykaty, self-exclusion) wchodzą WYŁĄCZNIE przez parametry — helper niczego nie zgaduje o
  * intencji wołającego. Post-processing (mapowanie na `NeighborPair` + próg dystansu w nightly,
  * spłaszczenie do listy id w `vectorArm`) zostaje po stronie wołającego; ten helper zwraca surowe
- * pary `(memoryId, dist)`.
+ * pary `(memoryId, dist)`. Trzeci wołający (roadmap v1.6, A1): `memory/near-duplicates.ts` —
+ * podpowiedź „podobne do istniejących" przy save_memory (scope projekt + global, `groupByMemory: true`,
+ * próg z `NEAR_DUPLICATE_DISTANCE` filtrowany po stronie wołającego).
  */
 export async function findAnnNeighbors(params: AnnSearchParams): Promise<AnnNeighbor[]> {
   const { db, queryVector, embeddingModel, scopeCondition, extraConditions = [], groupByMemory, limit } =

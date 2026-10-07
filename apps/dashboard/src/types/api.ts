@@ -38,6 +38,17 @@ export interface ProposalPayloadShape {
   slug?: string;
 }
 
+/** Pozycja podpowiedzi „podobne do istniejących" (A1) — lustro `ProposalSimilarMemory`
+ * (`apps/server/src/proposals/proposals.types.ts`). `available:false` = pamięć zarchiwizowana / przycięta /
+ * usunięta po zapisie propozycji (`header`/`scope` wtedy `null`) — UI pokazuje tylko dostępne. */
+export interface ProposalSimilarMemory {
+  id: string;
+  distance: number;
+  available: boolean;
+  header: string | null;
+  scope: MemoryScope | null;
+}
+
 export interface ProposalView {
   id: string;
   type: ProposalType;
@@ -54,6 +65,49 @@ export interface ProposalView {
   updatedAt: string;
   stale: boolean;
   staleIds: string[];
+  /** A1: `null` = nie policzono, `[]` = policzono, brak podobnych, lista = ≤3 pozycje rosnąco po odległości. */
+  similarMemories: ProposalSimilarMemory[] | null;
+}
+
+/** Pola wiersza kolejki wyprowadzone SERWEROWO z efektywnego payloadu (`coalesce(edited_payload,
+ * payload)`) — lustro `ProposalListSummary` (`apps/server/src/proposals/proposals.types.ts`). Pola
+ * nieobecne w payloadzie danego typu są `null`. */
+export interface ProposalListSummary {
+  header: string | null;
+  kind: MemoryKind | null;
+  tags: string[];
+  memoryId: string | null;
+  name: string | null;
+  slug: string | null;
+}
+
+/** Lekki element listy kolejki (`GET /api/proposals`) — lustro `ProposalListItem`; celowo BEZ
+ * `payload`/`editedPayload`/`baseVersions`/`affectedIds` (pełny widok: `GET /api/proposals/:id` ->
+ * `ProposalView`). Znacznik podpowiedzi prawie-duplikatu (A1) to `hasSimilar`. */
+export interface ProposalListItem {
+  id: string;
+  type: ProposalType;
+  origin: ProposalOrigin;
+  status: ProposalStatus;
+  scope: MemoryScope;
+  projectId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  summary: ProposalListSummary;
+  /** `edited_payload IS NOT NULL`. */
+  edited: boolean;
+  stale: boolean;
+  /** A1: podpowiedź ma choć jedną wciąż zatwierdzoną pamięć (ta sama reguła co `available` w detalu). */
+  hasSimilar: boolean;
+}
+
+/** Strona `GET /api/proposals` — lustro `ProposalListPage`. `total` liczone z TYMI SAMYMI filtrami co
+ * lista (bez kursora); `nextCursor` = `null` na ostatniej stronie. Kolejka używa jednej strony i `total`
+ * ("N z M"), nie doładowuje. */
+export interface ProposalListPage {
+  items: ProposalListItem[];
+  nextCursor: string | null;
+  total: number;
 }
 
 export interface ApproveResult {
@@ -219,6 +273,13 @@ export interface AuditLogRowApi {
   createdAt: string;
 }
 
+/** Strona `GET /api/audit` — lustro `AuditPage` (`apps/server/src/audit/audit.service.ts`). `nextCursor`
+ * to OPAQUE string (nie ISO `createdAt`) — przekazywany z powrotem bez interpretacji; `null` = ostatnia strona. */
+export interface AuditPage {
+  items: AuditLogRowApi[];
+  nextCursor: string | null;
+}
+
 export interface DashboardMetrics {
   queueDepth: number;
   embedding: { status: 'up' | 'down'; model: string; latencyMs: number | null };
@@ -306,6 +367,28 @@ export interface NightlyCounters {
   /** Wiersze `search_events` usunięte retencją, piggyback na tym samym przebiegu (roadmap v1.1
    * "Pomiary"). */
   searchEventsPruned: number;
+  // Liczniki kroku LLM (roadmap v1.6) — lustro `LlmCounters` (`apps/server/src/llm/llm.types.ts`).
+  llmCalls: number;
+  llmErrors: number;
+  llmSkippedCap: number;
+  llmSkippedBreaker: number;
+  llmSkippedSecret: number;
+  llmSkippedKeyUnreadable: number;
+}
+
+/** Lustro `LlmRunState` (`apps/server/src/llm/llm.types.ts`). */
+export type LlmRunState = 'disabled' | 'ready' | 'key_unreadable' | 'unavailable';
+
+/** Typ sekretu ze skanera (`SecretKind`, `apps/server/src/common/secret-scanner.ts`) — string, bo to tylko etykieta chipa. */
+export interface SkippedSecretEntry {
+  memoryId: string;
+  secretType: string;
+}
+
+/** Lustro `NightlyLlmReport` — blok `llm` w wyniku przebiegu / `nightly_run.metadata`. */
+export interface NightlyLlmReport {
+  state: LlmRunState;
+  skippedSecret: SkippedSecretEntry[];
 }
 
 export interface NightlyRunResult {
@@ -314,7 +397,54 @@ export interface NightlyRunResult {
   finishedAt: string;
   durationMs: number;
   counters: NightlyCounters;
+  /** `null` przy `skipped-locked` (przebieg się nie odbył). */
+  llm: NightlyLlmReport | null;
 }
+
+/** Ekran "Ustawienia" (roadmap v1.6) — lustro `LlmSettingsDto`/`LlmSettingsResponse`/`LlmSettingsUpdate`/
+ * `LlmCheckResult` (`apps/server/src/llm/llm.types.ts`, `dashboard/settings.controller.ts`). Klucz API jest
+ * write-only: odpowiedź niesie wyłącznie stan `none | set | unreadable`. */
+export type LlmApiKeyState = 'none' | 'set' | 'unreadable';
+
+export interface LlmSettings {
+  enabled: boolean;
+  endpoint: string | null;
+  model: string | null;
+  callCap: number;
+  timeoutMs: number;
+  apiKey: LlmApiKeyState;
+  /** `false` → serwer nie ma `SECRETS_ENCRYPTION_KEY` (zapis klucza API odrzucany). */
+  encryptionKeyConfigured: boolean;
+  updatedAt: string | null;
+}
+
+export interface LlmSettingsResponse {
+  settings: LlmSettings;
+  lastRun: {
+    at: string;
+    status: 'success';
+    counters: Pick<
+      NightlyCounters,
+      'llmCalls' | 'llmErrors' | 'llmSkippedCap' | 'llmSkippedBreaker' | 'llmSkippedSecret' | 'llmSkippedKeyUnreadable'
+    >;
+    llm: NightlyLlmReport | null;
+  } | null;
+}
+
+export type LlmApiKeyAction = { action: 'keep' } | { action: 'set'; value: string } | { action: 'clear' };
+
+export interface LlmSettingsUpdate {
+  enabled: boolean;
+  endpoint: string | null;
+  model: string | null;
+  callCap: number;
+  timeoutMs: number;
+  apiKey: LlmApiKeyAction;
+}
+
+export type LlmCheckResult =
+  | { ok: true; model: string; latencyMs: number; endpoint: string; enabled: boolean }
+  | { ok: false; error: string };
 
 /** Hard-purge (roadmap v1.1) — lustro `PurgePreview`/`PurgeResult` (`apps/server/src/purge/purge.service.ts`). */
 export interface PurgePreview {

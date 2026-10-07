@@ -1,13 +1,17 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, asc, eq, gt, inArray, ne } from 'drizzle-orm';
+import { and, asc, eq, gt, ne } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { generateId, ID_PREFIX } from '../common/ids';
+import { idsAny } from '../common/sql-helpers';
 import { AppConfigService } from '../config/config.service';
 import { DB, PG_POOL, type Database, type PgPool } from '../db/db.tokens';
 import { embeddings, memories, proposals, stagingEmbeddings } from '../db/schema';
 import type { MemoryKind, MemoryScope } from '../db/schema/enums';
 import { findAnnNeighbors } from '../embeddings/ann-search';
 import { EmbeddingService } from '../embeddings/embedding.service';
+import { LlmRunBudget } from '../llm/llm-budget';
+import { LlmService } from '../llm/llm.service';
+import { EMPTY_LLM_COUNTERS, type NightlyLlmReport } from '../llm/llm.types';
 import { computeStaleIds } from '../proposals/proposals.service';
 import { UsageService } from '../usage/usage.service';
 import { buildClusters, pickCanonicalMerge, type NeighborPair } from './dedup-cluster';
@@ -41,6 +45,7 @@ const EMPTY_COUNTERS: NightlyCounters = {
   skippedPoliteness: 0,
   skippedCap: 0,
   searchEventsPruned: 0,
+  ...EMPTY_LLM_COUNTERS,
 };
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -82,6 +87,11 @@ const NEIGHBOR_SCAN_CONCURRENCY = 10;
  * z poprzednich przebiegów (`reconcile.ts`) i tylko RÓŻNICUJE kolejkę (create/withdraw) — nie ma
  * checkpointów ani historii przebiegów poza samą tabelą `proposals`. Mid-run crash zostawia bazę
  * spójną (każdy insert/withdraw jest niezależny) — kolejny przebieg samo-naprawia stan.
+ *
+ * Od roadmap v1.6 job ma OPCJONALNY krok LLM (opt-in w Ustawieniach, domyślnie wyłączony): `runLocked`
+ * otwiera na starcie budżet przebiegu (`LlmService.openRunBudget`) i dokłada jego liczniki + blok `llm`
+ * do wyniku. Fail-open (ust. 3): żadna awaria ustawień/providera nie zamienia przebiegu w `failed`.
+ * Sam B1 nie ma jeszcze żadnego detektora korzystającego z modelu — budżet jest otwierany, ale nie wołany.
  */
 @Injectable()
 export class NightlyService {
@@ -95,6 +105,7 @@ export class NightlyService {
     private readonly embedding: EmbeddingService,
     @Inject(PRUNE_SCORER) private readonly pruneScorer: PruneScorer,
     private readonly usage: UsageService,
+    private readonly llm: LlmService,
   ) {}
 
   /**
@@ -124,13 +135,14 @@ export class NightlyService {
           finishedAt: finishedAt.toISOString(),
           durationMs: finishedAt.getTime() - startedAt.getTime(),
           counters: EMPTY_COUNTERS,
+          llm: null,
         };
         this.logger.warn('[nightly] lock zajęty przez inny przebieg — skipped-locked, no-op.');
         await this.audit.log({ eventType: 'nightly_run', actor, metadata: { ...result } });
         return result;
       }
 
-      const counters = await this.runLocked(actor);
+      const { counters, llm } = await this.runLocked(actor);
       const finishedAt = new Date();
       const result: NightlyRunResult = {
         status: 'success',
@@ -138,6 +150,7 @@ export class NightlyService {
         finishedAt: finishedAt.toISOString(),
         durationMs: finishedAt.getTime() - startedAt.getTime(),
         counters,
+        llm,
       };
       await this.audit.log({ eventType: 'nightly_run', actor, metadata: { ...result } });
       return result;
@@ -169,17 +182,24 @@ export class NightlyService {
 
   // ---- orkiestracja pod lockiem: detekcja -> reconcile -> apply ---------
 
-  private async runLocked(actor: string): Promise<NightlyCounters> {
+  private async runLocked(actor: string): Promise<{ counters: NightlyCounters; llm: NightlyLlmReport }> {
+    const budget = await this.openLlmBudget(actor);
+    // B2/B3: detektory korzystające z modelu dostają tu `budget` i wołają `budget.call(...)` — jedyna droga
+    // do providera (cap, bezpiecznik, skaner sekretów, liczniki). B1 nie ma jeszcze żadnego, więc krok
+    // nie wykonuje ani jednego żądania, niezależnie od ustawień.
     const activeModel = this.embedding.model;
     const facts = await this.loadApprovedFacts(activeModel);
     const factById = new Map(facts.map((f) => [f.id, f]));
-    // Snapshot id set (Fix 1, code review commit d057871): ANN musi być zawężone do TYCH SAMYCH
-    // faktów co `factById`, inaczej fakt zatwierdzony współbieżnie w trakcie przebiegu może wrócić
-    // jako sąsiad, mimo że nie ma go w snapshotcie -> `buildMergeCondition` rzucałby na
-    // `factById.get(id)` i wywalał CAŁY przebieg. Restrykcja na poziomie zapytania czyni ten crash
-    // strukturalnie niemożliwym (taki fakt po prostu nie zostanie rozważony w TYM biegu — złapie go
-    // kolejny stateless re-scan).
-    const snapshotIds = Array.from(factById.keys());
+    // Snapshot (Fix 1, code review commit d057871; przeniesiony do JS w nightly-scale G2): sąsiedzi ANN
+    // muszą pochodzić z TYCH SAMYCH faktów co `factById`, inaczej fakt zatwierdzony współbieżnie w
+    // trakcie przebiegu mógłby wrócić jako sąsiad, mimo że nie ma go w snapshotcie ->
+    // `buildMergeCondition` rzucałby na `factById.get(id)` i wywalał CAŁY przebieg. Członkostwo
+    // sprawdza `findNeighborPairs` w JS (`factById.has`), NIE w SQL: dawne `id IN (snapshot)` niosło
+    // wszystkie id jako osobne parametry KAŻDEGO zapytania ANN (O(N²) bajtów, twardy sufit 65 535
+    // parametrów Postgresa), a liczba bind-parametrów ma być stała, niezależna od liczby faktów.
+    // Fakt spoza snapshotu może zająć slot w top-k, ale JS go odrzuca; wypiera realnego sąsiada tylko
+    // jeśli sam jest bliskim duplikatem (klaster i tak już nieaktualny) — para i tak powstaje z obu
+    // końców, a kolejny stateless re-scan koryguje resztę.
 
     const dedupDistance = this.config.get('NIGHTLY_DEDUP_DISTANCE');
     const annNeighbors = this.config.get('NIGHTLY_ANN_NEIGHBORS');
@@ -192,7 +212,7 @@ export class NightlyService {
       const chunk = facts.slice(i, i + NEIGHBOR_SCAN_CONCURRENCY);
       const results = await Promise.all(
         chunk.map((fact) =>
-          this.findNeighborPairs(fact, snapshotIds, activeModel, annNeighbors, dedupDistance),
+          this.findNeighborPairs(fact, factById, activeModel, annNeighbors, dedupDistance),
         ),
       );
       for (const found of results) pairs.push(...found);
@@ -277,15 +297,39 @@ export class NightlyService {
     }
 
     return {
-      created,
-      withdrawn,
-      skippedAsDup: reconciled.skipped.length,
-      mergeProposed,
-      pruneProposed,
-      skippedPoliteness,
-      skippedCap,
-      searchEventsPruned,
+      counters: {
+        created,
+        withdrawn,
+        skippedAsDup: reconciled.skipped.length,
+        mergeProposed,
+        pruneProposed,
+        skippedPoliteness,
+        skippedCap,
+        searchEventsPruned,
+        ...budget.counters(),
+      },
+      llm: budget.report(),
     };
+  }
+
+  /** Otwiera budżet LLM przebiegu. Odczyt ustawień z bazy, który się nie uda, daje stan `unavailable` —
+   * nigdy `failed` (fail-open, ust. 3). Nieczytelny klucz (G7) jest widoczny jako `llm.state` w metadanych
+   * przebiegu + jedno ostrzeżenie w logu; liczniki `llmSkippedKeyUnreadable` rosną dopiero z wywołań
+   * detektorów (od B2). */
+  private async openLlmBudget(actor: string): Promise<LlmRunBudget> {
+    try {
+      const budget = await this.llm.openRunBudget(actor);
+      if (budget.state === 'key_unreadable') {
+        this.logger.warn(
+          '[nightly] krok LLM pominięty: zapisanego klucza API nie da się odszyfrować (zmieniony SECRETS_ENCRYPTION_KEY?) — wpisz go ponownie w Ustawieniach.',
+        );
+      }
+      return budget;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`[nightly] nie udało się odczytać ustawień LLM (fail-open, krok LLM pominięty): ${message}`);
+      return LlmRunBudget.unavailable();
+    }
   }
 
   // ---- detekcja: dedup (ANN) ---------------------------------------------
@@ -361,13 +405,14 @@ export class NightlyService {
    * LEFT JOIN w `loadApprovedFacts`, bez osobnego zapytania per fakt (eliminacja jednego z dwóch N+1
    * round-tripów tej pętli).
    *
-   * `snapshotIds` (Fix 1, code review commit d057871), przekazane przez `extraConditions`, zawęża
-   * wynik ANN do id-ów ze snapshotu przekazanego do `runLocked` — fakt zatwierdzony współbieżnie PO
-   * snapshotcie nigdy nie wróci jako sąsiad, mimo że jego embedding mógłby być blisko. Bez tego
-   * `buildMergeCondition` (który indeksuje WYŁĄCZNIE po snapshotcie przez `factById`) rzucałby na
-   * brakujący klucz i wywalał cały przebieg (TOCTOU) — taki fakt po prostu poczeka na kolejny
-   * stateless re-scan. `ne(memories.id, fact.id)` (też w `extraConditions`) wyklucza sam fakt z
-   * własnego wyniku ANN.
+   * Snapshot (Fix 1, code review commit d057871; nightly-scale G2): wiersze ANN spoza `factById`
+   * (fakt zatwierdzony współbieżnie PO snapshotcie) są odrzucane W JS, przed filtrem dystansu — bez
+   * tego `buildMergeCondition` (który indeksuje WYŁĄCZNIE po snapshotcie przez `factById`) rzucałby
+   * na brakujący klucz i wywalał cały przebieg (TOCTOU); taki fakt poczeka na kolejny stateless
+   * re-scan. Członkostwa NIE ma w SQL (dawne `inArray(memories.id, snapshotIds)`): liczba
+   * bind-parametrów zapytania ANN jest stała (wektor, model, status, scope 1–2, kind, id faktu,
+   * limit), niezależna od liczby zatwierdzonych faktów. `ne(memories.id, fact.id)` (w
+   * `extraConditions`) wyklucza sam fakt z własnego wyniku ANN.
    *
    * `eq(memories.kind, fact.kind)` (roadmap v1.3 "Dedup kind-aware", defense-in-depth): partycja ANN
    * jest ścisła też po `kind`, symetrycznie ze `scope`/`projectId` wyżej — klaster nigdy nie miesza
@@ -376,7 +421,7 @@ export class NightlyService {
    */
   private async findNeighborPairs(
     fact: FactRow,
-    snapshotIds: string[],
+    factById: Map<string, FactRow>,
     activeModel: string,
     annNeighbors: number,
     dedupDistance: number,
@@ -395,7 +440,6 @@ export class NightlyService {
       scopeCondition,
       extraConditions: [
         eq(memories.kind, fact.kind),
-        inArray(memories.id, snapshotIds),
         ne(memories.id, fact.id),
       ],
       groupByMemory: false, // fakty mają dokładnie jeden wektor — bez kolapsowania multi-chunk
@@ -403,7 +447,7 @@ export class NightlyService {
     });
 
     return rows
-      .filter((r) => r.dist <= dedupDistance)
+      .filter((r) => factById.has(r.memoryId) && r.dist <= dedupDistance)
       .map((r) => ({ a: fact.id, b: r.memoryId, dist: r.dist }));
   }
 
@@ -501,7 +545,7 @@ export class NightlyService {
         ? await this.db
             .select({ id: memories.id, version: memories.version })
             .from(memories)
-            .where(inArray(memories.id, allIds))
+            .where(idsAny(memories.id, allIds))
         : [];
     const versionMap = new Map(versionRows.map((r) => [r.id, r.version]));
 

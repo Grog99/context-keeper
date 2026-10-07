@@ -318,7 +318,7 @@ Bazujemy na shadcn (kopiowane do repo → pełna kontrola). Poniżej — bazowe 
 
 **`MonoId`** — `mem_…`/`ck_…`/`rev_…` w mono `text-xs`, klik = kopiuj (toast). Token zawsze maskowany poza jednorazowym reveal.
 
-**`ProposalRow`** — wiersz kolejki `h-12`: `[StatusChip] [KindMarker] [type ikona] Header (truncate) … [OriginPath] [tagi ≤2 + „+N"] [czas rel.]`. Stale → dodatkowy `danger` badge po prawej. Hover `surface-muted`, aktywny `accent-subtle` + lewy pasek `2px` iris. `kind` (v1.4) tymi samymi kanałami co wiersz pamięci (§2.3): `KindGutter` przy lewej krawędzi (ustępuje paskowi zaznaczenia) + `KindMarker`; propozycja bez `kind` w payloadzie (patch `update` bez zmiany kind, `delete`) dostaje pusty slot 22px, żeby tytuły się nie rozjeżdżały.
+**`ProposalRow`** — wiersz kolejki `h-12`: `[StatusChip] [KindMarker] [type ikona] Header (truncate) … [OriginPath] [tagi ≤2 + „+N"] [czas rel.]`. Stale → dodatkowy `danger` badge po prawej. Hover `surface-muted`, aktywny `accent-subtle` + lewy pasek `2px` iris. `kind` (v1.4) tymi samymi kanałami co wiersz pamięci (§2.3): `KindGutter` przy lewej krawędzi (ustępuje paskowi zaznaczenia) + `KindMarker`; propozycja bez `kind` w payloadzie (patch `update` bez zmiany kind, `delete`) dostaje pusty slot 22px, żeby tytuły się nie rozjeżdżały. Podpowiedź „podobne do istniejących" (v1.6, A1) → ikona `sparkles` w kolorze `info` tuż za tytułem (`similarHint`; tooltip + `aria-label`) — sygnał dla recenzenta zatwierdzającego bez otwierania detalu.
 
 **`DiffView`** — **zależny od `type`** (FR-D1). Najbardziej produktowy komponent:
 
@@ -340,9 +340,9 @@ A11y (§10, P2 — kolor nigdy nie jest jedynym sygnałem): usunięcia/dodania n
 
 Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashboard/package.json` — świadomie **bez** `@types/diff` (ten pakiet typuje starszy kształt v5 i przesłoniłby własne typy v9 dołączone w paczce; `moduleResolution: "Bundler"` poprawnie rozwiązuje jej mapę `exports`).
 
-**`ProposalActions`** — sticky bar u dołu detalu: `Zatwierdź` (primary, skrót **A**), `Odrzuć` (ghost-danger, **R**), `Edytuj` (secondary, **E**), oraz split-button **`Zatwierdź jako zamiennik ▾`** (**S**, wybór X spośród „similar/affected"). Przy `stale` → primary **disabled** + inline alert z powodem i CTA „Przejrzyj różnicę / Zaktualizuj bazę".
+**`ProposalActions`** — sticky bar u dołu detalu: `Zatwierdź` (primary, skrót **A**), `Odrzuć` (ghost-danger, **R**), `Edytuj` (secondary, **E**), oraz split-button **`Zatwierdź jako zamiennik ▾`** (**S**, wybór X spośród „similar/affected"). Gdy propozycja ma podpowiedź A1 (`supersedeSuggestions`), lista kandydatów zaczyna się grupą **„Podobne (podpowiedź)"** — widoczną bez wpisywania frazy (dopóki pole wyszukiwania jest puste; po wpisaniu fraza przejmuje listę); kandydat z zasięgiem `global` ma znaczek `global`. Przy `stale` → primary **disabled** + inline alert z powodem i CTA „Przejrzyj różnicę / Zaktualizuj bazę".
 
-**`DedupHint`** — pod headerem, `info` alert inline: `sparkles` + „Podobne do: `mem_x`, `mem_y`" (klik → podgląd). Nie blokuje (advisory, FR-M3).
+**`DedupHint`** — pod headerem, `info` alert inline: `sparkles` + „Podobne do: `mem_x`, `mem_y`" (klik → podgląd). Nie blokuje (advisory, FR-M3). W kolejce (v1.6, A1) id pochodzą z `proposals.similar_memories`; klik nawiguje do `/pamiec?id=<id>` (przeglądarka pamięci); pozycje niedostępne (pamięć zarchiwizowana / usunięta po zapisie) są pomijane, a gdy nie zostaje żadna — blok się nie renderuje.
 
 **`RevisionTimeline`** — pionowa oś w detalu pamięci: każda rewizja = `rev_…` (mono), autor (origin), czas, akcja (`created`/`edited`/`promote`/`superseded-by`). Supersession linkuje do zamiennika.
 
@@ -381,6 +381,7 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 │           │                                                                │
 │  ────────  │                                                               │
 │   Projekty│                                                                │
+│ ⚙ Ustaw.  │                                                                │
 │ ◐ Motyw   │                                                                │
 │   Wyloguj │                                                                │
 └──────────┴──────────────────────────────────────────────────────────────┘
@@ -390,7 +391,7 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
   nawigacja 7 ekranów kontekstowych (Kolejka z badge liczby pending), separator, przycisk
   `＋ Nowa pamięć` (aktywny tylko gdy kontekst = konkretny/Global), a na samym dole — wizualnie
   odcięta `border-t` — sekcja konta/ustawień: wejście do **Projekty** (ustawienia całego projektu,
-  poza kontekstem — §9.3), toggle motywu, Wyloguj.
+  poza kontekstem — §9.3), **Ustawienia** (ustawienia instancji, poza kontekstem — §9.9), toggle motywu, Wyloguj.
 - **Top bar (52px):** search (`⌘K`) (lewo) · **health strip** (MetricStat ×4, `ml-auto`).
 - **Health strip** jest wszechobecny (P1) — recenzent zawsze widzi głębokość kolejki, zdrowie embeddingu, wynik nocnego jobu, `secret_blocked`/24h.
 
@@ -416,8 +417,21 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
   listy); lista `ProposalRow` z własnym checkboxem per wiersz (klik w checkbox rozłączny od klika w
   wiersz — pierwszy toggle'uje zaznaczenie, drugi otwiera podgląd); `QueueBulkBar` pod paskiem filtrów,
   WYŁĄCZNIE gdy zaznaczenie niepuste — licznik + „Zatwierdź (N)"/„Odrzuć (N)"/„Anuluj zaznaczenie".
-  Badge stale widoczny na wierszu.
-- **Prawa:** header + `OriginPath` + `type` + `kind` (`KindMarker` + nazwa, v1.4; dla `update`/`delete` bez `kind` w payloadzie — kind pamięci, której dotyczą) + tagi; `DedupHint` (jeśli jest); Tabs `Diff`/`Metadane`/`Rewizje`; sticky `ProposalActions`.
+  Badge stale widoczny na wierszu. Wiersz z podpowiedzią „podobne do istniejących" (v1.6, A1/G10) ma
+  ikonę `sparkles` (`info`) za tytułem; `hasSimilar` jest liczone serwerowo i uwzględnia tylko wciąż
+  zatwierdzone pamięci, więc znacznik zgadza się z blokiem w detalu. Dialog bulk approve dopisuje
+  „N propozycji z podpowiedzią „podobne do istniejących" — zatwierdzenie bez otwarcia detalu może
+  wprowadzić prawie-duplikat" (kolor `info`, tylko gdy N > 0, jak ostrzeżenie o stale).
+  **Skala (nightly-scale):** lista to **jedna strona najstarszych oczekujących** (FIFO, domyślnie 100 —
+  serwer zwraca lekkie elementy bez `payload`; tytuł/`kind`/tagi wiersza pochodzą z `summary`), bez
+  „Załaduj więcej" i bez przewijania nieskończonego. W pasku filtrów, przy przycisku odświeżania, stoi
+  licznik **zgodny z aktywnym filtrem** (projekt/`type`/`origin`/`scope` — serwer liczy `total` tymi samymi
+  warunkami co listę): „100 z 342" gdy lista jest obcięta, samo „342" gdy mieści się w całości. Pod
+  wierszami, gdy obcięta, muted-owa notka „Pokazano N najstarszych z M — kolejne pojawią się po
+  rozstrzygnięciu widocznych" (zatwierdzone znikają, następne wskakują przy pollingu co 15 s).
+  **Bulk i „zaznacz wszystkie" działają wyłącznie na widocznych wierszach** (inwariant z v1.3 bez zmian:
+  „wszystkie" nigdy nie znaczy „wszystkie w bazie"; aria-label checkboxa podaje liczbę widocznych).
+- **Prawa:** header + `OriginPath` + `type` + `kind` (`KindMarker` + nazwa, v1.4; dla `update`/`delete` bez `kind` w payloadzie — kind pamięci, której dotyczą) + tagi; `DedupHint` (jeśli podpowiedź A1 ma dostępne pamięci; bezpośrednio pod nagłówkiem, przed relacjami i zakładkami); Tabs `Diff`/`Metadane`/`Rewizje`; sticky `ProposalActions` (pamięci z podpowiedzi są kandydatami „Zatwierdź jako zamiennik" bez wpisywania frazy). Detal ładuje się po wyborze wiersza z `GET /api/proposals/:id` (lista jest lekka) — do czasu odpowiedzi szkielet, przy błędzie stan błędu z „Spróbuj ponownie"; `A`/`R`/`E`/`S` i przyciski akcji działają dopiero na załadowanym detalu zaznaczonego wiersza; detal sąsiadów ±1 jest prefetchowany przy `j/k`; pozycja w `ProposalActions` to `numer wiersza / total`.
 - **Stany specjalne:** `stale` → primary disabled + alert danger z powodem; `edit-before-approve` → header/body stają się edytowalne inline, akcja zmienia się na „Zatwierdź z edycją" (badge „approved with edits"). Bulk (roadmap v1.3): potwierdzenie przez `AlertDialog` (ostrzeżenie o `stale` dla approve, wspólne pole `reason` dla reject); po operacji sukcesy znikają z zaznaczenia, porażki zostają zaznaczone i widoczne przez „Szczegóły" na toaście (`BulkFailuresDialog`, id + kod + komunikat).
 - **Propozycja `create_project` (v1.5, onboarding przez MCP)** — nie niesie treści pamięci. Tytuł wiersza i detalu: „Nowy projekt: ‹nazwa› (‹slug›)” (`projectProposalTitle`), ikona wiersza `FolderPlus`; brak `KindMarker` (bez `kind`). Tab „Diff” pokazuje zamiast `DiffView` podgląd `ProjectProposalPreview`: `dl` Nazwa / Slug (mono) / Nagłówek MCP `X-Context-Keeper-Project: ‹slug›` + notka w ramce: zatwierdzenie utworzy projekt **bez tokena**, agenci z tokenem konta i tym nagłówkiem zaczną pracować od razu, token projektowy (np. CI) można wydać później na ekranie Projekty, odrzucenie zwalnia slug. Tab „Rewizje”: „Nie dotyczy”. `ProposalActions` bez „Edytuj” i „Zatwierdź jako zamiennik” (`PROPOSAL_CAPABILITIES` w `lib/proposals.ts`). Typ `create_project` jest w filtrze `type`. Approve (pojedynczy i bulk) odświeża listę projektów — `ContextSwitcher` i ekran Projekty widzą nowy projekt bez przeładowania. Propozycja ma `scope='global'`, `project_id=NULL`, więc w przełączniku kontekstu widać ją pod „Global”/„Wszystkie” (osobny filtr → backlog).
 - **Klawiatura:** `j/k` nawigacja, `A/R/E`, `S` zamiennik, `x` zaznacz/odznacz (bulk, roadmap v1.3 — `A`/`R` świadomie zostają jednoelementowe, bulk zawsze wymaga jawnego kliknięcia), `Enter` otwiera, `/` search (dla `create_project` `E`/`S` nieaktywne).
@@ -486,6 +500,10 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 - **Filtry:** `event_type` (m.in. `secret_blocked`, `purge_tombstone`, `nightly_run`, `proposal_*`, `promote`, `archive`, `token_*`), zakres czasu, projekt.
 - **Tabela:** czas (mono, tabular) · `event_type` (chip) · aktor (`OriginPath`/`human-dashboard`) · `affected_ids` (mono, klik → pamięć) · `rev_…`.
 - **`secret_blocked`** wyróżniony `danger` — to sygnał rotacji/unieważnienia; wiersz linkuje do projektu/tokena z CTA „Zarządzaj tokenem" (v1.3 — operator wybiera `Rotuj` albo `Unieważnij` w `ProjectTokensDialog`).
+- **`llm_secret_skipped`** (v1.6, ikona `shield-alert`, `danger`) — krok LLM nocnego joba pominął wpis, bo skaner wykrył w nim sekret
+  (`affected_ids` = id pamięci, `metadata.secretType`, bez materiału). Bez CTA „Zarządzaj tokenem" — to nie jest sygnał tokena, tylko
+  wpisu w pamięci; człowiek decyduje, czy go poprawić. **`instance_settings_changed`** (v1.6, ikona `settings`, `info`) — zapis w
+  „Ustawieniach" (`metadata.section`, `metadata.changes`; klucz API tylko jako `set`/`cleared`, nigdy wartość).
 - **`token_revoked`** (v1.3, ikona `shield-off`, `danger`) i **`token_relabeled`** (v1.3, ikona `pencil`, `neutral`) dołączone do `token_*` — aktor niesie dodatkowy chip z `metadata.tokenLabel`, gdy obecny (agent-path eventy: `proposal_created`, `secret_blocked`).
 - **Sekcja `revisions`:** przegląd historii zmian (before/after) niezależnie od kolejki.
 
@@ -527,6 +545,34 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
   kontekstu) + `.mcp.json` z nagłówkiem, `EmptyState` gdy brak projektów; (3) `AGENTS.md`; (4) `CLAUDE.md`;
   (5) *Token projektowy (CI / współpracownik)* — `.mcp.json` bez nagłówka; (6) kroki końcowe + `curl /health`.
 
+### 9.9 Ustawienia (v1.6) — ustawienia instancji
+
+- **Route/label:** `/ustawienia`, „Ustawienia" — spójne z polskimi slugami. Skrót klawiaturowy `g s`. Wejście w dolnej sekcji railu
+  (§9.0), pod „Projekty", nad toggle'em motywu — ustawienia instancji to nie nawigacja kontekstowa (precedens: `Projekty`, §9.3).
+  Ten ekran **ignoruje** `ContextSwitcher` (dziś ustawienia są globalne dla instancji; model per projekt to późniejsze
+  rozszerzenie, które nie zmienia układu ekranu).
+- **Rama:** `ScreenContainer width="prose"`. Ekran powstaje z jedną sekcją, „Model LLM", w karcie `rounded-lg border bg-surface p-4`;
+  kolejne sekcje ustawień instancji dochodzą pod nią w tym samym stylu.
+- **Sekcja „Model LLM"** (krok LLM nocnego joba — opcjonalny, domyślnie wyłączony):
+  1. **Stan** — `StatusChip` (kolor + ikona + label, P2): `Wyłączony` (neutral) · `Włączony · <model>` (success) · `Klucz nieczytelny —
+     wpisz ponownie` (danger, ikona `key-round`). Stan „nieczytelny" znaczy, że `SECRETS_ENCRYPTION_KEY` zmieniono lub zgubiono —
+     zapisany klucz API jest bezużyteczny, a nocny job pomija krok LLM (liczone w przebiegu).
+  2. **Ostrzeżenie o egressie** — pole `warning` nad formularzem: po włączeniu treść pamięci wychodzi do wskazanego endpointu
+     (poza maszynę, jeśli to zewnętrzne API); wpisy ze skanera sekretów nie są wysyłane (lista poniżej).
+  3. **Formularz** — `Switch` „Włącz krok LLM w nocnym jobie"; `Input` **endpoint** (placeholder
+     `https://api.openai.com/v1/chat/completions`, podpowiedź „Ollama: `http://localhost:11434/v1/chat/completions`" — pełny URL
+     `/chat/completions`); `Input` **model** (wymagany po włączeniu, bez domyślnej wartości — nazwa zależy od providera);
+     **klucz API** — write-only: pokazuje wyłącznie „ustawiony" / „brak", przyciski `Zmień` (otwiera pole `type=password`) i `Usuń`
+     (za potwierdzeniem), wartość nigdy nie wraca do przeglądarki; pole jest wyłączone z podpowiedzią „ustaw `SECRETS_ENCRYPTION_KEY`
+     na serwerze", gdy serwer nie ma klucza szyfrującego; **limit wywołań na przebieg** (domyślnie 100); **timeout** w sekundach
+     (domyślnie 30); `Zapisz`; błędy z API inline pod formularzem (nie tylko toast).
+  4. **„Sprawdź połączenie"** — przycisk secondary obok `Zapisz`; wyłączony przy niezapisanych zmianach lub bez zapisanego
+     endpointu i modelu; stan pending; wynik inline: `OK · <model> · 412 ms` albo czytelny błąd (status, bez klucza). To jedno
+     testowe wywołanie na żądanie — **bez żywej sondy** w pasku zdrowia ani w metrykach (płatne wywołanie).
+  5. **„Ostatni przebieg"** — czas (względny + absolutny w tooltipie), stan LLM z `nightly_run`, tabela liczników (`tabular-nums`):
+     wywołania, błędy, pominięte (limit · bezpiecznik · sekret · klucz). Lista wpisów pominiętych przez skaner sekretów:
+     `MonoId` linkujące do `/pamiec?id=…` + chip z typem sekretu. Gdy nie było jeszcze udanego przebiegu — `EmptyState`.
+
 ---
 
 ## 10. Stany, dostępność, klawiatura
@@ -534,7 +580,7 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 - **Focus:** zawsze widoczny `focus-visible` — ring 2px iris + offset 2px. Nawigacja Tab przez wszystkie interaktywne.
 - **Kontrast:** cel **WCAG AA** (tekst ≥4.5:1, UI/ikony ≥3:1). Palety §2 dobrane pod to w obu motywach; status-fg na status-subtle spełnia AA.
 - **Kolor nie jest jedynym sygnałem** (P2): każdy status = kolor **+ ikona + label**.
-- **Klawiatura (kolejka):** `j/k` góra/dół, `Enter` detal, `A` approve, `R` reject, `E` edit, `S` zamiennik, `x` zaznacz/odznacz (bulk approve/reject, roadmap v1.3), `/` search, `⌘K` paleta poleceń, `g` potem `k/p/c/t/a/m/o/w` — skok do ekranu (Kolejka/Pamięć/Oś czasu/Projekty/Audyt/Pomiary/Operacje/Onboarding). Skróty widoczne w tooltipach i „?" cheatsheet.
+- **Klawiatura (kolejka):** `j/k` góra/dół, `Enter` detal, `A` approve, `R` reject, `E` edit, `S` zamiennik, `x` zaznacz/odznacz (bulk approve/reject, roadmap v1.3), `/` search, `⌘K` paleta poleceń, `g` potem `k/p/c/t/a/m/o/w/s` — skok do ekranu (Kolejka/Pamięć/Oś czasu/Projekty/Audyt/Pomiary/Operacje/Onboarding/Ustawienia). Skróty widoczne w tooltipach i „?" cheatsheet.
 - **Reduced motion:** `prefers-reduced-motion` → bez translate/shimmer.
 - **Empty / loading / error:** każdy list ma `EmptyState`, `Skeleton`, i inline error (nie modal) z akcją „Ponów".
 - **Live vs polling:** v1 kolejka odświeżana pollingiem — pokaż „ostatnia aktualizacja Xs temu" + ręczny refresh; bez fałszywego „real-time".
@@ -560,7 +606,7 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 4. **Ekran-bohater** — Kolejka (§9.1) end-to-end na realnym API, potem Pamięć/Projekty/Audyt.
 5. **A11y pass** — focus, kontrast, klawiatura (§10) jako część „definition of done", nie po fakcie.
 
-**Poza v1 (spójne z roadmapą PRD §10):** bulk approve/reject (anti-fatigue) — layout kolejki już to udźwignie (checkbox na wierszu + bulk bar); ręczny trigger nocnego jobu i hard-purge w dashboardzie (v1.1) — miejsce w Audycie/Projektach; per-user auth (v2) — dolna sekcja railu (dziś: Projekty, toggle motywu, Wyloguj — §9.0) już istnieje i ją rozszerzy.
+**Poza v1 (spójne z roadmapą PRD §10):** bulk approve/reject (anti-fatigue) — layout kolejki już to udźwignie (checkbox na wierszu + bulk bar); ręczny trigger nocnego jobu i hard-purge w dashboardzie (v1.1) — miejsce w Audycie/Projektach; per-user auth (v2) — dolna sekcja railu (dziś: Projekty, Ustawienia, toggle motywu, Wyloguj — §9.0) już istnieje i ją rozszerzy.
 
 ---
 

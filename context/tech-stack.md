@@ -166,6 +166,7 @@ Jeden dyskryminator `kind` na tabeli `memories` (nie osobne tabele — reużycie
 - Kolejka to **tabela**, nie flaga `status=pending` na dokumencie — bo merge (A+B→C) to operacja „utwórz C, zarchiwizuj A, zarchiwizuj B", której flaga nie wyrazi. Jeden mechanizm i jedna powierzchnia audytu dla zapisów agenta, edycji człowieka i propozycji nocnego joba.
 - **Optimistic concurrency (nowe):** proposal celujący w istniejące pamięci zapisuje przy utworzeniu **`base_versions`** — `revision_id` bazowy każdego `affected_id` (stan, względem którego liczono payload). Przy akceptacji sprawdzany wewnątrz transakcji (§8bis). Drift → proposal jest **stale** (computed guard, bez nowej wartości w enumie `status`).
 - **Idempotencja / dedup (nowe):** twardy `duplicate_pending` tylko przy **exact match** `hash(header+body+scope+project+kind [+event_time])` wobec pending proposala — szóste pole dokładane WYŁĄCZNIE dla `kind='event'` (hashe `fact`/`document` bit-w-bit jak przed v1.3), więc to samo zdarzenie odnotowane dla dwóch różnych czasów to dwie pamięci, nie duplikat; exact-match do approved → `already_exists`; podobne → proposal + hint (§5).
+- **`similar_memories` (v1.6, A1; `jsonb`, nullable)** — wynik detekcji prawie-duplikatów liczony **raz, przy `save_memory`**; trzy stany: `NULL` = nie policzono (provider down / przekroczony budżet czasu / propozycja bez detekcji), `[]` = policzono, brak podobnych, lista = ≤3 pozycje `{id, distance}` rosnąco po odległości kosinusowej (id zatwierdzonej pamięci). Wypełniana tylko dla `origin='agent'` + `type='create'` + `kind` fact/document; `update` (`supersedes`), `event`, propozycje nocnego joba i `create_project` zawsze mają `NULL`. Edit-before-approve jej **nie zmienia** (opisuje oryginał agenta); brak backfillu — propozycje sprzed migracji 0016 zostają `NULL`. Zapis idzie UPDATE-em po insercie proposala (proposal powstaje przed jakimkolwiek wywołaniem providera). Serwer rozwiązuje id przy odczycie (`GET /api/proposals/:id` → `available`/`header`/`scope`; zarchiwizowana lub usunięta pamięć = niedostępna, UI ją pomija), a lekka lista (`GET /api/proposals`) niesie tylko flagę `hasSimilar`.
 - **`create_project` (v1.5)** — propozycja założenia projektu, nie mutacja pamięci: payload `{name, slug}`, `scope='global'`, `project_id=NULL`, `affected_ids=[]`, `content_hash=NULL`. Unikalność slugu wśród oczekujących: partial unique index `proposals_create_project_slug_pending_key` na `(payload->>'slug') WHERE status='pending' AND payload->>'slug' IS NOT NULL` (predykat celowo bez `type = 'create_project'` — Postgres 55P04 przy migracji w jednej transakcji; niezmiennik: tylko ten payload ma klucz `slug`). Approve zakłada wiersz `projects` **bez tokena** (zniesiony niezmiennik „nigdy projekt bez tokena"); kolizja slugu przy approve → `validation_error`, propozycja zostaje `pending`; odrzucenie zwalnia slug. Brak edit-before-approve i supersession.
 
 > **Forward-compat (v2):** miejsce na pole `confidence`/`auto_eligible` (anti-fatigue / sedymentacja).
@@ -186,7 +187,7 @@ Wektory policzone przy `save` (dla dedup), zanim proposal zostanie zatwierdzony.
 
 `id`, `event_type`, `actor` (`agent:<project_id>` (narzędzia pamięci — projekt z credentialu albo z nagłówka), `agent:account` (v1.5 — akcje tokenu konta bez projektu: `create_project` → `proposal_created` / `secret_blocked`, token w `metadata.{tokenId,tokenLabel}`) albo `"human-dashboard"`), `affected_ids`, `revision_id` (opcjonalnie, before/after), `created_at`. Odczyty **nie** logowane per-event — zostają liczniki.
 
-- **event_type:** `proposal_created`/`approved`/`rejected`/`edited`, `human_edit`, `archive`, `promote`, `token_created`/`rotated`/**`revoked`**/**`relabeled`** (v1.3 — `revoked`=unieważnienie natychmiastowe, `relabeled`=rename etykiety, kosmetyczny), **`secret_blocked`** (metadane: typ sekretu + `tokenId`/`tokenLabel` (v1.3, atrybucja per-agent) + czas — bez materiału sekretu; sygnał rotacji/unieważnienia, §10), **`purge_tombstone`** (content wymazany, powód, czas — §10), **`nightly_run`** (status/liczniki, §8), **`project_settings_changed`** (v1.2 — zmiana ustawień projektu z dialogu szczegółów, np. `include_events_in_default_search`; metadane `{field, from, to}`; v1.5: także `field: 'slug'` przy edycji slugu, `{from, to}`). v1.5 nie dodało wartości enuma `event_type`.
+- **event_type:** `proposal_created`/`approved`/`rejected`/`edited`, `human_edit`, `archive`, `promote`, `token_created`/`rotated`/**`revoked`**/**`relabeled`** (v1.3 — `revoked`=unieważnienie natychmiastowe, `relabeled`=rename etykiety, kosmetyczny), **`secret_blocked`** (metadane: typ sekretu + `tokenId`/`tokenLabel` (v1.3, atrybucja per-agent) + czas — bez materiału sekretu; sygnał rotacji/unieważnienia, §10), **`purge_tombstone`** (content wymazany, powód, czas — §10), **`nightly_run`** (status/liczniki, §8), **`project_settings_changed`** (v1.2 — zmiana ustawień projektu z dialogu szczegółów, np. `include_events_in_default_search`; metadane `{field, from, to}`; v1.5: także `field: 'slug'` przy edycji slugu, `{from, to}`), **`llm_secret_skipped`** (v1.6 — krok LLM nocnego joba pominął wpis pamięci, bo skaner sekretów trafił w jego treść; `affected_ids` = id pamięci, metadane `{secretType, purpose}`, bez materiału; osobny typ, nie `secret_blocked`, żeby nie zawyżać metryki `secretBlocked24h` i nie niosić CTA tokena, §8), **`instance_settings_changed`** (v1.6 — zapis w ekranie Ustawienia; metadane `{section: 'llm', changes}`, klucz API wyłącznie jako `set`/`cleared`, nigdy wartość; pomijany, gdy nic się nie zmieniło). v1.5 nie dodało wartości enuma `event_type`; v1.6 dodaje dwie (migracja 0017).
 
 ### `projects`
 
@@ -227,6 +228,18 @@ pepper.** Lookup token→(projekt, token) = jeden trafiony indeks JOIN (§10).
   `project_tokens_account_label_active_key` na `(label) WHERE project_id IS NULL AND status='active'`
   (NULL-e są w indeksie projektowym rozłączne). Lookup nie zakłada projektu: guard ustala `tokenScope` i
   rozwiązuje projekt z nagłówka.
+
+### `llm_settings` (v1.6 — ustawienia kroku LLM nocnego joba)
+
+Konfiguracja opcjonalnego kroku LLM (§8) żyje **w bazie i w dashboardzie** (ekran Ustawienia), nie w env — zmiana działa od
+następnego przebiegu bez redeployu. Kolumny: `id` (`text` PK; wiersz instancji ma stałe `'global'`, przyszłe wiersze per projekt `llms_…`),
+`project_id` (nullable, FK `projects` ON DELETE CASCADE; **`NULL` = ustawienie instancji**), `enabled` (default `false`), `endpoint`
+(pełny URL `…/chat/completions`), `model` (**bez wartości domyślnej** — nazwa zależy od providera), `api_key_ciphertext`
+(szyfrogram, §10), `call_cap` (default 100, CHECK 1–10000), `timeout_ms` (default 30000, CHECK 1000–300000), `updated_at`.
+`UNIQUE NULLS NOT DISTINCT (project_id)` — najwyżej jeden wiersz instancji i jeden na projekt; CHECK `NOT enabled OR (endpoint IS NOT NULL AND
+model IS NOT NULL)` — niekompletna konfiguracja nie zapisze się jako włączona. Migracja 0017 zasiewa wiersz instancji
+(`id = 'global'`, wyłączony); odczyty mają fallback na wartości domyślne, gdyby go zabrakło. **Per projekt** (poza zakresem v1.6): dodatkowy
+wiersz z `project_id` = PEŁNE nadpisanie, nie łatka pól — schemat już to dopuszcza.
 
 ### `search_events` (instrumentacja `search_memory`, v1.1; `cross_project` v1.5)
 
@@ -277,8 +290,17 @@ Embedding-similarity **nie odróżnia** korekty od duplikatu („PG15"→„PG16
 
 - exact `hash(header+body+scope+project+kind [+event_time dla `kind='event'`])` == pending proposal → **`duplicate_pending`** (id proposala; łapie retry sieciowy),
 - exact == approved memory → **`already_exists`** (id pamięci),
-- **podobne-ale-nie-exact → proposal ZAWSZE powstaje** + hint „similar to [ids]" dla recenzenta,
+- **podobne-ale-nie-exact → proposal ZAWSZE powstaje** + hint „similar to [ids]" dla recenzenta (reguła niżej),
 - nowe → create.
+
+**Hint „podobne do istniejących" (v1.6, A1)** — liczony przy `save_memory` (create agenta), zapisany w `proposals.similar_memories` (§4):
+
+- **Próg:** `NEAR_DUPLICATE_DISTANCE` — dystans kosinusowy `<=>`, pozycja trafia do hintu przy odległości ≤ progu. Domyślnie **0.20**, zmierzone dla bge-m3 (domyślny preset `multilingual`, 2026-10-07, korpus dogfood): łapie 86% parafraz (36/42), 0% niepowiązanych próbek (najbliższa niepowiązana 0.311); korekty wpadają w 89% (zamierzone — recenzent rozważa „Zatwierdź jako zamiennik"). Wartość jest **specyficzna dla modelu**: preset `api` z text-embedding-3-small (żywa instancja dogfood) **musi** ustawić jawnie `NEAR_DUPLICATE_DISTANCE=0.13` w env (Coolify) — przy 0.13 łapie 79% parafraz PL→PL (23/29) i nie daje fałszywych alarmów w tle (kolejne różne pary od 0.138); parafrazy między językami (EN↔PL, dystans 0.26–0.34) nakładają się na różne fakty, więc żaden próg ich nie złapie (ograniczenie modelu, patrz backlog). Niezależny od `NIGHTLY_DEDUP_DISTANCE` — nocny próg jest celowo wąski („scal wąsko"), hint ma łapać parafrazy; ten sam próg ma później zasilać bezpiecznik auto mode (A2).
+- **Zakres porównania:** wyłącznie zatwierdzone pamięci (`status='approved'`; pending proposale nie wchodzą), z projektu zapisu **i** `global`, tego samego `kind` (fact/document; `event` bez detekcji), z wektorami aktywnego modelu. Przez wspólny prymityw ANN (`findAnnNeighbors`), nie osobne zapytanie.
+- **Dokument:** minimum odległości po parach chunków, kolaps do jednej pozycji na pamięć; najwyżej 3 pozycje, od najbliższej.
+- **Budżet:** wyszukanie mieści się w **tym samym** twardym budżecie `EMBEDDING_SAVE_TIMEOUT_MS` co embedding (jeden deadline na oba kroki); przekroczenie (lub brak wektora) → `NULL`, `save_memory` i tak zwraca `pending`. Bardzo duży dokument (wiele chunków) może więc skończyć jako `NULL`.
+- **Advisory, nie dla agenta:** nic nie jest suppresowane ani odrzucane po podobieństwie; kontrakt `{id, status}` i opis narzędzia MCP bez zmian — agent hintu nie dostaje.
+- **Nocny krok dedup** (§8) działa osobną polityką (ścisła partycja, `NIGHTLY_DEDUP_DISTANCE`) i jest bez zmian.
 
 Bez client-supplied idempotency key w v1 (hash treści wystarcza).
 
@@ -359,7 +381,7 @@ Trzy zwalidowane presety zamiast surowego knoba `EMBEDDING_MODEL` — każdy spi
 
 ### Degradacja — fail-open na obu ścieżkach (nowe)
 
-- **`save_memory`:** przechwycenie faktu jest święte — embedding **nigdy nie blokuje proposala**. Provider up → staging embedding + dedup-hint. Provider down / **przekroczony twardy budżet czasu** → proposal i tak powstaje (bez staged wektora), agent dostaje szybko `pending`, **autorytatywny embedding liczony przy akceptacji**. Invariant: *autorytatywny embedding gwarantowany przy akceptacji; embedding przy save = best-effort pod dedup-hint*.
+- **`save_memory`:** przechwycenie faktu jest święte — embedding **nigdy nie blokuje proposala**. Provider up → staging embedding + dedup-hint (wyszukanie podobnych pamięci, §5). Provider down / **przekroczony twardy budżet czasu** → proposal i tak powstaje (bez staged wektora i bez hintu — `similar_memories = NULL`, „nie policzono"), agent dostaje szybko `pending`, **autorytatywny embedding liczony przy akceptacji**. Budżet `EMBEDDING_SAVE_TIMEOUT_MS` obejmuje **embedding i wyszukanie podobnych razem** (jeden deadline). Invariant: *autorytatywny embedding gwarantowany przy akceptacji; embedding przy save = best-effort pod dedup-hint*.
 - **`search_memory`:** query embedding padł → **FTS-only** (§6), nie błąd.
 - **`/health`:** provider embeddingów down = **degraded, nie unhealthy** — `app` zostaje „up". Zdrowie providera jako osobna metryka w dashboardzie (§11).
 
@@ -377,6 +399,7 @@ Wektor liczony przy `save` (dla dedup) → `staging_embeddings` (powiązany z pr
 - **Dedup przez ANN** (near-neighbors per pamięć przez indeks wektorowy), nie O(n²). Deterministyczny i tani; merge/rewrite przez LLM i tak wymaga przeglądu.
 - **Prune/staleness** korzysta z `last_accessed_at`/`access_count`, z minimalnym **wiekiem/grace** przed kwalifikacją (świeży `fact` ma z natury niski `access_count`).
 - **Pluggable score:** job czyta abstrakcyjny score; v2 podmienia recency → success/failure co-occurrence (Memory Worth) bez migracji.
+- **Opcjonalny krok LLM (v1.6)** — job NIE jest już w całości deterministyczny: może dodatkowo pytać model językowy. **Opt-in, domyślnie wyłączony** (włącza go człowiek w Ustawieniach; bez tego job działa jak dotąd). Klient to OpenAI-kształtny `POST …/chat/completions` (OpenAI/OpenRouter/Groq i lokalne Ollama/vLLM przez URL), **bez SDK vendora**; `Authorization: Bearer` tylko gdy klucz jest ustawiony. Konfiguracja czytana **świeżo per przebieg** (`llm_settings`, §4). **Fail-open:** awaria providera/ustawień = log + licznik, przebieg zostaje `success`. Reguły (jedno miejsce: `LlmRunBudget`, `apps/server/src/llm/llm-budget.ts`): **cap** w ŻĄDANIACH HTTP na przebieg (domyślnie 100, ponowienie się wlicza, niezależny od `NIGHTLY_MAX_PROPOSALS_PER_RUN`; nadmiar liczony, nie gubiony), **timeout** żądania (domyślnie 30 s), **bezpiecznik** — po 3 kolejnych błędach reszta przebiegu pomija LLM (martwy provider kosztuje `3 × timeout`, nie `cap × timeout`), **jedna ponowna próba tylko na 429/503** (backoff z górnym limitem na `Retry-After`, wliczona do capa; timeout bez retry), odpowiedź walidowana **zod-schematem wołającego** z `response_format: json_object` (niezgodność = policzony błąd), **skaner sekretów** na treści wychodzącej — wpis z trafieniem NIE jest wysyłany, jest zdarzenie audytu `llm_secret_skipped` i pozycja na liście pominiętych w Ustawieniach (bez redakcji). Wszystko, co przyszłe kroki LLM zaproponują, idzie do kolejki jak każda propozycja (nigdy auto). **B1 dostarcza sam klient, konfigurację i obserwowalność — żadnego detektora z modelem jeszcze nie ma** (prune z sądem modelu i `conflicts_report` to kolejne kroki v1.6). Konfiguracja LLM nie dziedziczy `EMBEDDING_API_*`.
 - **`conflicts_report` (wykrywanie sprzeczności same-topic) → v2** — wymaga wiarygodnego sądu LLM o kontradykcji (wysoki false-positive); v1 zostaje przy dedup near-identical + prune.
 
 ### Semantyka operacyjna (nowe)
@@ -386,7 +409,7 @@ Wektor liczony przy `save` (dla dedup) → `staging_embeddings` (powiązany z pr
 3. **Idempotentne + samosprzątające proponowanie** (higiena kolejki): równoważny **ważny** pending-nightly proposal istnieje → pomiń (zero churnu); istnieje ale **stale/nieaktualny** → withdraw (audit) + re-derive jeśli warunek trwa; brak → create. Job dotyka **wyłącznie własnych** nightly-proposali (nigdy human/agent).
 4. **Harmonogram:** cron konfigurowalny (env), domyślnie ~03:00 czasu operatora (TZ konfigurowalna). Przy ANN job ~liniowy (minuty).
 5. **Ręczny trigger:** CLI `run-nightly` w v1 (przycisk w dashboardzie → v1.1), respektuje ten sam lock.
-6. **Observability:** event `nightly_run` — status (success/failed/skipped-locked), start/end/duration, liczniki (created/withdrawn/skipped-as-dup) — w dashboardzie (§11).
+6. **Observability:** event `nightly_run` — status (success/failed/skipped-locked), start/end/duration, liczniki (created/withdrawn/skipped-as-dup) — w dashboardzie (§11). Od v1.6 liczniki niosą też pola kroku LLM (`llmCalls`, `llmErrors`, `llmSkippedCap`/`Breaker`/`Secret`/`KeyUnreadable`), a `metadata.llm` stan kroku (`disabled`/`ready`/`key_unreadable`/`unavailable`) i listę pominiętych przez skaner (max 200).
 
 ---
 
@@ -406,7 +429,7 @@ Wektor liczony przy `save` (dla dedup) → `staging_embeddings` (powiązany z pr
 - **Hosting:** pojedynczy VPS + Docker Compose (nie serverless — serverless dokłada connection pooling do Postgresa, cold start, uniemożliwia lokalne embeddingi).
 - **Sizing VPS wg embeddingów:** `api` → ~2 GB; `local` lekki (bge-small/nomic) → ~4 GB; **`local` multi-język (bge-m3) → ~8 GB** (Postgres + app + model + zapas na budowę HNSW). Odpowiada presetom (§7): `api`/`english`/`multilingual`; przy domyślnym `multilingual` (bge-m3) celujemy w **8 GB**.
 - **Config: 12-factor env** (§12). Projekty i tokeny w tabeli `projects` (nie w env).
-- **Bootstrapping / first-run:** komenda seed/CLI (`create-project [--slug]`, `list-projects` (kolumna SLUG na końcu), `create-token` / `list-tokens` / `rotate-token` / `revoke-token`, `create-account-token` / `list-account-tokens` (v1.5), **`purge`**, **`run-nightly`**, **`reembed`**) do założenia pierwszego projektu i tokenu oraz operacji uprzywilejowanych; hasło dashboardu z env przy pierwszym starcie, zmiana potem w dashboardzie. CLI to komendy `nestjs-commander` w tym samym kodzie (reużycie serwisów), odpalane przez `docker compose run --rm app <cmd>`.
+- **Bootstrapping / first-run:** komenda seed/CLI (`create-project [--slug]`, `list-projects` (kolumna SLUG na końcu), `create-token` / `list-tokens` / `rotate-token` / `revoke-token`, `create-account-token` / `list-account-tokens` (v1.5), **`purge`**, **`run-nightly`**, **`reembed`**, **`check-llm`** (v1.6 — jedno testowe wywołanie skonfigurowanego modelu LLM: model + latencja albo czytelny błąd, bez klucza w wyjściu)) do założenia pierwszego projektu i tokenu oraz operacji uprzywilejowanych; hasło dashboardu z env przy pierwszym starcie, zmiana potem w dashboardzie. CLI to komendy `nestjs-commander` w tym samym kodzie (reużycie serwisów), odpalane przez `docker compose run --rm app <cmd>`.
 - **Sekrety:** klucze API i seed hasła jako `.env` / Docker secrets na hoście — nie w obrazie, nie w repo.
 - **Backup:** `pg_dump` na cronie (wektory są w dumpie) + kopia offsite, retencja N dni.
 - **Migracje:** narzędzie migracyjne od dnia zero.
@@ -426,7 +449,7 @@ Wektor liczony przy `save` (dla dedup) → `staging_embeddings` (powiązany z pr
 
 Cienki generator nad `.env` + profilami Compose — **nie osobna warstwa configu** (12-factor zostaje; wyjście to ręcznie edytowalny `.env`). Kanonem configu jest wersjonowany **`.env.example`** (pełna, skomentowana lista zmiennych); instalator z niego korzysta, nie zastępuje go.
 
-- **Faza 1 — generacja (zawsze, bez kontenerów):** `install.sh` (POSIX, zależności sh + openssl) zadaje pytania (tryb edge A/B, domena+email ACME przy A, preset embeddingów, nazwa pierwszego projektu, cron/TZ), generuje sekrety (`SESSION_SECRET`, seed `DASHBOARD_PASSWORD`), zapisuje `.env` + `COMPOSE_PROFILES`. Koniec = kompletny `.env` + wypisane next-steps.
+- **Faza 1 — generacja (zawsze, bez kontenerów):** `install.sh` (POSIX, zależności sh + openssl) zadaje pytania (tryb edge A/B, domena+email ACME przy A, preset embeddingów, nazwa pierwszego projektu, cron/TZ), generuje sekrety (`SESSION_SECRET`, seed `DASHBOARD_PASSWORD`, v1.6 `SECRETS_ENCRYPTION_KEY` — raz, nigdy nie nadpisywany), zapisuje `.env` + `COMPOSE_PROFILES`. Koniec = kompletny `.env` + wypisane next-steps.
 - **Faza 2 — uruchomienie (opcjonalne, prompt tak/nie; default = tylko generacja):** przy „tak" → `docker compose up -d` + migracje + `create-project` (token wypisany **raz**). Przy „nie" → instalator wypisuje dokładne komendy do odpalenia ręcznie.
 - **Token mintuje Nest CLI (`create-project`), nie shell** — `ck_…` musi trafić do bazy jako SHA-256 atomowo (§10), więc powstaje dopiero na ścieżce uruchomienia (Faza 2) albo z wypisanej komendy manualnej. Faza czysto-offline nie ma jeszcze tokena — świadome (nie da się go bezpiecznie „wygenerować" bez DB).
 - **Idempotencja / bezpieczeństwo:** sekrety generowane **tylko gdy nieobecne** (re-run nie unieważnia sesji przez nowy `SESSION_SECRET` ani nie re-mintuje tokena); sekret na ekranie tylko raz (bearer); zmiana presetu embeddingów pod istniejącymi danymi → kieruje na `reembed` (§7), nie zmienia `EMBEDDING_DIM` po cichu. `.env` w `.gitignore`, nigdy do repo.
@@ -457,6 +480,16 @@ Cienki generator nad `.env` + profilami Compose — **nie osobna warstwa configu
   - **`secret_blocked` = sygnał rotacji/unieważnienia.** Blokada nie *un-exposuje* sekretu — LLM już go przeczytał (i potencjalnie API providera). Audit event (typ sekretu + `tokenId`/`tokenLabel` (v1.3, atrybucja per-agent) + czas, bez materiału) mówi operatorowi KTÓRY token/agent to zapisał — „ten credential wyciekł, rotuj lub unieważnij TEN token". Surfacing: filtrowalny w Audycie + wskaźnik „N blokad / 24h" w dashboardzie (§11); push → roadmapa.
 - **Hard-purge = remediacja** (bo soft-delete + append-only nie umie). Uprzywilejowana, rzadka, **nie wystawiona przez MCP.** Wymazuje treść we **wszystkich** content-bearing tabelach (`memories`, `embeddings`, `staging_embeddings`, `revisions`, `proposals.payload`, referencje w `audit_log`) + zostawia **`purge_tombstone`** (akt audytowalny, treść znika). Forma v1 = **CLI** (`purge <id> --reason`); przycisk w dashboardzie → v1.1. Nie łamie zasady soft-delete — archive zostaje domyślną ścieżką.
 
+### Sekrety w bazie (v1.6)
+
+Pierwszy sekret aplikacji w bazie: klucz API providera LLM (`llm_settings.api_key_ciphertext`, §4). Reguły:
+
+- **Szyfrowanie:** AES-256-GCM (`node:crypto`, `common/secret-box.ts`), świeże 12-bajtowe IV na zapis, tag 16 B, **AAD** = cel (`llm_settings.api_key` — szyfrogram z innej kolumny się nie odszyfruje). Format `v1:<iv>:<tag>:<ciphertext>` (base64url). Klucz = **`SECRETS_ENCRYPTION_KEY`** (env, 32 bajty base64/base64url, `openssl rand -base64 32`; `install.sh` generuje go raz). W `pg_dump`/offsite ląduje wyłącznie szyfrogram — klucz szyfrujący nie jest w bazie.
+- **Write-only:** REST nigdy nie zwraca klucza ani jego fragmentu (`apiKey: none|set|unreadable`), klucz nie trafia do audytu (`set`/`cleared`), logów ani komunikatów błędów (statusy HTTP bez ciała odpowiedzi, `redact` w providerze, komunikaty serwisu stałe — bez wejścia użytkownika).
+- **Brak klucza szyfrującego:** appka startuje normalnie, zapis klucza API odrzucany czytelnym komunikatem. **Źle sformatowany** (nie-32-bajtowy) → twardy fail przy starcie (env), żeby literówka nie zamieniła się po cichu w „nieczytelny".
+- **Nieodszyfrowalny** (zmieniony/zgubiony klucz, uszkodzony szyfrogram) → appka startuje, krok LLM pominięty i widoczny w `nightly_run` (`llm.state = key_unreadable`), Ustawienia: „Klucz nieczytelny — wpisz ponownie". **Rotacja klucza szyfrującego = ponowne wpisanie kluczy** (brak automatycznego re-szyfrowania w v1.6).
+- **Threat model kroku LLM:** po włączeniu treść pamięci wychodzi do endpointu wybranego przez operatora (egress poza maszynę, jeśli to zewnętrzne API) — opt-in jest obroną proceduralną; skaner sekretów pomija wpisy z trafieniem (nie redaguje — niekompletna redakcja = fałszywe bezpieczeństwo). „Sprawdź połączenie" to żądanie server-side pod adres wskazany przez zalogowanego admina (sesja + CSRF), jedna płatna próba na kliknięcie; w odpowiedzi tylko status/model/latencja, endpoint z loginem/hasłem w URL jest odrzucany.
+
 ### Pozostałe
 
 - **Audit log** append-only (§4) — każdy zapis, który wszedł do pamięci, ma ślad, kto go wepchnął.
@@ -470,6 +503,7 @@ Cienki generator nad `.env` + profilami Compose — **nie osobna warstwa configu
 - **Structured logs na stdout** (Docker zbiera).
 - **`/health`** dla proxy (embedding-down = degraded, nie unhealthy — §7).
 - **Minimalne metryki wystawione w dashboardzie:** pending count / głębokość kolejki, latencja embeddingu, **zdrowie providera embeddingów**, **wynik ostatniego nocnego jobu** (status + liczniki), **liczba blokad skanera sekretów / 24h** (sygnał rotacji). Nie pełny Prometheus/Grafana — stack metryczny łatwo dołożyć później.
+- **Krok LLM (v1.6):** liczniki i stan kroku są w `nightly_run.metadata` (`counters.llm*`, `llm.state`, `llm.skippedSecret`), a ekran **Ustawienia** pokazuje je z ostatniego udanego przebiegu. **Bez żywej sondy** w `/health` ani `/api/metrics` (płatne wywołanie przy każdym pollu) — połączenie sprawdza się na żądanie: przycisk „Sprawdź połączenie" albo CLI `check-llm`.
 
 ---
 
@@ -482,7 +516,8 @@ Cienki generator nad `.env` + profilami Compose — **nie osobna warstwa configu
 | `EMBEDDING_MODEL` | np. `bge-m3` |
 | `EMBEDDING_DIM` | wymiar wektora (musi zgadzać się z kolumną `vector`) |
 | `EMBEDDING_API_KEY` | klucz przy `provider=api` (sekret) |
-| `EMBEDDING_SAVE_TIMEOUT_MS` | twardy budżet czasu na embedding przy `save` (potem `pending` bez embeddingu) |
+| `EMBEDDING_SAVE_TIMEOUT_MS` | twardy budżet czasu na embedding **i** wyszukanie podobnych pamięci przy `save` (potem `pending` bez embeddingu / bez hintu) |
+| `NEAR_DUPLICATE_DISTANCE` | (v1.6, A1) próg „podejrzanego duplikatu" (dystans kosinusowy) dla hintu „podobne do istniejących" przy `save`; domyślnie **0.20** (zmierzone dla bge-m3, preset `multilingual`) — **zależy od modelu embeddingów**: preset `api` z text-embedding-3-small musi jawnie ustawić **0.13** (Coolify); niezależny od `NIGHTLY_DEDUP_DISTANCE` |
 | `BODY_MAX_FACT` / `BODY_MAX_DOCUMENT` | limity rozmiaru body per `kind` (~8 KB / ~256 KB) |
 | `TAGS_MAX` / `TAG_MAX_LEN` | limity tagów (~10 / ~40) |
 | `NIGHTLY_CRON` / `NIGHTLY_TZ` | harmonogram nocnego jobu (domyślnie ~03:00 lokalnie) |
@@ -491,13 +526,14 @@ Cienki generator nad `.env` + profilami Compose — **nie osobna warstwa configu
 | `RATE_LIMIT_CREATE_PROJECT_PER_MIN` | (v1.5) limit `create_project` per token konta, domyślnie 3/min (tylko okno minutowe) |
 | `DASHBOARD_PASSWORD` | seed hasła dashboardu przy pierwszym starcie (sekret) |
 | `SESSION_SECRET` | podpis cookie sesji (sekret) |
+| `SECRETS_ENCRYPTION_KEY` | (v1.6, opcjonalna) klucz AES-256 szyfrujący sekrety w bazie — dziś klucz API modelu LLM (§10); 32 bajty base64/base64url; brak = zapis klucza API odrzucany, źle sformatowany = fail przy starcie; zmiana = zapisane klucze nieczytelne. Konfiguracja samego LLM (endpoint/model/klucz/cap/timeout) jest w bazie (§4 `llm_settings`), nie w env |
 | `COMPOSE_PROFILES` | aktywne profile Compose (`local-embeddings`, `edge-proxy`) — ustawiane przez instalator |
 | `TRUST_PROXY` | `true` gdy TLS terminowany upstream (tryb B) — honoruj `X-Forwarded-*` (§9) |
 | `PORT_MCP` / `PORT_DASHBOARD` | rozdzielne porty `app` (routing/firewall przez zewnętrzny proxy w trybie B) |
 | `ACME_DOMAIN` / `ACME_EMAIL` | domena + email dla Let's Encrypt (tylko bundled Caddy, tryb A) |
 | `PUBLIC_MCP_URL` | (v1.2, nośny dla MCP od v1.5) publiczny origin `/mcp` do renderowania `.mcp.json` w `list_projects`/`create_project` i na ekranie Onboarding; fallback `https://${ACME_DOMAIN}`, inaczej placeholder + `mcpUrlConfigured: false` |
 
-> **Ta tabela nie jest kompletna** — pokazuje zmienne nośne architektonicznie (~27 z 62). Nie
+> **Ta tabela nie jest kompletna** — pokazuje zmienne nośne architektonicznie (~28 z 63). Nie
 > traktuj braku wiersza jako „taki knob nie istnieje": pełny, autorytatywny zestaw to
 > [`.env.example`](../.env.example) (kanon, z komentarzami) + `apps/server/src/config/env.ts`
 > (walidacja zod — jedyne miejsce, gdzie wartości domyślne są prawdziwe). Poza tabelą zostają m.in.

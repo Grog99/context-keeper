@@ -17,6 +17,7 @@ import { OsCzasuScreen } from './screens/OsCzasuScreen';
 import { PomiaryScreen } from './screens/PomiaryScreen';
 import { ProjectsScreen } from './screens/ProjectsScreen';
 import { QueueScreen } from './screens/QueueScreen';
+import { UstawieniaScreen } from './screens/UstawieniaScreen';
 
 /** Gate login-vs-app (§M2 planu Fazy 5) — `GET /api/auth/session` decyduje który poddrzewo renderować. */
 function Gate() {
@@ -47,6 +48,7 @@ function Gate() {
         <Route path="/pomiary" element={<PomiaryScreen />} />
         <Route path="/operacje" element={<OperacjeScreen />} />
         <Route path="/onboarding" element={<OnboardingScreen />} />
+        <Route path="/ustawienia" element={<UstawieniaScreen />} />
         <Route path="*" element={<Navigate to="/kolejka" replace />} />
       </Route>
     </Routes>
