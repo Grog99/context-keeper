@@ -34,4 +34,6 @@ export const queryKeys = {
   metrics: () => ['metrics'] as const,
   usage: (filter: Record<string, unknown>) => ['metrics', 'usage', filter] as const,
   config: () => ['config'] as const,
+  /** Ekran "Ustawienia" (roadmap v1.6) — sekcja "Model LLM": ustawienia + ostatni udany przebieg. */
+  llmSettings: () => ['settings', 'llm'] as const,
 };

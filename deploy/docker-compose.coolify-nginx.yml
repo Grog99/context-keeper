@@ -59,6 +59,8 @@ services:
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY}
       SESSION_SECRET: ${SESSION_SECRET}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+      # Opcjonalny: klucz szyfrujący sekrety w bazie (klucz API modelu LLM z Ustawień). `openssl rand -base64 32`.
+      SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:-}
     # Publikacja TYLKO na loopback hosta — host nginx robi proxy_pass http://127.0.0.1:3000 / :3001.
     # NIE zmieniaj interfejsu "127.0.0.1" — na 0.0.0.0 wystawiłoby app publicznie z pominięciem
     # Pangolina. Konfigurowalny jest TYLKO numer portu na hoście (PORT_MCP/PORT_DASHBOARD w .env),

@@ -67,6 +67,7 @@ export async function apiFetch<T>(path: string, options: ApiRequestOptions = {})
 export const api = {
   get: <T>(path: string): Promise<T> => apiFetch<T>(path),
   post: <T>(path: string, body?: unknown): Promise<T> => apiFetch<T>(path, { method: 'POST', body }),
+  put: <T>(path: string, body?: unknown): Promise<T> => apiFetch<T>(path, { method: 'PUT', body }),
   patch: <T>(path: string, body?: unknown): Promise<T> => apiFetch<T>(path, { method: 'PATCH', body }),
   del: <T>(path: string): Promise<T> => apiFetch<T>(path, { method: 'DELETE' }),
 };

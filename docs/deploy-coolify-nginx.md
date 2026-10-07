@@ -38,6 +38,8 @@ nich host nginx, a przed nim stoi Pangolin. Nikt nie dobije się do app z pomini
 Te same co w wariancie Coolify — pełna tabela w [`deploy-coolify.md` §3](deploy-coolify.md#3-zmienne-środowiskowe).
 Sekrety **wymagane** (bez defaultu w compose, ustaw w Coolify UI): `POSTGRES_PASSWORD`,
 `SESSION_SECRET`, `DASHBOARD_PASSWORD`, `EMBEDDING_API_KEY`, `EMBEDDING_API_URL`.
+Opcjonalna, ale zalecana: `SECRETS_ENCRYPTION_KEY` (`openssl rand -base64 32` — szyfruje klucz API modelu LLM
+zapisany w Ustawieniach; opis w [`deploy-coolify.md` §3](deploy-coolify.md#krok-llm-nocnego-joba-opcjonalny)).
 `TRUST_PROXY=true`, `EMBEDDING_PROVIDER=api`, `EMBEDDING_DIM=1024`, `DB_AUTO_MIGRATE=true` są zapięte
 w compose — nie musisz ich podawać.
 

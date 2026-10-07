@@ -52,7 +52,7 @@ Context Keeper onboarding installer.
 
   Phase 1 (always runs, offline) generates ./.env from .env.example: it asks a few questions
   (edge/proxy mode, embedding preset, nightly job schedule, first project name), preserves or
-  generates SESSION_SECRET/DASHBOARD_PASSWORD safely, and writes the result atomically
+  generates SESSION_SECRET/DASHBOARD_PASSWORD/SECRETS_ENCRYPTION_KEY safely, and writes the result atomically
   (mode 600). It never duplicates .env.example — untouched keys/comments pass through verbatim.
 
   Phase 2 (optional, prompted; default = generation only) can start the Docker Compose stack,
@@ -66,7 +66,7 @@ Options:
       --start    Force Phase 2 to start the stack (skips the "start now?" prompt).
       --no-start Force Phase 2 to skip starting the stack (skips the "start now?" prompt).
       --dry-run  Print the .env that would be written to stdout; write NOTHING to disk and run no
-                 Docker commands. SESSION_SECRET/DASHBOARD_PASSWORD are NEVER printed, even in
+                 Docker commands. SESSION_SECRET/DASHBOARD_PASSWORD/SECRETS_ENCRYPTION_KEY are NEVER printed, even in
                  --dry-run — see the comment above emit_env() below for why and how.
   -h, --help     Show this help and exit.
 
@@ -241,6 +241,7 @@ compute_profiles() {
 # ---------------------------------------------------------------------------------------------
 OLD_SESSION_SECRET=''
 OLD_DASHBOARD_PASSWORD=''
+OLD_SECRETS_ENCRYPTION_KEY=''
 OLD_EMBEDDING_DIM=''
 OLD_EMBEDDING_PROVIDER=''
 OLD_EMBEDDING_MODEL=''
@@ -263,6 +264,7 @@ if [ -f .env ]; then
     case "$_k" in
       SESSION_SECRET) OLD_SESSION_SECRET=$_v ;;
       DASHBOARD_PASSWORD) OLD_DASHBOARD_PASSWORD=$_v ;;
+      SECRETS_ENCRYPTION_KEY) OLD_SECRETS_ENCRYPTION_KEY=$_v ;;
       EMBEDDING_DIM) OLD_EMBEDDING_DIM=$_v ;;
       EMBEDDING_PROVIDER) OLD_EMBEDDING_PROVIDER=$_v ;;
       EMBEDDING_MODEL) OLD_EMBEDDING_MODEL=$_v ;;
@@ -304,6 +306,10 @@ fi
 if [ "$ENV_ACTION" = "abort" ]; then
   printf '[install] status=aborted reason=user-declined-env-change\n'
   exit 0
+fi
+
+if [ "$ENV_ACTION" = "keep" ] && [ -z "$OLD_SECRETS_ENCRYPTION_KEY" ]; then
+  printf '[install] NOTE: the kept .env has no SECRETS_ENCRYPTION_KEY — it is needed only to store the LLM API key (dashboard -> Ustawienia). Add one with: openssl rand -base64 32 (never change it later: stored keys become unreadable).\n' >&2
 fi
 
 # ---------------------------------------------------------------------------------------------
@@ -444,6 +450,18 @@ if [ "$ENV_ACTION" = "regenerate" ]; then
       SESSION_SECRET_ACTION=kept
       ;;
   esac
+  # SECRETS_ENCRYPTION_KEY (AES-256 key for secrets stored in the DB, e.g. the LLM API key) — generated
+  # ONLY when empty, never regenerated: replacing it makes every already-stored secret undecryptable.
+  case "$OLD_SECRETS_ENCRYPTION_KEY" in
+    '')
+      OUT_SECRETS_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d '\n')
+      SECRETS_ENCRYPTION_KEY_ACTION=generated
+      ;;
+    *)
+      OUT_SECRETS_ENCRYPTION_KEY=$OLD_SECRETS_ENCRYPTION_KEY
+      SECRETS_ENCRYPTION_KEY_ACTION=kept
+      ;;
+  esac
   case "$OLD_DASHBOARD_PASSWORD" in
     ''|"$DEV_DASHBOARD_PASSWORD_PLACEHOLDER")
       OUT_DASHBOARD_PASSWORD=$(openssl rand -base64 36 | tr -d '\n')
@@ -460,7 +478,7 @@ if [ "$ENV_ACTION" = "regenerate" ]; then
   # everything else (comments, blank lines, untouched keys) passes through verbatim. This is a
   # template, never a duplication of .env.example's canon.
   #
-  # DELIBERATE CHOICE for --dry-run: SESSION_SECRET/DASHBOARD_PASSWORD are ALWAYS withheld and
+  # DELIBERATE CHOICE for --dry-run: SESSION_SECRET/DASHBOARD_PASSWORD/SECRETS_ENCRYPTION_KEY are ALWAYS withheld and
   # replaced with a labeled placeholder, even in --dry-run, even when the underlying value would
   # just be an already-existing secret being kept unchanged. Rationale: --dry-run output is easy
   # to paste into chat logs/CI logs/screenshots by an operator previewing the installer, and the
@@ -507,6 +525,13 @@ if [ "$ENV_ACTION" = "regenerate" ]; then
             printf '%s\n' "SESSION_SECRET=$OUT_SESSION_SECRET"
           fi
           ;;
+        SECRETS_ENCRYPTION_KEY)
+          if [ "$DRY_RUN" -eq 1 ]; then
+            printf '%s\n' "SECRETS_ENCRYPTION_KEY=<withheld in --dry-run; action=$SECRETS_ENCRYPTION_KEY_ACTION>"
+          else
+            printf '%s\n' "SECRETS_ENCRYPTION_KEY=$OUT_SECRETS_ENCRYPTION_KEY"
+          fi
+          ;;
         COMPOSE_PROFILES) printf '%s\n' "COMPOSE_PROFILES=$OUT_COMPOSE_PROFILES" ;;
         ACME_DOMAIN) printf '%s\n' "ACME_DOMAIN=$OUT_ACME_DOMAIN" ;;
         ACME_EMAIL) printf '%s\n' "ACME_EMAIL=$OUT_ACME_EMAIL" ;;
@@ -516,7 +541,7 @@ if [ "$ENV_ACTION" = "regenerate" ]; then
   }
 
   if [ "$DRY_RUN" -eq 1 ]; then
-    printf '\n[install] --dry-run preview of .env (SESSION_SECRET/DASHBOARD_PASSWORD/EMBEDDING_API_KEY withheld — see comment in this script) ------\n'
+    printf '\n[install] --dry-run preview of .env (SESSION_SECRET/DASHBOARD_PASSWORD/SECRETS_ENCRYPTION_KEY/EMBEDDING_API_KEY withheld — see comment in this script) ------\n'
     emit_env
     printf '[install] --------------------------------------------------------------------------------------------------------\n'
     printf '[install] nothing written to disk.\n'
@@ -527,7 +552,7 @@ if [ "$ENV_ACTION" = "regenerate" ]; then
     mv -- "$TMP_ENV" .env
     chmod 600 -- .env
     TMP_ENV=''
-    printf '[install] wrote .env (mode 600). SESSION_SECRET=%s, DASHBOARD_PASSWORD=%s (values never printed).\n' "$SESSION_SECRET_ACTION" "$DASHBOARD_PASSWORD_ACTION"
+    printf '[install] wrote .env (mode 600). SESSION_SECRET=%s, DASHBOARD_PASSWORD=%s, SECRETS_ENCRYPTION_KEY=%s (values never printed).\n' "$SESSION_SECRET_ACTION" "$DASHBOARD_PASSWORD_ACTION" "$SECRETS_ENCRYPTION_KEY_ACTION"
   fi
 fi
 

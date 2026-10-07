@@ -10,6 +10,7 @@ import {
   emptyBody,
   emptyQuery,
   humanCreateBody,
+  llmSettingsBody,
   memoriesListQuery,
   memoryEventsQuery,
   opaqueId,
@@ -291,5 +292,59 @@ describe('dashboard.schemas — body: brakujące wymagane pole / zły typ / unde
     expect(approveBody.safeParse({ expectedSupersedeVersion: -1 }).success).toBe(false);
     expect(rejectBody.safeParse(undefined).success).toBe(true);
     expect(rejectBody.safeParse({ reason: 'dup' }).success).toBe(true);
+  });
+});
+
+describe('llmSettingsBody (roadmap v1.6) — PUT /api/settings/llm', () => {
+  const VALID = {
+    enabled: true,
+    endpoint: 'http://localhost:11434/v1/chat/completions',
+    model: 'llama3',
+    callCap: 100,
+    timeoutMs: 30000,
+    apiKey: { action: 'keep' as const },
+  };
+
+  it('poprawne body przechodzi; endpoint/model są przycinane', () => {
+    const r = llmSettingsBody.parse({ ...VALID, endpoint: '  https://api.openai.com/v1/chat/completions  ', model: ' gpt ' });
+    expect(r.endpoint).toBe('https://api.openai.com/v1/chat/completions');
+    expect(r.model).toBe('gpt');
+  });
+
+  it('endpoint/model mogą być null albo pustym stringiem (serwis zamienia "" na null)', () => {
+    expect(llmSettingsBody.safeParse({ ...VALID, enabled: false, endpoint: null, model: null }).success).toBe(true);
+    expect(llmSettingsBody.safeParse({ ...VALID, enabled: false, endpoint: '', model: '' }).success).toBe(true);
+  });
+
+  it('strict: nieznany klucz na wierzchu i w apiKey -> invalid', () => {
+    expect(llmSettingsBody.safeParse({ ...VALID, extra: 1 }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, apiKey: { action: 'keep', value: 'x' } }).success).toBe(false);
+  });
+
+  it.each(['ftp://host/v1/chat/completions', 'nie-url', 'https://user:pass@host/v1/chat/completions', 'https://user@host/x'])(
+    'endpoint %j jest odrzucany (nie-http(s) albo login/hasło w URL-u)',
+    (endpoint) => {
+      expect(llmSettingsBody.safeParse({ ...VALID, endpoint }).success).toBe(false);
+    },
+  );
+
+  it('callCap i timeoutMs: granice 1..10000 i 1000..300000, tylko całkowite', () => {
+    expect(llmSettingsBody.safeParse({ ...VALID, callCap: 0 }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, callCap: 10001 }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, callCap: 1.5 }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, callCap: 1 }).success).toBe(true);
+    expect(llmSettingsBody.safeParse({ ...VALID, callCap: 10000 }).success).toBe(true);
+    expect(llmSettingsBody.safeParse({ ...VALID, timeoutMs: 999 }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, timeoutMs: 300001 }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, timeoutMs: 1000 }).success).toBe(true);
+  });
+
+  it('apiKey: unia keep | set(value niepusty) | clear; inne akcje i pusta wartość odrzucane', () => {
+    expect(llmSettingsBody.safeParse({ ...VALID, apiKey: { action: 'set', value: 'sk-x' } }).success).toBe(true);
+    expect(llmSettingsBody.safeParse({ ...VALID, apiKey: { action: 'clear' } }).success).toBe(true);
+    expect(llmSettingsBody.safeParse({ ...VALID, apiKey: { action: 'set', value: '   ' } }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, apiKey: { action: 'set' } }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, apiKey: { action: 'reveal' } }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, apiKey: undefined }).success).toBe(false);
   });
 });

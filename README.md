@@ -66,7 +66,7 @@ CLI `create-account-token`. Dalej: [Podłącz swojego agenta](#podłącz-swojego
 ## Szybki start — Docker, manualnie (fallback / zaawansowany)
 
 ```bash
-cp .env.example .env          # dostosuj sekrety (SESSION_SECRET, DASHBOARD_PASSWORD)
+cp .env.example .env          # dostosuj sekrety (SESSION_SECRET, DASHBOARD_PASSWORD, opcjonalnie SECRETS_ENCRYPTION_KEY)
 docker compose up -d db       # Postgres + pgvector
 docker compose --profile local-embeddings up -d embeddings   # sidecar embeddingów (TEI + bge-m3)
 docker compose up -d app      # serwer — auto-migruje przy starcie (DB_AUTO_MIGRATE=true, domyślnie)
@@ -221,6 +221,10 @@ patrz `package.json`.
   / `revoke-token`, a dla tokenów konta `create-account-token` / `list-account-tokens`
   (`rotate-token` i `revoke-token` działają dla obu rodzajów).
 - `.env` poza repo; sekrety nie trafiają do obrazu.
+- Klucz API modelu LLM (opcjonalny krok nocnego joba, ustawiany w dashboardzie → Ustawienia) leży w bazie
+  **wyłącznie zaszyfrowany** (AES-256-GCM, klucz z env `SECRETS_ENCRYPTION_KEY`; `install.sh` generuje go raz),
+  a REST nigdy go nie zwraca. Sprawdzenie konfiguracji: CLI `check-llm` (jedno testowe wywołanie, bez klucza w
+  wyjściu). Po włączeniu kroku treść pamięci wychodzi do wskazanego endpointu — domyślnie jest wyłączony.
 
 ## Operacje
 

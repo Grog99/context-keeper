@@ -28,4 +28,5 @@ export const ID_PREFIX = {
   searchEvent: 'sev',
   relation: 'rel',
   token: 'tok',
+  llmSettings: 'llms',
 } as const;

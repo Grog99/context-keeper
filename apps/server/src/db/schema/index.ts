@@ -10,3 +10,4 @@ export * from './proposals';
 export * from './revisions';
 export * from './audit-log';
 export * from './search-events';
+export * from './llm-settings';

@@ -17,7 +17,10 @@ import { NightlyController } from '../src/dashboard/nightly.controller';
 import { OnboardingController } from '../src/dashboard/onboarding.controller';
 import { ProjectsController } from '../src/dashboard/projects.controller';
 import { ProposalsController } from '../src/dashboard/proposals.controller';
+import { SettingsController } from '../src/dashboard/settings.controller';
 import { UsageMetricsController } from '../src/dashboard/usage-metrics.controller';
+import { LlmSettingsService } from '../src/llm/llm-settings.service';
+import { LlmService } from '../src/llm/llm.service';
 import { MemoryAdminService } from '../src/memory/memory-admin.service';
 import { NightlyService } from '../src/nightly/nightly.service';
 import { OnboardingService } from '../src/onboarding/onboarding.service';
@@ -135,6 +138,21 @@ function fakeNightly(): NightlyService {
   } as unknown as NightlyService;
 }
 
+const LLM_SENTINEL = 'sk-sentinel-DO-NOT-LEAK-http-77777';
+
+function fakeLlmSettings(): LlmSettingsService {
+  return {
+    getPublic: async () => (track('llmSettings.getPublic'), {}),
+    update: async () => (track('llmSettings.update'), {}),
+  } as unknown as LlmSettingsService;
+}
+
+function fakeLlm(): LlmService {
+  return {
+    checkConnection: async () => (track('llm.checkConnection'), { ok: false, error: 'x' }),
+  } as unknown as LlmService;
+}
+
 const CONFIG_DEFAULTS: Record<string, unknown> = {
   BODY_MAX_FACT: 8192,
   BODY_MAX_DOCUMENT: 262144,
@@ -165,6 +183,7 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
         UsageMetricsController,
         ConfigController,
         NightlyController,
+        SettingsController,
       ],
       providers: [
         { provide: MemoryAdminService, useValue: fakeMemoryAdmin() },
@@ -174,6 +193,8 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
         { provide: ProjectsService, useValue: fakeProjects() },
         { provide: UsageService, useValue: fakeUsage() },
         { provide: NightlyService, useValue: fakeNightly() },
+        { provide: LlmSettingsService, useValue: fakeLlmSettings() },
+        { provide: LlmService, useValue: fakeLlm() },
         { provide: OnboardingService, useValue: fakeOnboarding() },
         { provide: AppConfigService, useValue: fakeConfig() },
         DashboardErrorFilter,
@@ -489,6 +510,65 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
       const { status } = await req('POST', '/api/memories/mem_1/archive');
       expect(status).not.toBe(400);
       expect(calls).toEqual(['memoryAdmin.archiveMemory']);
+    });
+  });
+
+  describe('PUT /api/settings/llm (roadmap v1.6) — walidacja i brak klucza API w odpowiedziach', () => {
+    const VALID = {
+      enabled: false,
+      endpoint: null,
+      model: null,
+      callCap: 100,
+      timeoutMs: 30000,
+      apiKey: { action: 'keep' },
+    };
+
+    it('niepoprawne body niosące klucz-wartownik -> 400, a JSON odpowiedzi NIE zawiera wartownika; serwis niewołany', async () => {
+      const { status, json } = await req('PUT', '/api/settings/llm', {
+        ...VALID,
+        callCap: 'dużo',
+        apiKey: { action: 'set', value: LLM_SENTINEL },
+        nieznane: LLM_SENTINEL,
+      });
+      expect(status).toBe(400);
+      expect(json).toMatchObject({ code: 'validation_error' });
+      expect(JSON.stringify(json)).not.toContain(LLM_SENTINEL);
+      expect(calls).toEqual([]);
+    });
+
+    it('endpoint z loginem/hasłem w URL-u -> 400 bez echa wartości', async () => {
+      const { status, json } = await req('PUT', '/api/settings/llm', {
+        ...VALID,
+        endpoint: `https://user:${LLM_SENTINEL}@host/v1/chat/completions`,
+      });
+      expect(status).toBe(400);
+      expect(JSON.stringify(json)).not.toContain(LLM_SENTINEL);
+      expect(calls).toEqual([]);
+    });
+
+    it.each([
+      ['cap poza zakresem', { callCap: 0 }],
+      ['timeout poza zakresem', { timeoutMs: 100 }],
+      ['nieznana akcja klucza', { apiKey: { action: 'reveal' } }],
+      ['set bez wartości', { apiKey: { action: 'set' } }],
+    ])('%s -> 400', async (_label, patch) => {
+      const { status } = await req('PUT', '/api/settings/llm', { ...VALID, ...patch });
+      expect(status).toBe(400);
+      expect(calls).toEqual([]);
+    });
+
+    it('poprawne body przechodzi do serwisu', async () => {
+      const { status } = await req('PUT', '/api/settings/llm', VALID);
+      expect(status).toBe(200);
+      expect(calls).toEqual(['llmSettings.update']);
+    });
+
+    it('GET i POST /check: nieznany klucz query -> 400; poprawne -> 200', async () => {
+      expect((await req('GET', '/api/settings/llm?foo=1')).status).toBe(400);
+      expect((await req('POST', '/api/settings/llm/check', { x: 1 })).status).toBe(400);
+      expect(calls).toEqual([]);
+      expect((await req('POST', '/api/settings/llm/check')).status).toBe(200);
+      expect(calls).toEqual(['llm.checkConnection']);
     });
   });
 });

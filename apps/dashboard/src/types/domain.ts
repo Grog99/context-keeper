@@ -41,7 +41,9 @@ export type AuditEventType =
   | 'backup_completed'
   | 'project_settings_changed'
   | 'relation_created'
-  | 'relation_removed';
+  | 'relation_removed'
+  | 'llm_secret_skipped'
+  | 'instance_settings_changed';
 
 /** Lustro `ProjectTokenState` (`apps/server/src/db/schema/enums.ts`) — stan PERSYSTOWANY na wierszu
  * `project_tokens`. `expired` NIE jest tu — to pochodna, patrz `EffectiveTokenStatus`. */

@@ -367,6 +367,28 @@ export interface NightlyCounters {
   /** Wiersze `search_events` usunięte retencją, piggyback na tym samym przebiegu (roadmap v1.1
    * "Pomiary"). */
   searchEventsPruned: number;
+  // Liczniki kroku LLM (roadmap v1.6) — lustro `LlmCounters` (`apps/server/src/llm/llm.types.ts`).
+  llmCalls: number;
+  llmErrors: number;
+  llmSkippedCap: number;
+  llmSkippedBreaker: number;
+  llmSkippedSecret: number;
+  llmSkippedKeyUnreadable: number;
+}
+
+/** Lustro `LlmRunState` (`apps/server/src/llm/llm.types.ts`). */
+export type LlmRunState = 'disabled' | 'ready' | 'key_unreadable' | 'unavailable';
+
+/** Typ sekretu ze skanera (`SecretKind`, `apps/server/src/common/secret-scanner.ts`) — string, bo to tylko etykieta chipa. */
+export interface SkippedSecretEntry {
+  memoryId: string;
+  secretType: string;
+}
+
+/** Lustro `NightlyLlmReport` — blok `llm` w wyniku przebiegu / `nightly_run.metadata`. */
+export interface NightlyLlmReport {
+  state: LlmRunState;
+  skippedSecret: SkippedSecretEntry[];
 }
 
 export interface NightlyRunResult {
@@ -375,7 +397,54 @@ export interface NightlyRunResult {
   finishedAt: string;
   durationMs: number;
   counters: NightlyCounters;
+  /** `null` przy `skipped-locked` (przebieg się nie odbył). */
+  llm: NightlyLlmReport | null;
 }
+
+/** Ekran "Ustawienia" (roadmap v1.6) — lustro `LlmSettingsDto`/`LlmSettingsResponse`/`LlmSettingsUpdate`/
+ * `LlmCheckResult` (`apps/server/src/llm/llm.types.ts`, `dashboard/settings.controller.ts`). Klucz API jest
+ * write-only: odpowiedź niesie wyłącznie stan `none | set | unreadable`. */
+export type LlmApiKeyState = 'none' | 'set' | 'unreadable';
+
+export interface LlmSettings {
+  enabled: boolean;
+  endpoint: string | null;
+  model: string | null;
+  callCap: number;
+  timeoutMs: number;
+  apiKey: LlmApiKeyState;
+  /** `false` → serwer nie ma `SECRETS_ENCRYPTION_KEY` (zapis klucza API odrzucany). */
+  encryptionKeyConfigured: boolean;
+  updatedAt: string | null;
+}
+
+export interface LlmSettingsResponse {
+  settings: LlmSettings;
+  lastRun: {
+    at: string;
+    status: 'success';
+    counters: Pick<
+      NightlyCounters,
+      'llmCalls' | 'llmErrors' | 'llmSkippedCap' | 'llmSkippedBreaker' | 'llmSkippedSecret' | 'llmSkippedKeyUnreadable'
+    >;
+    llm: NightlyLlmReport | null;
+  } | null;
+}
+
+export type LlmApiKeyAction = { action: 'keep' } | { action: 'set'; value: string } | { action: 'clear' };
+
+export interface LlmSettingsUpdate {
+  enabled: boolean;
+  endpoint: string | null;
+  model: string | null;
+  callCap: number;
+  timeoutMs: number;
+  apiKey: LlmApiKeyAction;
+}
+
+export type LlmCheckResult =
+  | { ok: true; model: string; latencyMs: number; endpoint: string; enabled: boolean }
+  | { ok: false; error: string };
 
 /** Hard-purge (roadmap v1.1) — lustro `PurgePreview`/`PurgeResult` (`apps/server/src/purge/purge.service.ts`). */
 export interface PurgePreview {

@@ -1,4 +1,4 @@
-import { Activity, Archive, FolderKanban, History, Inbox, PlugZap, ScrollText, Wrench } from 'lucide-react';
+import { Activity, Archive, FolderKanban, History, Inbox, PlugZap, ScrollText, Settings, Wrench } from 'lucide-react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
@@ -21,6 +21,7 @@ const SCREENS: ScreenEntry[] = [
   { to: '/pomiary', label: 'Pomiary', icon: Activity },
   { to: '/operacje', label: 'Operacje', icon: Wrench },
   { to: '/onboarding', label: 'Onboarding', icon: PlugZap },
+  { to: '/ustawienia', label: 'Ustawienia', icon: Settings },
 ];
 
 export interface CommandPaletteProps {
