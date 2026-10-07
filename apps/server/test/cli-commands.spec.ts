@@ -289,6 +289,10 @@ describe('run-nightly — podsumowanie niesie stan i liczniki kroku LLM (roadmap
       llmSkippedBreaker: 4,
       llmSkippedSecret: 5,
       llmSkippedKeyUnreadable: 6,
+      llmPruneCandidates: 7,
+      llmPruneKept: 4,
+      llmPruneDeleteProposed: 2,
+      llmPruneUpdateProposed: 1,
     },
     llm: { state: 'ready', skippedSecret: [] },
   };
@@ -303,6 +307,7 @@ describe('run-nightly — podsumowanie niesie stan i liczniki kroku LLM (roadmap
     expect(lines[0]).toContain('status=success');
     expect(lines[0]).toContain('searchEventsPruned=4');
     expect(lines[0]).toContain('llm=ready llmCalls=9 llmErrors=2 llmSkipped=cap:3,breaker:4,secret:5,key:6');
+    expect(lines[0]).toContain('llmPrune=cand:7,kept:4,delete:2,update:1');
   });
 
   it('skipped-locked (llm:null) -> llm=- (przebieg się nie odbył)', async () => {

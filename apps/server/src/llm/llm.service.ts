@@ -68,6 +68,7 @@ export class LlmService {
           provider: this.provider,
           endpoint: cfg.endpoint,
           callCap: cfg.callCap,
+          scanWindowDays: cfg.scanWindowDays,
           audit: this.audit,
           actor,
         });

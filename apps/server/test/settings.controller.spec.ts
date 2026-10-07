@@ -14,6 +14,7 @@ const DTO: LlmSettingsDto = {
   model: 'gpt-x',
   callCap: 100,
   timeoutMs: 30000,
+  scanWindowDays: 1,
   apiKey: 'set',
   encryptionKeyConfigured: true,
   updatedAt: '2026-01-01T00:00:00.000Z',
@@ -71,6 +72,10 @@ describe('SettingsController (roadmap v1.6) — Ustawienia / Model LLM', () => {
           llmSkippedBreaker: 0,
           llmSkippedSecret: 1,
           llmSkippedKeyUnreadable: 0,
+          llmPruneCandidates: 9,
+          llmPruneKept: 5,
+          llmPruneDeleteProposed: 3,
+          llmPruneUpdateProposed: 1,
         },
         llm: { state: 'ready', skippedSecret: [{ memoryId: 'mem_s', secretType: 'jwt' }] },
       }),
@@ -95,6 +100,10 @@ describe('SettingsController (roadmap v1.6) — Ustawienia / Model LLM', () => {
         llmSkippedBreaker: 0,
         llmSkippedSecret: 1,
         llmSkippedKeyUnreadable: 0,
+        llmPruneCandidates: 9,
+        llmPruneKept: 5,
+        llmPruneDeleteProposed: 3,
+        llmPruneUpdateProposed: 1,
       },
       llm: { state: 'ready', skippedSecret: [{ memoryId: 'mem_s', secretType: 'jwt' }] },
     });
@@ -115,6 +124,10 @@ describe('SettingsController (roadmap v1.6) — Ustawienia / Model LLM', () => {
         llmSkippedBreaker: 0,
         llmSkippedSecret: 0,
         llmSkippedKeyUnreadable: 0,
+        llmPruneCandidates: 0,
+        llmPruneKept: 0,
+        llmPruneDeleteProposed: 0,
+        llmPruneUpdateProposed: 0,
       },
       llm: null,
     });
@@ -141,6 +154,7 @@ describe('SettingsController (roadmap v1.6) — Ustawienia / Model LLM', () => {
       model: 'm',
       callCap: 10,
       timeoutMs: 5000,
+      scanWindowDays: 7,
       apiKey: { action: 'keep' },
     };
 

@@ -86,6 +86,14 @@ const LLM_ZEROS = {
   llmSkippedKeyUnreadable: 0,
 };
 
+/** Liczniki detektora LLM prune (v1.6 B2) przy wyłączonym kroku — osobno od `LLM_ZEROS`. */
+const LLM_PRUNE_ZEROS = {
+  llmPruneCandidates: 0,
+  llmPruneKept: 0,
+  llmPruneDeleteProposed: 0,
+  llmPruneUpdateProposed: 0,
+};
+
 /** Dwa różne klucze szyfrujące (32 B base64) — zmieniony SECRETS_ENCRYPTION_KEY (G7). */
 const KEY_A = Buffer.alloc(32, 1).toString('base64');
 const KEY_B = Buffer.alloc(32, 2).toString('base64');
@@ -246,6 +254,7 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
         skippedCap: 0,
         searchEventsPruned: 0,
         ...LLM_ZEROS,
+        ...LLM_PRUNE_ZEROS,
       });
 
       const proposalRow = await findNightlyProposal('merge', [factA.id, factB.id]);
@@ -282,6 +291,7 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
         skippedCap: 0,
         searchEventsPruned: 0,
         ...LLM_ZEROS,
+        ...LLM_PRUNE_ZEROS,
       });
     });
 
@@ -439,6 +449,7 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
           skippedCap: 0,
           searchEventsPruned: 0,
           ...LLM_ZEROS,
+          ...LLM_PRUNE_ZEROS,
         });
 
         const auditRow = await audit.latestByEventType('nightly_run');
@@ -656,7 +667,7 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
     });
   });
 
-  describe('krok LLM (B1) — opt-in, fail-open, bez żadnego żądania do sieci', () => {
+  describe('krok LLM (B1) — opt-in, fail-open, bez żądania do sieci przy wyłączonym kroku', () => {
     afterEach(async () => {
       vi.restoreAllMocks();
       // Przywróć domyślny stan wiersza instancji (wyłączony, bez klucza) dla kolejnych testów.
@@ -681,22 +692,6 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
       expect((auditRow!.metadata as { llm?: unknown }).llm).toEqual({ state: 'disabled', skippedSecret: [] });
     });
 
-    it('włączony, ale B1 nie ma detektora: nadal 0 żądań (budżet otwarty, nic go nie woła)', async () => {
-      await db
-        .update(llmSettings)
-        .set({ enabled: true, endpoint: 'http://llm.invalid/v1/chat/completions', model: 'm' })
-        .where(eq(llmSettings.id, LLM_GLOBAL_SETTINGS_ID));
-      const fetchSpy = vi.spyOn(globalThis, 'fetch');
-      const { nightly } = buildServices();
-
-      const result = await nightly.run({ actor: 'tester-llm-on' });
-
-      expect(result.status).toBe('success');
-      expect(result.llm?.state).toBe('ready');
-      expect(result.counters).toMatchObject(LLM_ZEROS);
-      expect(fetchSpy).not.toHaveBeenCalled();
-    });
-
     it('G7: klucz zaszyfrowany kluczem A, serwis zbudowany z kluczem B -> success + llm.state=key_unreadable, 0 żądań', async () => {
       const ciphertext = createSecretBox(KEY_A).encrypt('sk-test-sentinel', LLM_API_KEY_AAD);
       await db
@@ -715,7 +710,7 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
 
       expect(result.status).toBe('success');
       expect(result.llm?.state).toBe('key_unreadable');
-      // Decyzja Stage 2: licznik rośnie dopiero z wywołań detektorów (od B2), nie przy otwarciu budżetu.
+      // Detektory nie ruszają przy !budget.enabled (ust. 15 z B2), więc licznik zostaje 0 — sygnałem jest llm.state.
       expect(result.counters.llmSkippedKeyUnreadable).toBe(0);
       expect(fetchSpy).not.toHaveBeenCalled();
     });

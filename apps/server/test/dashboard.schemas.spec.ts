@@ -302,6 +302,7 @@ describe('llmSettingsBody (roadmap v1.6) — PUT /api/settings/llm', () => {
     model: 'llama3',
     callCap: 100,
     timeoutMs: 30000,
+    scanWindowDays: 1,
     apiKey: { action: 'keep' as const },
   };
 
@@ -337,6 +338,16 @@ describe('llmSettingsBody (roadmap v1.6) — PUT /api/settings/llm', () => {
     expect(llmSettingsBody.safeParse({ ...VALID, timeoutMs: 999 }).success).toBe(false);
     expect(llmSettingsBody.safeParse({ ...VALID, timeoutMs: 300001 }).success).toBe(false);
     expect(llmSettingsBody.safeParse({ ...VALID, timeoutMs: 1000 }).success).toBe(true);
+  });
+
+  it('scanWindowDays: granice 1 i 365 przechodzą; 0, 366, 1.5 i brak pola są odrzucane', () => {
+    expect(llmSettingsBody.safeParse({ ...VALID, scanWindowDays: 1 }).success).toBe(true);
+    expect(llmSettingsBody.safeParse({ ...VALID, scanWindowDays: 365 }).success).toBe(true);
+    expect(llmSettingsBody.safeParse({ ...VALID, scanWindowDays: 0 }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, scanWindowDays: 366 }).success).toBe(false);
+    expect(llmSettingsBody.safeParse({ ...VALID, scanWindowDays: 1.5 }).success).toBe(false);
+    const { scanWindowDays: _omit, ...withoutWindow } = VALID;
+    expect(llmSettingsBody.safeParse(withoutWindow).success).toBe(false);
   });
 
   it('apiKey: unia keep | set(value niepusty) | clear; inne akcje i pusta wartość odrzucane', () => {

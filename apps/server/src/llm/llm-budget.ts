@@ -4,6 +4,7 @@ import type { AuditService } from '../audit/audit.service';
 import { scanForSecrets } from '../common/secret-scanner';
 import {
   LLM_BREAKER_THRESHOLD,
+  LLM_DEFAULT_SCAN_WINDOW_DAYS,
   LLM_RETRY_DEFAULT_WAIT_MS,
   LLM_RETRY_MAX_WAIT_MS,
   LLM_SKIPPED_SECRET_LIST_MAX,
@@ -44,6 +45,8 @@ export interface LlmRunBudgetOptions {
   provider: LlmProvider;
   endpoint: LlmEndpoint;
   callCap: number;
+  /** Okno przeglądu detektorów LLM w dniach (G6) — z ustawień przebiegu; opcjonalne, by testy B1 się nie zmieniały. */
+  scanWindowDays?: number;
   audit: Pick<AuditService, 'log'>;
   actor: string;
   breakerThreshold?: number;
@@ -93,7 +96,7 @@ const realSleep = (ms: number): Promise<void> => new Promise((resolve) => setTim
  *
  * Liczniki: `llmCalls` = żądania HTTP faktycznie wysłane (z retry), `llmErrors` = wywołania logiczne
  * zakończone błędem. Slot capa jest rezerwowany SYNCHRONICZNIE przed pierwszym `await`, więc przy
- * współbieżnych wywołaniach (B2 wybiera poziom współbieżności) sufit jest twardy. Kolejność kontroli:
+ * współbieżnych wywołaniach (detektory B2/B3 wołają ze współbieżnością `LLM_DETECTOR_CONCURRENCY`) sufit jest twardy. Kolejność kontroli:
  * stan → sekret → bezpiecznik → cap → wysyłka; skan sekretów idzie przed bezpiecznikiem i capem, więc
  * pominięcie wpisu ze względu na sekret nie zużywa slotu ani nie zależy od zdrowia providera.
  */
@@ -130,6 +133,12 @@ export class LlmRunBudget {
   /** Czy `call()` ma szansę coś wysłać — detektory mogą pominąć budowanie promptów, gdy `false`. */
   get enabled(): boolean {
     return this.state === 'ready';
+  }
+
+  /** Okno przeglądu (G6) z ustawień przebiegu — wspólne dla detektorów B2/B3. Poza stanem `ready` wartość
+   * domyślna (nieużywana: detektory nie ruszają przy `!enabled`). */
+  get scanWindowDays(): number {
+    return this.deps?.scanWindowDays ?? LLM_DEFAULT_SCAN_WINDOW_DAYS;
   }
 
   counters(): LlmCounters {

@@ -8,7 +8,7 @@ import { migrateUpTo, REAL_MIGRATIONS_FOLDER } from './helpers/migrations';
 
 /**
  * Migracja 0017 (roadmap v1.6, ticket nightly-llm-provider: tabela `llm_settings` + dwie wartości
- * `audit_event_type`) jako REALNY UPGRADE z 0015 na bazie z danymi — nie świeża baza. Dane (projekt,
+ * `audit_event_type`; plus 0018 z nightly-llm-prune: kolumna `scan_window_days`) jako REALNY UPGRADE z 0015 na bazie z danymi — nie świeża baza. Dane (projekt,
  * pamięć, wpis audytu) powstają PRZED migracją i muszą przeżyć nietknięte; zasiew wiersza instancji
  * i oba CHECK-i / unikalność `NULLS NOT DISTINCT` muszą działać na bazie po upgrade'dzie.
  */
@@ -123,6 +123,22 @@ describe('migracja 0017 — upgrade 0016 → 0017 na niepustej bazie (testcontai
         code: '23514',
       });
     }
+  });
+
+  // Migracja 0018 (ticket nightly-llm-prune, G6) — dochodzi w tym samym `migrate()` nad wierszem zasianym przez 0017.
+  it('0018: wiersz instancji zasiany przed upgradem dostaje scan_window_days = 1', async () => {
+    const { rows } = await pool.query<{ scan_window_days: number }>("SELECT scan_window_days FROM llm_settings WHERE id = 'global'");
+    expect(rows[0].scan_window_days).toBe(1);
+  });
+
+  it('0018 CHECK: scan_window_days poza zakresem 1–365 jest odrzucany (23514), 365 przechodzi', async () => {
+    for (const value of [0, 366, -5]) {
+      await expect(pool.query(`UPDATE llm_settings SET scan_window_days = ${value} WHERE id = 'global'`)).rejects.toMatchObject({
+        code: '23514',
+      });
+    }
+    await pool.query("UPDATE llm_settings SET scan_window_days = 365 WHERE id = 'global'");
+    await pool.query("UPDATE llm_settings SET scan_window_days = 1 WHERE id = 'global'");
   });
 
   it('dane sprzed migracji nietknięte', async () => {

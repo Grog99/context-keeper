@@ -292,6 +292,42 @@ export function DevPreviewScreen() {
         />
       </Section>
 
+      <Section title="DiffView — delete (detektor LLM)">
+        <DiffView
+          type="delete"
+          data={{
+            memoryId: 'mem_3e19a7',
+            header: 'Teraz poprawiam testy modułu auth',
+            body: 'Teraz poprawiam testy modułu auth, potem wezmę się za refaktor sesji.',
+            rationale: {
+              category: 'ephemeral',
+              reason: 'Notatka o bieżącej pracy w sesji — stan zadania, nie trwała wiedza o projekcie.',
+            },
+          }}
+        />
+      </Section>
+
+      <Section title="DiffView — update (detektor LLM, tagi)">
+        <DiffView
+          type="update"
+          data={{
+            before: {
+              header: 'Przy okazji dodawania nowego endpointu warto pamiętać, że rate limit jest liczony per token',
+              body: 'Rate limit MCP jest liczony per token (token bucket), a nie per IP. Dlatego, jak już wspominałem, limit dotyczy tokena.',
+            },
+            after: {
+              header: 'Rate limit MCP jest liczony per token',
+              body: 'Rate limit MCP jest liczony per token (token bucket), a nie per IP.',
+            },
+            tags: { before: ['mcp', 'rate-limit', 'misc', 'todo'], after: ['mcp', 'rate-limit'] },
+            rationale: {
+              category: 'verbose',
+              reason: 'Fakt jest wartościowy, ale nagłówek i treść zawierają zbędne wstępy i powtórzenia.',
+            },
+          }}
+        />
+      </Section>
+
       <Section title="ProposalActions">
         <div className="overflow-hidden rounded-md border border-border">
           <ProposalActions
