@@ -69,6 +69,21 @@ hasłem.
 | `POSTGRES_USER` | `ck` | user Postgresa |
 | `POSTGRES_DB` | `context_keeper` | nazwa bazy |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | model u providera API |
+| `PUBLIC_MCP_URL` | *(pusty)* | publiczny origin `/mcp` (np. `https://ck-mcp.example.com`) — **ustaw**, inaczej `.mcp.json` z `list_projects`/`create_project` i ekranu *Onboarding* ma placeholder zamiast adresu instancji |
+
+Pozostałe knoby (`RATE_LIMIT_*`, `TOKEN_GRACE_PERIOD_HOURS`, `SEARCH_EVENTS_RETENTION_DAYS`, progi
+nocnego joba, retrieval, limity wejścia, sesja) compose deklaruje jako `${X:-default}` z tymi samymi
+defaultami co `apps/server/src/config/env.ts` — Coolify pokazuje je w UI z wartością startową, opis
+każdego w [`.env.example`](../.env.example).
+
+> **Jak zmienne trafiają do kontenera.** Coolify zapisuje zmienne zasobu do `.env` obok compose,
+> używa go do interpolacji `${X}` (`docker compose --env-file`) i — dla aplikacji Docker Compose
+> z repo, poza trybem *raw compose deployment* — dokleja `env_file: .env` do **każdego** serwisu
+> (źródło: [`ApplicationDeploymentJob.php`](https://github.com/coollabsio/coolify/blob/main/app/Jobs/ApplicationDeploymentJob.php),
+> „Always add .env file to services"; dokumentacja opisuje tylko wykrywanie `${X}`:
+> [Docker Compose → Environment variables](https://coolify.io/docs/applications/builds/docker-compose)).
+> Zmienna dodana w UI ręcznie dotrze więc do appki, ale nie polegaj na tym: każda zmienna appki ma
+> być zadeklarowana w compose — pilnuje tego `apps/server/test/compose-env-parity.spec.ts`.
 
 Compose na sztywno ustawia `EMBEDDING_PROVIDER=api` i `EMBEDDING_DIM=1024` (skrócone przez
 Matryoshka/`dimensions` z natywnych 1536 — patrz `apps/server/src/embeddings/api.provider.ts`) —
