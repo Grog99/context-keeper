@@ -56,6 +56,8 @@ export function toProjectContext(project: ProjectRow, token: PublicTokenRow): Pr
     projectId: project.id,
     projectName: project.name,
     includeEventsInDefaultSearch: project.includeEventsInDefaultSearch,
+    autoMode: project.autoMode,
+    autoModeDailyLimit: project.autoModeDailyLimit,
     tokenId: token.id,
     tokenLabel: token.label,
   };

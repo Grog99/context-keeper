@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { BulkFailuresDialog } from '../components/BulkFailuresDialog';
 import { ContextSwitcher } from '../components/ContextSwitcher';
+import { AutoHoldNotice } from '../components/AutoHoldNotice';
 import { DedupHint } from '../components/DedupHint';
 import { DiffView } from '../components/DiffView';
 import { EmptyState } from '../components/EmptyState';
@@ -150,6 +151,7 @@ export function DevPreviewScreen() {
             tags={['infra', 'database', 'postgres']}
             createdAt={minutesAgo(2)}
             similarHint
+            holdReasons={['near_duplicate', 'daily_limit']}
             selected={selectedRow === 'a'}
             onClick={() => setSelectedRow('a')}
           />
@@ -317,6 +319,10 @@ export function DevPreviewScreen() {
             position="3 / 4"
           />
         </div>
+      </Section>
+
+      <Section title="AutoHoldNotice (auto mode, A2)">
+        <AutoHoldNotice reasons={['near_duplicate', 'human_target', 'daily_limit']} />
       </Section>
 
       <Section title="DedupHint">

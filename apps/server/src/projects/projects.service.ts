@@ -25,11 +25,15 @@ const LAST_USED_THROTTLE_MS = 60_000;
  * budowane `ProjectContext` w testach dalej się kompilowały bez tego pola; `undefined` ⇒ wyłączone
  * (patrz `MemoryService.search`). `tokenId`/`tokenLabel` opcjonalne z tego samego powodu (roadmap
  * v1.3, "Wiele tokenów per projekt + graceful rotation") — atrybucja per-agent w `audit_log.metadata`
- * i `search_events.token_id` (§memory/memory.service.ts `attribution`). */
+ * i `search_events.token_id` (§memory/memory.service.ts `attribution`). `autoMode`/`autoModeDailyLimit`
+ * (roadmap v1.6, A2) opcjonalne z tego samego powodu; `undefined` ⇒ auto mode wyłączony, limit domyślny
+ * (`MemoryService.decideAutoMode`). Kontekst nigdy nie jest serializowany do odpowiedzi MCP. */
 export interface ProjectContext {
   projectId: string;
   projectName: string;
   includeEventsInDefaultSearch?: boolean;
+  autoMode?: boolean;
+  autoModeDailyLimit?: number;
   tokenId?: string;
   tokenLabel?: string;
 }
@@ -439,17 +443,25 @@ export class ProjectsService {
     return this.db.select().from(projects).orderBy(projects.createdAt);
   }
 
-  /** Dialog szczegółów projektu (roadmap v1.2, "kind=event episodic") — dziś jedyne edytowalne pole
-   * jest `includeEventsInDefaultSearch`; kontroler audytuje zmianę (`project_settings_changed`),
-   * serwis sam nie audytuje (wzorem `createProject`/`rotateToken`, §M1 planu Fazy 5).
-   * `updates.includeEventsInDefaultSearch === undefined` (pole pominięte w body) → no-op zwracający
-   * bieżący wiersz, bez uderzania w `UPDATE` (`drizzle`'s `mapUpdateSet` rzuca "No values to set"
-   * na pustym obiekcie `.set()`, więc filtrujemy `undefined` PRZED złożeniem zapytania). */
+  /** Dialog szczegółów projektu (roadmap v1.2, "kind=event episodic"; v1.6 A2 — auto mode) — edytowalne
+   * pola: `includeEventsInDefaultSearch`, `autoMode`, `autoModeDailyLimit`; kontroler audytuje zmianę
+   * (`project_settings_changed`), serwis sam nie audytuje (wzorem `createProject`/`rotateToken`, §M1
+   * planu Fazy 5). Pola pominięte (`undefined`) nie wchodzą do `.set()`; gdy nie ma żadnego → no-op
+   * zwracający bieżący wiersz, bez uderzania w `UPDATE` (`drizzle`'s `mapUpdateSet` rzuca "No values
+   * to set" na pustym obiekcie, więc filtrujemy `undefined` PRZED złożeniem zapytania). */
   async updateProject(
     projectId: string,
-    updates: { includeEventsInDefaultSearch?: boolean },
+    updates: { includeEventsInDefaultSearch?: boolean; autoMode?: boolean; autoModeDailyLimit?: number },
   ): Promise<ProjectRow> {
-    if (updates.includeEventsInDefaultSearch === undefined) {
+    const set: Partial<
+      Pick<ProjectRow, 'includeEventsInDefaultSearch' | 'autoMode' | 'autoModeDailyLimit'>
+    > = {};
+    if (updates.includeEventsInDefaultSearch !== undefined) {
+      set.includeEventsInDefaultSearch = updates.includeEventsInDefaultSearch;
+    }
+    if (updates.autoMode !== undefined) set.autoMode = updates.autoMode;
+    if (updates.autoModeDailyLimit !== undefined) set.autoModeDailyLimit = updates.autoModeDailyLimit;
+    if (Object.keys(set).length === 0) {
       const current = await this.findById(projectId);
       if (!current) {
         throw new NotFoundException(`Projekt nie istnieje: ${projectId}`);
@@ -458,7 +470,7 @@ export class ProjectsService {
     }
     const [project] = await this.db
       .update(projects)
-      .set({ includeEventsInDefaultSearch: updates.includeEventsInDefaultSearch })
+      .set(set)
       .where(eq(projects.id, projectId))
       .returning();
     if (!project) {

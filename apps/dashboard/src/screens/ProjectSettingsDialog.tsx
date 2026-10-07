@@ -47,6 +47,9 @@ export interface ProjectSettingsDialogProps {
  * backend audytuje ją jako `project_settings_changed` (widoczne na ekranie "Audyt" bez dodatkowej
  * pracy tutaj). Roadmap v1.5: edycja slugu (`SlugRow`) z ostrzeżeniem przed zapisem — repo z dotychczasowym
  * slugiem w `.mcp.json` przestają się rozwiązywać, a ten sam `PATCH` audytuje zmianę (`field: 'slug'`).
+ * Roadmap v1.6 (A2): `AutoModeSection` — przełącznik auto mode (włączenie wymaga potwierdzenia w `AlertDialog`,
+ * wyłączenie nie) + dzienny limit auto-akceptacji; oba przez ten sam `PATCH`, audytowane jako
+ * `project_settings_changed` (`field: 'autoMode'` / `'autoModeDailyLimit'`).
  */
 export function ProjectSettingsDialog({ project, onOpenChange }: ProjectSettingsDialogProps) {
   const queryClient = useQueryClient();
@@ -105,6 +108,8 @@ export function ProjectSettingsDialog({ project, onOpenChange }: ProjectSettings
                 aria-label="Dołączaj zdarzenia do domyślnego wyszukiwania"
               />
             </div>
+
+            <AutoModeSection key={project.id} project={project} />
           </>
         )}
       </DialogContent>
@@ -196,5 +201,137 @@ function SlugRow({ project }: { project: ProjectListItem }) {
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+// Mirror granic limitu (`AUTO_MODE_MAX_DAILY_LIMIT` na serwerze: CHECK 1..10000) — tylko do wyłączenia przycisku
+// "Zapisz"; serwer zostaje authoritative (komunikat błędu zawsze z API).
+const AUTO_LIMIT_MIN = 1;
+const AUTO_LIMIT_MAX = 10000;
+
+/** Sekcja auto mode (roadmap v1.6, A2, G4/G7). Wyłączenie idzie od razu (zaostrza human-gate, bez tarcia);
+ * włączenie otwiera `AlertDialog` (wzorzec `SlugRow`) z opisem, co się zmienia, a co zostaje w kolejce.
+ * Limit (okno kroczące 24 h) ma własne pole + "Zapisz". Montowana z `key={project.id}` — stan pola limitu
+ * nie przecieka między projektami. */
+function AutoModeSection({ project }: { project: ProjectListItem }) {
+  const queryClient = useQueryClient();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [limitValue, setLimitValue] = useState(String(project.autoModeDailyLimit));
+
+  const parsedLimit = Number(limitValue);
+  const limitValid =
+    limitValue.trim() !== '' &&
+    Number.isInteger(parsedLimit) &&
+    parsedLimit >= AUTO_LIMIT_MIN &&
+    parsedLimit <= AUTO_LIMIT_MAX;
+  const limitChanged = limitValid && parsedLimit !== project.autoModeDailyLimit;
+
+  const modeMutation = useMutation({
+    mutationFn: (autoMode: boolean) => api.patch<ProjectListItem>(`/projects/${project.id}`, { autoMode }),
+    onSuccess: (_data, autoMode) => {
+      setConfirmOpen(false);
+      toast.success(autoMode ? 'Auto mode włączony' : 'Auto mode wyłączony');
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects() });
+    },
+    onError: (err) => {
+      setConfirmOpen(false);
+      toast.error(describeApiError(err));
+    },
+  });
+
+  const limitMutation = useMutation({
+    mutationFn: (autoModeDailyLimit: number) =>
+      api.patch<ProjectListItem>(`/projects/${project.id}`, { autoModeDailyLimit }),
+    onSuccess: () => {
+      toast.success('Limit auto-akceptacji zapisany');
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects() });
+    },
+    onError: (err) => toast.error(describeApiError(err)),
+  });
+
+  return (
+    <div className="mt-3 flex flex-col gap-3 rounded-md border border-border bg-muted/40 px-3.5 py-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[13.5px] font-medium text-foreground">Auto mode — zapisy agenta bez kolejki</span>
+          <span className="text-xs text-muted-foreground">
+            Zapisy agenta, które przejdą bezpieczniki (bez podobnych pamięci, bez korekty treści człowieka, w
+            limicie), trafiają do pamięci od razu — bez przeglądu. Pozostałe czekają w kolejce z powodem.
+          </span>
+        </div>
+        <Switch
+          checked={project.autoMode}
+          disabled={modeMutation.isPending}
+          onCheckedChange={(checked) => {
+            if (checked) setConfirmOpen(true);
+            else modeMutation.mutate(false);
+          }}
+          aria-label="Auto mode — zapisy agenta bez kolejki"
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <label htmlFor={`auto-limit-${project.id}`} className="text-xs text-muted-foreground">
+          Limit auto-akceptacji / 24 h ({AUTO_LIMIT_MIN}–{AUTO_LIMIT_MAX})
+        </label>
+        <div className="flex items-center gap-1.5">
+          <Input
+            id={`auto-limit-${project.id}`}
+            type="number"
+            min={AUTO_LIMIT_MIN}
+            max={AUTO_LIMIT_MAX}
+            step={1}
+            value={limitValue}
+            onChange={(e) => setLimitValue(e.target.value)}
+            className="h-8 w-24 font-mono text-xs"
+          />
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={!limitChanged || limitMutation.isPending}
+            onClick={() => limitMutation.mutate(parsedLimit)}
+          >
+            Zapisz
+          </Button>
+        </div>
+      </div>
+
+      <AlertDialog open={confirmOpen} onOpenChange={(open) => !open && !modeMutation.isPending && setConfirmOpen(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Włączyć auto mode dla „{project.name}”?</AlertDialogTitle>
+          </AlertDialogHeader>
+          <AlertDialogDescription asChild>
+            <div className="space-y-2.5 text-sm text-muted-foreground">
+              <p>
+                <span className="font-medium text-foreground">Co się zmienia:</span> nowe zapisy agenta (także
+                korekty <span className="font-mono">supersedes</span> i relacje) wchodzą do pamięci bez przeglądu
+                człowieka.
+              </p>
+              <p>
+                <span className="font-medium text-foreground">Nadal trafia do kolejki:</span> zapis podobny do
+                istniejącej pamięci albo taki, którego nie dało się sprawdzić; korekta treści napisanej lub
+                poprawionej przez człowieka; zapisy ponad limit ({project.autoModeDailyLimit} / 24 h).
+              </p>
+              <p>
+                <span className="font-medium text-foreground">Bez zmian:</span> skaner sekretów, walidacja i
+                wykrywanie identycznych duplikatów; propozycje nocnego joba i założenie projektu zawsze czekają na
+                człowieka; obecne propozycje w kolejce zostają w kolejce.
+              </p>
+              <p>
+                <span className="font-medium text-foreground">Widoczność:</span> zmiana trafia do audytu, a wpisy
+                z auto mode znajdziesz w przeglądarce pamięci (filtr „auto-zaakceptowane”).
+              </p>
+            </div>
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={modeMutation.isPending}>Anuluj</AlertDialogCancel>
+            <AlertDialogAction onClick={() => modeMutation.mutate(true)} disabled={modeMutation.isPending}>
+              {modeMutation.isPending ? 'Włączanie…' : 'Włącz auto mode'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   );
 }

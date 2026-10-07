@@ -30,12 +30,14 @@ export interface SaveMemoryInput {
    * `MemoryService.saveAsSupersede`. `event`/`global`/inny projekt/nieznane id → błąd. */
   supersedes?: string;
   /** Opcjonalne — typowane krawędzie OD tej pamięci DO istniejących pamięci WŁASNEGO projektu
-   * (max `MAX_RELATIONS_PER_SAVE`). Rider na TYM SAMYM human-gated proposalu (create/update) —
+   * (max `MAX_RELATIONS_PER_SAVE`). Rider na TYM SAMYM proposalu (create/update) —
    * materializowane dopiero w `ProposalsService.approve()`, patrz `MemoryService.resolveRelations`. */
   relations?: SaveRelationInput[];
 }
 
-export type SaveStatus = 'pending' | 'duplicate_pending' | 'already_exists';
+/** `approved` (roadmap v1.6, A2) — wyłącznie auto mode: zapis przeszedł bezpieczniki i został od razu
+ * zatwierdzony; `id` to wtedy id PAMIĘCI (przy `supersedes` — korygowanego celu), nie propozycji. */
+export type SaveStatus = 'pending' | 'duplicate_pending' | 'already_exists' | 'approved';
 
 export interface SaveMemoryResult {
   id: string;

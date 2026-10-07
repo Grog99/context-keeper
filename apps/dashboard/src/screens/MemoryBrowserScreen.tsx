@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Clock } from 'lucide-react';
+import { Bot, Clock } from 'lucide-react';
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
@@ -16,6 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../components/ui/alert-dialog';
+import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -49,6 +50,17 @@ import { PurgeMemoryDialog } from './PurgeMemoryDialog';
 
 type KindFilter = 'all' | MemoryKind;
 type StatusFilter = 'all' | MemoryStatus;
+/** A2 (G6): `auto` = tylko pamięci, których bieżąca treść weszła przez auto mode. */
+type ApprovalFilter = 'all' | 'auto';
+
+/** Znacznik „auto" (A2, G6) — `info`, ten sam język co lista projektów; tooltip niesie czas auto-akceptacji. */
+function AutoBadge({ at }: { at: string }) {
+  return (
+    <Badge variant="info" title={`Treść zaakceptowana automatycznie (auto mode) — ${formatAbsoluteTime(at)}`}>
+      <Bot className="size-3" aria-hidden /> auto
+    </Badge>
+  );
+}
 
 function toRevisionItems(rows: RevisionRowApi[]): RevisionItem[] {
   return rows.map((r) => ({
@@ -68,6 +80,7 @@ export function MemoryBrowserScreen() {
 
   const [kind, setKind] = useState<KindFilter>('all');
   const [status, setStatus] = useState<StatusFilter>('all');
+  const [approval, setApproval] = useState<ApprovalFilter>('all');
   const [tagsInput, setTagsInput] = useState('');
   const [qInput, setQInput] = useState('');
   const [q, setQ] = useState('');
@@ -111,6 +124,7 @@ export function MemoryBrowserScreen() {
   const filterParams: Record<string, string | string[]> = { ...contextQueryParams(active) };
   if (kind !== 'all') filterParams.kind = kind;
   if (status !== 'all') filterParams.status = status;
+  if (approval === 'auto') filterParams.autoApproved = 'true';
   if (tags.length > 0) filterParams.tags = tags;
   if (q) filterParams.q = q;
 
@@ -270,6 +284,15 @@ export function MemoryBrowserScreen() {
               <SelectItem value="purged">purged</SelectItem>
             </SelectContent>
           </Select>
+          <Select value={approval} onValueChange={(v) => setApproval(v as ApprovalFilter)}>
+            <SelectTrigger className="h-7 gap-1.5 px-2 text-[12px]" aria-label="Filtr zatwierdzenia">
+              <SelectValue placeholder="zatwierdzenie" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">zatwierdzenie: wszystkie</SelectItem>
+              <SelectItem value="auto">auto-zaakceptowane</SelectItem>
+            </SelectContent>
+          </Select>
           <Input
             value={tagsInput}
             onChange={(e) => setTagsInput(e.target.value)}
@@ -327,6 +350,7 @@ export function MemoryBrowserScreen() {
               >
                 <div className="mb-1 flex items-start gap-3">
                   <h2 className="flex-1 text-lg font-medium leading-snug tracking-tight text-foreground">{detail.header}</h2>
+                  {detail.autoApprovedAt && <AutoBadge at={detail.autoApprovedAt} />}
                   <StatusChip status={detail.status} />
                 </div>
                 <div className="mb-4 flex flex-wrap items-center gap-x-3.5 gap-y-2 border-b border-border pb-4 text-xs">
@@ -410,6 +434,10 @@ export function MemoryBrowserScreen() {
                         <dd className="font-mono text-xs">{formatAbsoluteTime(detail.updatedAt)}</dd>
                         <dt className="text-muted-foreground">Zatwierdzono</dt>
                         <dd className="font-mono text-xs">{detail.approvedAt ? formatAbsoluteTime(detail.approvedAt) : '—'}</dd>
+                        <dt className="text-muted-foreground">Auto-zaakceptowano</dt>
+                        <dd className="font-mono text-xs">
+                          {detail.autoApprovedAt ? formatAbsoluteTime(detail.autoApprovedAt) : '—'}
+                        </dd>
                         {detail.kind === 'event' && (
                           <>
                             <dt className="text-muted-foreground">event_time</dt>
@@ -632,6 +660,7 @@ function MemoryRow({
       </div>
       <div className="flex flex-col items-end gap-1 pt-0.5">
         <span className="whitespace-nowrap font-mono text-[11px] text-faint">acc {item.accessCount}</span>
+        {item.autoApprovedAt && <AutoBadge at={item.autoApprovedAt} />}
         {item.status !== 'approved' && <StatusChip status={item.status} />}
       </div>
     </div>

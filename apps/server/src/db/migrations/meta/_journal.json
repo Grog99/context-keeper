@@ -127,6 +127,13 @@
       "when": 1791353924489,
       "tag": "0017_llm_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791396456151,
+      "tag": "0018_auto_mode",
+      "breakpoints": true
     }
   ]
 }

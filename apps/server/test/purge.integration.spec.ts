@@ -27,6 +27,7 @@ import {
 } from '../src/db/schema';
 import type { EmbeddingProvider } from '../src/embeddings/embedding-provider';
 import { EmbeddingService } from '../src/embeddings/embedding.service';
+import { MemoryAdminService } from '../src/memory/memory-admin.service';
 import { ProposalsService } from '../src/proposals/proposals.service';
 import type { ProjectContext } from '../src/projects/projects.service';
 import type { ProjectsService } from '../src/projects/projects.service';
@@ -224,6 +225,29 @@ describe('PurgeService (integration, testcontainers) — hard-purge FR-S3', () =
   });
 
   describe('purge — happy path', () => {
+    it('zdejmuje znacznik auto mode (auto_approved_at -> NULL) i tombstone znika z filtra "auto-zaakceptowane" (G6)', async () => {
+      const config = new AppConfigService(envSchema.parse({ DATABASE_URL: 'postgres://unused' }));
+      const admin = new MemoryAdminService(db, config, audit, new EmbeddingService(new StubEmbeddingProvider('purge-model'), config));
+      const seeded = await seedApprovedMemory({
+        header: 'Auto-zaakceptowana do purge',
+        projectId: projectA.projectId,
+        autoApprovedAt: new Date(),
+      });
+
+      const before = await admin.listMemories({ scope: 'project', projectId: projectA.projectId, autoApproved: true });
+      expect(before.map((m) => m.id)).toContain(seeded.id);
+
+      await purge.purge(seeded.id, { reason: 'test G6 auto_approved_at', actor: 'tester' });
+
+      const [memRow] = await db.select().from(memories).where(eq(memories.id, seeded.id));
+      expect(memRow.status).toBe('purged');
+      expect(memRow.autoApprovedAt).toBeNull();
+
+      // Bez filtra statusu — tombstone nie może wisieć w widoku "auto".
+      const after = await admin.listMemories({ scope: 'project', projectId: projectA.projectId, autoApproved: true });
+      expect(after.map((m) => m.id)).not.toContain(seeded.id);
+    });
+
     it('wymazuje treść we wszystkich content-bearing tabelach + audit purge_tombstone, zostawia niepowiązane wiersze nietknięte', async () => {
       const seeded = await seedApprovedMemory({
         header: 'Sekret w tresci',

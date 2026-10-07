@@ -21,6 +21,7 @@ import { Skeleton } from '../components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Textarea } from '../components/ui/textarea';
 import { Input } from '../components/ui/input';
+import { AutoHoldNotice } from '../components/AutoHoldNotice';
 import { BulkFailuresDialog } from '../components/BulkFailuresDialog';
 import { DedupHint } from '../components/DedupHint';
 import { DiffView } from '../components/DiffView';
@@ -541,6 +542,7 @@ export function QueueScreen() {
                   createdAt={p.createdAt}
                   stale={p.stale}
                   similarHint={p.hasSimilar}
+                  holdReasons={p.autoHoldReasons}
                   selected={p.id === selectedId}
                   onClick={() => setSelectedId(p.id)}
                   selectable
@@ -817,6 +819,9 @@ function ProposalDetail({
             </>
           )}
         </div>
+
+        {/* Powód zawrócenia z auto mode (A2, G5) tuż nad podpowiedzią A1 — recenzent widzi „dlaczego tu jest". */}
+        <AutoHoldNotice reasons={proposal.autoHoldReasons} />
 
         {/* Podpowiedź A1 pod nagłówkiem, PRZED relacjami i zakładkami (§9.1); klik w id → podgląd pamięci. */}
         <DedupHint similarIds={similar.map((s) => s.id)} onSelect={(id) => navigate(`/pamiec?id=${id}`)} />

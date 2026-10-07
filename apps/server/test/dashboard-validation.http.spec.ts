@@ -339,6 +339,18 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
       expect(calls).toEqual([]);
     });
 
+    it('PATCH /api/projects/proj_1 {autoModeDailyLimit: 0} (limit < 1)', async () => {
+      const { status } = await req('PATCH', '/api/projects/proj_1', { autoModeDailyLimit: 0 });
+      expect(status).toBe(400);
+      expect(calls).toEqual([]);
+    });
+
+    it("PATCH /api/projects/proj_1 {autoMode: 'yes'} (nie-boolean)", async () => {
+      const { status } = await req('PATCH', '/api/projects/proj_1', { autoMode: 'yes' });
+      expect(status).toBe(400);
+      expect(calls).toEqual([]);
+    });
+
     it('PATCH /api/projects/proj_1 {slug: 5} (slug nie-string)', async () => {
       const { status } = await req('PATCH', '/api/projects/proj_1', { slug: 5 });
       expect(status).toBe(400);

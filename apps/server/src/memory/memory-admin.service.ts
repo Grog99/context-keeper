@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, arrayOverlaps, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
+import { and, arrayOverlaps, desc, eq, ilike, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { ToolError } from '../common/errors';
 import { generateId, ID_PREFIX } from '../common/ids';
@@ -44,6 +44,8 @@ export interface ListMemoriesFilter {
   status?: MemoryStatus;
   tags?: string[];
   q?: string;
+  /** Filtr „auto-zaakceptowane" (roadmap v1.6, A2, G6): tylko pamięci, których bieżąca treść weszła przez auto mode. */
+  autoApproved?: boolean;
   limit?: number;
 }
 
@@ -72,6 +74,8 @@ export interface MemoryListItem {
   version: number;
   /** Tylko `kind=event` (roadmap v1.2) — null dla fact/document. */
   eventTime: string | null;
+  /** v1.6 A2 (G6): ISO czas auto-akceptacji bieżącej treści; `null` = treść nie pochodzi z auto mode. */
+  autoApprovedAt: string | null;
 }
 
 export interface MemoryDetail extends MemoryListItem {
@@ -145,6 +149,7 @@ function toListItem(row: {
   updatedAt: Date;
   version: number;
   eventTime: Date | null;
+  autoApprovedAt: Date | null;
 }): MemoryListItem {
   return {
     ...row,
@@ -152,6 +157,7 @@ function toListItem(row: {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     eventTime: row.eventTime ? row.eventTime.toISOString() : null,
+    autoApprovedAt: row.autoApprovedAt ? row.autoApprovedAt.toISOString() : null,
   };
 }
 
@@ -197,6 +203,7 @@ export class MemoryAdminService {
     if (q) {
       conditions.push(ilike(memories.header, `%${q}%`));
     }
+    if (filter.autoApproved) conditions.push(isNotNull(memories.autoApprovedAt));
 
     const rows = await this.db
       .select({
@@ -214,6 +221,7 @@ export class MemoryAdminService {
         updatedAt: memories.updatedAt,
         version: memories.version,
         eventTime: memories.eventTime,
+        autoApprovedAt: memories.autoApprovedAt,
       })
       .from(memories)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -252,6 +260,7 @@ export class MemoryAdminService {
         updatedAt: memories.updatedAt,
         version: memories.version,
         eventTime: memories.eventTime,
+        autoApprovedAt: memories.autoApprovedAt,
       })
       .from(memories)
       .where(and(...conditions))
@@ -511,7 +520,15 @@ export class MemoryAdminService {
     await this.db.transaction(async (tx) => {
       await tx
         .update(memories)
-        .set({ header, body, tags, eventTime, version: sql`${memories.version} + 1`, updatedAt: new Date() })
+        .set({
+          header,
+          body,
+          tags,
+          eventTime,
+          version: sql`${memories.version} + 1`,
+          updatedAt: new Date(),
+          autoApprovedAt: null, // G6: edycja człowieka zdejmuje znacznik auto mode
+        })
         .where(eq(memories.id, id));
       await this.writeRevision(tx, id, 'edited', snapshotOf(current));
       await tx.delete(embeddings).where(eq(embeddings.memoryId, id));
@@ -556,7 +573,12 @@ export class MemoryAdminService {
     await this.db.transaction(async (tx) => {
       await tx
         .update(memories)
-        .set({ status: 'archived', version: sql`${memories.version} + 1`, updatedAt: new Date() })
+        .set({
+          status: 'archived',
+          version: sql`${memories.version} + 1`,
+          updatedAt: new Date(),
+          autoApprovedAt: null, // G6
+        })
         .where(eq(memories.id, id));
       await tx.delete(embeddings).where(eq(embeddings.memoryId, id));
       const deletedRelations = await tx
@@ -588,7 +610,13 @@ export class MemoryAdminService {
     await this.db.transaction(async (tx) => {
       await tx
         .update(memories)
-        .set({ scope: 'global', projectId: null, version: sql`${memories.version} + 1`, updatedAt: new Date() })
+        .set({
+          scope: 'global',
+          projectId: null,
+          version: sql`${memories.version} + 1`,
+          updatedAt: new Date(),
+          autoApprovedAt: null, // G6
+        })
         .where(eq(memories.id, id));
       const deletedRelations = await tx
         .delete(memoryRelations)

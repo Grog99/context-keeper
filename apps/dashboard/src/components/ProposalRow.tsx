@@ -1,8 +1,9 @@
-import { ArrowLeftRight, FolderPlus, GitMerge, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { ArrowLeftRight, FolderPlus, GitMerge, Plus, Sparkles, Trash2, Undo2 } from 'lucide-react';
 import type { KeyboardEvent, MouseEvent } from 'react';
 import { formatRelativeTime } from '../lib/format';
+import { AUTO_HOLD_REASON_LABEL } from '../lib/proposals';
 import { cn } from '../lib/utils';
-import type { MemoryKind, MemoryScope, ProposalOrigin, ProposalType } from '../types/domain';
+import type { AutoHoldReason, MemoryKind, MemoryScope, ProposalOrigin, ProposalType } from '../types/domain';
 import { KindGutter, KindMarker } from './KindMarker';
 import { OriginPath } from './OriginPath';
 import { StatusChip, type StatusChipStatus } from './StatusChip';
@@ -39,6 +40,9 @@ const MAX_VISIBLE_TAGS = 2;
  * `similarHint` (roadmap v1.6, A1/G10) — propozycja ma podpowiedź „podobne do istniejących": ikona
  * `sparkles` w kolorze `info` za tytułem (ten sam język co `DedupHint` w detalu). Sygnał dla recenzenta,
  * który zatwierdza bez otwierania detalu — advisory, nie blokuje.
+ *
+ * `holdReasons` (roadmap v1.6, A2/G5) — zapis zawrócony z auto mode do kolejki: ikona `undo-2` w kolorze
+ * `warning` (`attention`) za tytułem; tooltip i `aria-label` niosą powody. Brak/pusta lista → bez znacznika.
  */
 export interface ProposalRowProps {
   type: ProposalType;
@@ -53,6 +57,8 @@ export interface ProposalRowProps {
   stale?: boolean;
   /** A1 (G10): propozycja ma podpowiedź „podobne do istniejących" — znacznik `sparkles` przy tytule. */
   similarHint?: boolean;
+  /** A2 (G5): powody zawrócenia z auto mode — znacznik `undo-2` przy tytule. */
+  holdReasons?: AutoHoldReason[] | null;
   selected?: boolean;
   onClick?: () => void;
   /** Bulk selection (roadmap v1.3) — `checked`/`onCheckedChange` mają sens wyłącznie gdy `true`.
@@ -74,6 +80,7 @@ export function ProposalRow({
   createdAt,
   stale,
   similarHint,
+  holdReasons,
   selected,
   onClick,
   selectable,
@@ -83,6 +90,10 @@ export function ProposalRow({
   const Icon = TYPE_ICON[type];
   const visibleTags = tags.slice(0, MAX_VISIBLE_TAGS);
   const hiddenCount = tags.length - visibleTags.length;
+  const holdLabel =
+    holdReasons && holdReasons.length > 0
+      ? `Zawrócone z auto mode: ${holdReasons.map((r) => AUTO_HOLD_REASON_LABEL[r]).join('; ')}`
+      : null;
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -139,6 +150,11 @@ export function ProposalRow({
           <div className="flex min-w-0 items-center gap-1.5 truncate text-[13.5px] font-medium text-foreground">
             <Icon className="size-3.5 shrink-0 text-faint" />
             <span className="truncate">{title}</span>
+            {holdLabel && (
+              <span title={holdLabel} className="shrink-0">
+                <Undo2 className="size-3.5 text-warning" aria-label={holdLabel} />
+              </span>
+            )}
             {similarHint && (
               <span title="Podobne do istniejących pamięci (podpowiedź dedup)" className="shrink-0">
                 <Sparkles className="size-3.5 text-info" aria-label="Ma podpowiedź: podobne istniejące pamięci" />

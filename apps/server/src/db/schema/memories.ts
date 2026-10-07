@@ -36,6 +36,12 @@ export const memories = pgTable(
     // tworzeniu (edycja po fakcie poza zakresem v1). Napędza sortowanie ekranu "Oś czasu" i
     // age-decay w rankingu retrievalu (`MemoryService.search`).
     eventTime: timestamp('event_time', { withTimezone: true }),
+    // Auto mode (roadmap v1.6, A2, G6) — „bieżąca treść weszła przez auto mode": ustawiane przez
+    // `ProposalsService.approve(..., {auto:true})` (create i update), a ZDEJMOWANE (NULL) przy każdej
+    // późniejszej zmianie przez człowieka (edycja w dashboardzie, zatwierdzenie z kolejki korekty/merge'a,
+    // archiwizacja, promocja do global). NULL = żaden auto-zapis nie jest „ostatnim słowem" tej pamięci.
+    // Napędza filtr „auto-zaakceptowane" w przeglądarce (indeks częściowy).
+    autoApprovedAt: timestamp('auto_approved_at', { withTimezone: true }),
   },
   (t) => [
     index('memories_project_idx').on(t.projectId),
@@ -43,6 +49,9 @@ export const memories = pgTable(
     index('memories_status_idx').on(t.status),
     index('memories_scope_idx').on(t.scope),
     index('memories_event_time_idx').on(t.eventTime),
+    index('memories_auto_approved_at_idx')
+      .on(t.autoApprovedAt)
+      .where(sql`${t.autoApprovedAt} IS NOT NULL`),
   ],
 );
 

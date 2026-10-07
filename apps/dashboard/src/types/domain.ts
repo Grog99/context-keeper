@@ -12,6 +12,10 @@ export type ProposalType = 'create' | 'update' | 'merge' | 'delete' | 'create_pr
 export type ProposalOrigin = 'agent' | 'human' | 'nightly';
 export type ProposalStatus = 'pending' | 'approved' | 'rejected';
 
+/** Powody zawrócenia zapisu z auto mode do kolejki (roadmap v1.6, A2) — lustro `AUTO_HOLD_REASONS`
+ * (`apps/server/src/db/schema/proposals.ts`), w tej samej kolejności. */
+export type AutoHoldReason = 'near_duplicate' | 'not_computed' | 'human_target' | 'daily_limit' | 'auto_failed';
+
 /** Lustro `ProposalErrorCode` (`apps/server/src/proposals/proposals.errors.ts`) — kody błędów
  * domenowych kolejki, m.in. per-item w `BulkDecisionResult.failed` (roadmap v1.3, "Bulk
  * approve/reject w kolejce"). */

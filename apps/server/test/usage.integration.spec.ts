@@ -268,6 +268,36 @@ describe('UsageService (integration, testcontainers) — ekran "Pomiary", roadma
       expect(row.rejected).toBe(1);
       // withdrawn i pending NIE wchodzą do żadnej kolumny (suma approved+rejected != wszystkie 5 wierszy)
     });
+
+    it('A2 (G8): auto-akceptacje (auto_approved_at) nie są liczone — wykres to decyzje człowieka', async () => {
+      const created = await projects.createProject('usage-proposal-outcomes-auto');
+      const pAuto = created.project.id;
+      const day1 = utcDayStart(1);
+      const ts = new Date(day1.getTime() + HOUR_MS);
+
+      await insertProposal(db, { projectId: pAuto, status: 'approved', updatedAt: ts }); // człowiek
+      await insertProposal(db, { projectId: pAuto, status: 'approved', updatedAt: ts, autoApprovedAt: ts }); // maszyna
+      await insertProposal(db, {
+        projectId: pAuto,
+        status: 'approved',
+        editedPayload: { header: 'poprawione' },
+        updatedAt: ts,
+        autoApprovedAt: ts,
+      }); // maszyna — nie wchodzi też do „z edycją"
+      await insertProposal(db, { projectId: pAuto, status: 'rejected', updatedAt: ts });
+
+      const rows = await usage.proposalOutcomeSeries({
+        from: new Date(day1.getTime() - HOUR_MS),
+        to: new Date(day1.getTime() + DAY_MS),
+        bucket: 'day',
+        projectId: pAuto,
+      });
+
+      expect(rows).toHaveLength(1);
+      expect(rows[0].approved).toBe(1);
+      expect(rows[0].approvedWithEdits).toBe(0);
+      expect(rows[0].rejected).toBe(1);
+    });
   });
 
   describe('countSearchesByAccountTokens (roadmap v1.5, scope C)', () => {

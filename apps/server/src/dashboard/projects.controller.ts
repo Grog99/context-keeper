@@ -107,7 +107,10 @@ export class ProjectsController {
   }
 
   /** Dialog szczegółów projektu — `includeEventsInDefaultSearch` (roadmap v1.2, "kind=event
-   * episodic") i `slug` (roadmap v1.5, edycja z ostrzeżeniem w SPA). `ProjectsService` sam nie audytuje
+   * episodic"), `slug` (roadmap v1.5, edycja z ostrzeżeniem w SPA) oraz `autoMode`/`autoModeDailyLimit`
+   * (roadmap v1.6, A2 — wyłącznie tu, za SessionGuard+CsrfGuard; żadne narzędzie MCP ich nie dotyka;
+   * audyt tylko przy realnej zmianie wartości). Kolejność wpisów audytu: slug → includeEvents → autoMode →
+   * limit. `ProjectsService` sam nie audytuje
    * (§M1 planu Fazy 5, wzorem create/rotate) — audyt `project_settings_changed` dopisany TUTAJ, z
    * `from`/`to` żeby ekran "Audyt" mógł pokazać co się zmieniło bez osobnego zapytania; zmiana slugu
    * (`field: 'slug'`) loguje się tylko gdy slug faktycznie się zmienił (ten sam slug = no-op bez wpisu).
@@ -135,20 +138,49 @@ export class ProjectsController {
         });
       }
     }
-    if (body.includeEventsInDefaultSearch !== undefined) {
+    if (
+      body.includeEventsInDefaultSearch !== undefined ||
+      body.autoMode !== undefined ||
+      body.autoModeDailyLimit !== undefined
+    ) {
       updated = await this.projects.updateProject(id, {
         includeEventsInDefaultSearch: body.includeEventsInDefaultSearch,
+        autoMode: body.autoMode,
+        autoModeDailyLimit: body.autoModeDailyLimit,
       });
-      await this.audit.log({
-        eventType: 'project_settings_changed',
-        actor: DASHBOARD_ACTOR,
-        metadata: {
-          projectId: id,
-          field: 'includeEventsInDefaultSearch',
-          from: before.includeEventsInDefaultSearch,
-          to: updated.includeEventsInDefaultSearch,
-        },
-      });
+      if (body.includeEventsInDefaultSearch !== undefined) {
+        await this.audit.log({
+          eventType: 'project_settings_changed',
+          actor: DASHBOARD_ACTOR,
+          metadata: {
+            projectId: id,
+            field: 'includeEventsInDefaultSearch',
+            from: before.includeEventsInDefaultSearch,
+            to: updated.includeEventsInDefaultSearch,
+          },
+        });
+      }
+      // Auto mode (roadmap v1.6, A2): audytowane tylko gdy wartość faktycznie się zmieniła — zmiana
+      // human-gate'u ma zostawić ślad, a powtórzenie tej samej wartości (np. podwójny klik) nie jest zmianą.
+      if (body.autoMode !== undefined && updated.autoMode !== before.autoMode) {
+        await this.audit.log({
+          eventType: 'project_settings_changed',
+          actor: DASHBOARD_ACTOR,
+          metadata: { projectId: id, field: 'autoMode', from: before.autoMode, to: updated.autoMode },
+        });
+      }
+      if (body.autoModeDailyLimit !== undefined && updated.autoModeDailyLimit !== before.autoModeDailyLimit) {
+        await this.audit.log({
+          eventType: 'project_settings_changed',
+          actor: DASHBOARD_ACTOR,
+          metadata: {
+            projectId: id,
+            field: 'autoModeDailyLimit',
+            from: before.autoModeDailyLimit,
+            to: updated.autoModeDailyLimit,
+          },
+        });
+      }
     }
     return updated;
   }

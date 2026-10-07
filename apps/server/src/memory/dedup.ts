@@ -5,7 +5,7 @@ export interface DedupMatch {
 }
 
 export interface DedupOutcome {
-  status: SaveStatus;
+  status: Exclude<SaveStatus, 'approved'>;
   /** id proposala (duplicate_pending) albo id pamięci (already_exists) — brak dla 'new'. */
   existingId?: string;
 }

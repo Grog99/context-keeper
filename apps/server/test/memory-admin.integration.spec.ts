@@ -787,6 +787,60 @@ describe('MemoryAdminService (integration, testcontainers) — przeglądarka pam
     });
   });
 
+  describe('znacznik auto mode (roadmap v1.6, A2, G6)', () => {
+    async function autoMemory(): Promise<MemoryRow> {
+      return seedApprovedMemory({
+        header: 'Auto fakt',
+        body: 'Treść z auto mode.',
+        projectId: projectA.projectId,
+        source: 'agent',
+        autoApprovedAt: new Date(),
+      });
+    }
+
+    async function flag(id: string): Promise<Date | null> {
+      const [row] = await db.select({ at: memories.autoApprovedAt }).from(memories).where(eq(memories.id, id));
+      return row.at;
+    }
+
+    it("listMemories({autoApproved: true}) zwraca tylko pamięci ze znacznikiem; wiersz niesie autoApprovedAt (ISO)", async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('list-auto-model'));
+      const auto = await autoMemory();
+      const plain = await seedApprovedMemory({ header: 'Zwykła', body: 'T.', projectId: projectA.projectId });
+
+      const filtered = await admin.listMemories({ scope: 'project', projectId: projectA.projectId, autoApproved: true });
+      const ids = filtered.map((r) => r.id);
+      expect(ids).toContain(auto.id);
+      expect(ids).not.toContain(plain.id);
+      expect(filtered.find((r) => r.id === auto.id)?.autoApprovedAt).toEqual(expect.any(String));
+
+      const all = await admin.listMemories({ scope: 'project', projectId: projectA.projectId });
+      expect(all.find((r) => r.id === plain.id)?.autoApprovedAt).toBeNull();
+      expect((await admin.getMemoryDetail(auto.id)).autoApprovedAt).toEqual(expect.any(String));
+    });
+
+    it('editMemory zdejmuje znacznik', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('edit-auto-model'));
+      const auto = await autoMemory();
+      await admin.editMemory(auto.id, { body: 'Poprawione przez człowieka.' });
+      expect(await flag(auto.id)).toBeNull();
+    });
+
+    it('archiveMemory zdejmuje znacznik', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('archive-auto-model'));
+      const auto = await autoMemory();
+      await admin.archiveMemory(auto.id);
+      expect(await flag(auto.id)).toBeNull();
+    });
+
+    it('promoteToGlobal zdejmuje znacznik', async () => {
+      const { admin } = buildAdmin(new StubEmbeddingProvider('promote-auto-model'));
+      const auto = await autoMemory();
+      await admin.promoteToGlobal(auto.id);
+      expect(await flag(auto.id)).toBeNull();
+    });
+  });
+
   describe('AuditService.query — filtry FR-D4', () => {
     it('filtruje po eventType i limit', async () => {
       const { admin } = buildAdmin(new StubEmbeddingProvider('audit-query-model'));

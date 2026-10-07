@@ -7,6 +7,7 @@ import type {
   RelationType,
 } from '../db/schema/enums';
 import type { KeysetPosition } from '../common/keyset-cursor';
+import type { AutoHoldReason } from '../db/schema/proposals';
 import type { ProposalErrorCode } from './proposals.errors';
 
 /** Krawędź attach-on-save, niesiona w `payload.relations` (§memory.types.ts `SaveRelationInput`,
@@ -111,6 +112,12 @@ export interface ApproveOptions {
   supersedes?: string;
   /** Opcjonalny stale-guard dla `supersedes` (poza standardowym `base_versions` proposala). */
   expectedSupersedeVersion?: number;
+  /** v1.6 A2 — ustawiane wyłącznie przez `MemoryService.save()`: auto-akceptacja maszynowa (w transakcji
+   * blokuje wiersz projektu, przelicza limit okna 24 h i oznacza `auto_approved_at`). Dozwolona tylko
+   * dla propozycji agenta `create`/`update` (bez `supersedes`); nocny job i `create_project` nigdy. */
+  auto?: boolean;
+  /** `false` = gdy brak stagingu embeddingu, NIE wołaj providera (zostaje `vectorless`). Domyślnie `true`. */
+  recomputeEmbedding?: boolean;
 }
 
 export interface RejectOptions {
@@ -186,6 +193,8 @@ export interface ProposalListItem {
    * (`status='approved'`) pamięć — ta sama reguła co `available` w `ProposalView.similarMemories`,
    * żeby znacznik wiersza i blok w detalu się zgadzały. `false` także dla stanu „nie policzono". */
   hasSimilar: boolean;
+  /** A2 (G5): powody zawrócenia z auto mode (zbiór zamknięty); `null` = nic nie zawrócono. */
+  autoHoldReasons: AutoHoldReason[] | null;
 }
 
 /** Strona listy kolejki. `total` = `count(*)` z TYMI SAMYMI filtrami co lista (bez kursora) — licznik
@@ -231,6 +240,10 @@ export interface ProposalView {
    * podobnych, lista = ≤3 pozycje rosnąco po odległości. Opisuje oryginał agenta — edit-before-approve
    * jej nie zmienia (G2). */
   similarMemories: ProposalSimilarMemory[] | null;
+  /** A2 (G5): powody zawrócenia z auto mode; `null` = nic nie zawrócono (też projekt bez auto mode). */
+  autoHoldReasons: AutoHoldReason[] | null;
+  /** A2: ISO czas auto-akceptacji (maszynowej); `null` = nie auto-zaakceptowana. */
+  autoApprovedAt: string | null;
 }
 
 /** Decyzja zbiorcza (roadmap v1.3, "Bulk approve/reject w kolejce") — CZYSTA ORKIESTRACJA nad

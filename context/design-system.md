@@ -320,6 +320,10 @@ Bazujemy na shadcn (kopiowane do repo → pełna kontrola). Poniżej — bazowe 
 
 **`ProposalRow`** — wiersz kolejki `h-12`: `[StatusChip] [KindMarker] [type ikona] Header (truncate) … [OriginPath] [tagi ≤2 + „+N"] [czas rel.]`. Stale → dodatkowy `danger` badge po prawej. Hover `surface-muted`, aktywny `accent-subtle` + lewy pasek `2px` iris. `kind` (v1.4) tymi samymi kanałami co wiersz pamięci (§2.3): `KindGutter` przy lewej krawędzi (ustępuje paskowi zaznaczenia) + `KindMarker`; propozycja bez `kind` w payloadzie (patch `update` bez zmiany kind, `delete`) dostaje pusty slot 22px, żeby tytuły się nie rozjeżdżały. Podpowiedź „podobne do istniejących" (v1.6, A1) → ikona `sparkles` w kolorze `info` tuż za tytułem (`similarHint`; tooltip + `aria-label`) — sygnał dla recenzenta zatwierdzającego bez otwierania detalu.
 
+**`ProposalRow` — znacznik zawrócenia z auto mode (v1.6, A2, G5)** — gdy `autoHoldReasons` niepuste, za tytułem (obok `sparkles` podpowiedzi A1) stoi ikona `undo-2` w kolorze `warning` (rodzina `attention`); tooltip i `aria-label`: „Zawrócone z auto mode: ‹powody›". Brak powodów (projekt bez auto mode, zapisy sprzed A2) → brak znacznika.
+
+**`AutoHoldNotice`** (v1.6, A2) — `attention` alert inline (`border-warning bg-warning-subtle text-warning-foreground`, ikona `undo-2`): „Zawrócone z auto mode — wymaga decyzji człowieka:" + lista powodów (etykiety PL z `AUTO_HOLD_REASON_LABEL`: `near_duplicate`, `not_computed`, `human_target`, `daily_limit`, `auto_failed`). `null` gdy brak powodów. Informacyjny — nie blokuje decyzji. Stoi w detalu propozycji tuż nad `DedupHint`.
+
 **`DiffView`** — **zależny od `type`** (FR-D1). Najbardziej produktowy komponent:
 
 | `type` | Render |
@@ -417,7 +421,8 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
   listy); lista `ProposalRow` z własnym checkboxem per wiersz (klik w checkbox rozłączny od klika w
   wiersz — pierwszy toggle'uje zaznaczenie, drugi otwiera podgląd); `QueueBulkBar` pod paskiem filtrów,
   WYŁĄCZNIE gdy zaznaczenie niepuste — licznik + „Zatwierdź (N)"/„Odrzuć (N)"/„Anuluj zaznaczenie".
-  Badge stale widoczny na wierszu. Wiersz z podpowiedzią „podobne do istniejących" (v1.6, A1/G10) ma
+  Badge stale widoczny na wierszu. Wiersz zawrócony z auto mode (v1.6, A2/G5) ma ikonę `undo-2` (`warning`) za tytułem
+  z tooltipem powodów. Wiersz z podpowiedzią „podobne do istniejących" (v1.6, A1/G10) ma
   ikonę `sparkles` (`info`) za tytułem; `hasSimilar` jest liczone serwerowo i uwzględnia tylko wciąż
   zatwierdzone pamięci, więc znacznik zgadza się z blokiem w detalu. Dialog bulk approve dopisuje
   „N propozycji z podpowiedzią „podobne do istniejących" — zatwierdzenie bez otwarcia detalu może
@@ -431,14 +436,15 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
   rozstrzygnięciu widocznych" (zatwierdzone znikają, następne wskakują przy pollingu co 15 s).
   **Bulk i „zaznacz wszystkie" działają wyłącznie na widocznych wierszach** (inwariant z v1.3 bez zmian:
   „wszystkie" nigdy nie znaczy „wszystkie w bazie"; aria-label checkboxa podaje liczbę widocznych).
-- **Prawa:** header + `OriginPath` + `type` + `kind` (`KindMarker` + nazwa, v1.4; dla `update`/`delete` bez `kind` w payloadzie — kind pamięci, której dotyczą) + tagi; `DedupHint` (jeśli podpowiedź A1 ma dostępne pamięci; bezpośrednio pod nagłówkiem, przed relacjami i zakładkami); Tabs `Diff`/`Metadane`/`Rewizje`; sticky `ProposalActions` (pamięci z podpowiedzi są kandydatami „Zatwierdź jako zamiennik" bez wpisywania frazy). Detal ładuje się po wyborze wiersza z `GET /api/proposals/:id` (lista jest lekka) — do czasu odpowiedzi szkielet, przy błędzie stan błędu z „Spróbuj ponownie"; `A`/`R`/`E`/`S` i przyciski akcji działają dopiero na załadowanym detalu zaznaczonego wiersza; detal sąsiadów ±1 jest prefetchowany przy `j/k`; pozycja w `ProposalActions` to `numer wiersza / total`.
+- **Prawa:** header + `OriginPath` + `type` + `kind` (`KindMarker` + nazwa, v1.4; dla `update`/`delete` bez `kind` w payloadzie — kind pamięci, której dotyczą) + tagi; `AutoHoldNotice` (v1.6, A2 — powody zawrócenia z auto mode; bezpośrednio nad `DedupHint`, brak bloku gdy nic nie zawrócono); `DedupHint` (jeśli podpowiedź A1 ma dostępne pamięci; bezpośrednio pod nagłówkiem, przed relacjami i zakładkami); Tabs `Diff`/`Metadane`/`Rewizje`; sticky `ProposalActions` (pamięci z podpowiedzi są kandydatami „Zatwierdź jako zamiennik" bez wpisywania frazy). Detal ładuje się po wyborze wiersza z `GET /api/proposals/:id` (lista jest lekka) — do czasu odpowiedzi szkielet, przy błędzie stan błędu z „Spróbuj ponownie"; `A`/`R`/`E`/`S` i przyciski akcji działają dopiero na załadowanym detalu zaznaczonego wiersza; detal sąsiadów ±1 jest prefetchowany przy `j/k`; pozycja w `ProposalActions` to `numer wiersza / total`.
 - **Stany specjalne:** `stale` → primary disabled + alert danger z powodem; `edit-before-approve` → header/body stają się edytowalne inline, akcja zmienia się na „Zatwierdź z edycją" (badge „approved with edits"). Bulk (roadmap v1.3): potwierdzenie przez `AlertDialog` (ostrzeżenie o `stale` dla approve, wspólne pole `reason` dla reject); po operacji sukcesy znikają z zaznaczenia, porażki zostają zaznaczone i widoczne przez „Szczegóły" na toaście (`BulkFailuresDialog`, id + kod + komunikat).
 - **Propozycja `create_project` (v1.5, onboarding przez MCP)** — nie niesie treści pamięci. Tytuł wiersza i detalu: „Nowy projekt: ‹nazwa› (‹slug›)” (`projectProposalTitle`), ikona wiersza `FolderPlus`; brak `KindMarker` (bez `kind`). Tab „Diff” pokazuje zamiast `DiffView` podgląd `ProjectProposalPreview`: `dl` Nazwa / Slug (mono) / Nagłówek MCP `X-Context-Keeper-Project: ‹slug›` + notka w ramce: zatwierdzenie utworzy projekt **bez tokena**, agenci z tokenem konta i tym nagłówkiem zaczną pracować od razu, token projektowy (np. CI) można wydać później na ekranie Projekty, odrzucenie zwalnia slug. Tab „Rewizje”: „Nie dotyczy”. `ProposalActions` bez „Edytuj” i „Zatwierdź jako zamiennik” (`PROPOSAL_CAPABILITIES` w `lib/proposals.ts`). Typ `create_project` jest w filtrze `type`. Approve (pojedynczy i bulk) odświeża listę projektów — `ContextSwitcher` i ekran Projekty widzą nowy projekt bez przeładowania. Propozycja ma `scope='global'`, `project_id=NULL`, więc w przełączniku kontekstu widać ją pod „Global”/„Wszystkie” (osobny filtr → backlog).
 - **Klawiatura:** `j/k` nawigacja, `A/R/E`, `S` zamiennik, `x` zaznacz/odznacz (bulk, roadmap v1.3 — `A`/`R` świadomie zostają jednoelementowe, bulk zawsze wymaga jawnego kliknięcia), `Enter` otwiera, `/` search (dla `create_project` `E`/`S` nieaktywne).
 
 ### 9.2 Przeglądarka pamięci (FR-D2) — list/detail
 
-- **Filtry:** `scope` (toggle group: wg kontekstu), `kind` (`fact`/`document`/`event`, v1.2), status (`approved`/`archived`), tagi (multi), search.
+- **Filtry:** `scope` (toggle group: wg kontekstu), `kind` (`fact`/`document`/`event`, v1.2), status (`approved`/`archived`), **zatwierdzenie** (v1.6, A2/G6: „wszystkie" / „auto-zaakceptowane" — pamięci, których bieżąca treść weszła przez auto mode; zdejmuje je każda późniejsza zmiana człowieka), tagi (multi), search.
+- **Znacznik „auto" (v1.6, A2):** pamięć z `autoApprovedAt` ma `Badge variant="info"` z ikoną `bot` i napisem „auto" — w wierszu listy (pod licznikiem `acc`), w nagłówku detalu obok `StatusChip` oraz jako wiersz „Auto-zaakceptowano" (czas) w zakładce „Metadane".
 - **Lista:** wiersze jak kolejka, ale zamiast StatusChip pending → `kind` + `scope` + `access_count`/`last_accessed` (mono, tabular). `archived` przygaszone.
   - **Rozróżnienie `kind` (§2.3)** trzema kanałami: `KindGutter` przy lewej krawędzi (kształt +
     kolor), `KindMarker` zamiast dawnego neutralnego `Badge variant="kind"` (ikona + kolor) oraz
@@ -466,7 +472,7 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 
 ### 9.3 Projekty / tokeny (FR-D3) — poza context switcherem (lista wszystkich)
 
-- **Lista projektów:** nazwa, **`slug`** (v1.5, mono, kopiowalny — wartość nagłówka `X-Context-Keeper-Project`), `project_id` (mono), liczba pamięci, data utworzenia, **liczniki tokenów**
+- **Lista projektów:** nazwa (projekt z włączonym auto mode, v1.6/A2, ma obok nazwy `Badge variant="info"` z ikoną `bot` „auto" i tooltipem „Auto mode włączony — limit N / 24 h"), **`slug`** (v1.5, mono, kopiowalny — wartość nagłówka `X-Context-Keeper-Project`), `project_id` (mono), liczba pamięci, data utworzenia, **liczniki tokenów**
   (v1.3 — badge „N aktywne" + „M karencja", zastępuje dawny 1:1 status tokena — patrz `ProjectListItem.tokenCounts`).
 - **Akcje:** `Nowy projekt` (z wymaganą etykietą pierwszego tokena, prefill `default`, oraz opcjonalnym polem „Slug (opcjonalnie)" — placeholder „z nazwy", v1.5), `Tokeny` (ikona
   ⚙-sąsiad) → otwiera `ProjectTokensDialog` (v1.3), ikona ⚙ → `ProjectSettingsDialog`.
@@ -490,6 +496,14 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
   + `Zapisz`/`Anuluj`; `Zapisz` otwiera `AlertDialog` „Zmienić slug „stary" → „nowy"?" z ostrzeżeniem, że repo ze starym
   slugiem w `.mcp.json` przestaną się rozwiązywać (`project_not_found`), stary slug nie zostaje aliasem, a zmiana
   trafia do audytu (`project_settings_changed`, `field: slug`).
+  **Auto mode (v1.6, A2):** pod `Switch` zdarzeń sekcja `AutoModeSection` — `Switch` „Auto mode — zapisy agenta bez kolejki" z
+  krótkim opisem. **Wyłączenie** idzie od razu (zaostrza human-gate, bez tarcia); **włączenie** otwiera `AlertDialog`
+  (wzorzec `SlugRow`) „Włączyć auto mode dla „‹nazwa›"?" z opisem: co się zmienia (nowe zapisy agenta, w tym `supersedes` i
+  relacje, wchodzą bez przeglądu), co nadal trafia do kolejki (podobne / niesprawdzone, korekta treści człowieka, ponad limit),
+  co bez zmian (skaner sekretów, walidacja, exact-dedup; nocny job i `create_project` zawsze czekają na człowieka; obecna
+  kolejka zostaje) oraz gdzie to widać (audyt, filtr „auto-zaakceptowane"); akcje „Anuluj" / „Włącz auto mode". Pod nim pole
+  „Limit auto-akceptacji / 24 h" (`Input type=number`, 1–10000) + „Zapisz" (aktywne tylko gdy wartość poprawna i zmieniona).
+  Obie zmiany audytowane jako `project_settings_changed` (`field: autoMode` / `autoModeDailyLimit`).
 - Ten ekran **ignoruje** ContextSwitcher (zarządza kontekstami, nie żyje w jednym).
 - **Wejście do ekranu** stoi w dolnej sekcji railu (§9.0), przy toggle motywu i „Wyloguj" — wizualnie
   odcięte `border-t` od nawigacji kontekstowej (7 ekranów), bo dotyczy ustawień całego projektu, nie

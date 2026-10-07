@@ -124,7 +124,8 @@ export class UsageService {
    * Wynik decyzji recenzenta per bucket czasu, źródło = `proposals` (NIE `audit_log` — plan §1c,
    * scoping per-projekt bez heurystyki actor/affected_ids). `date_trunc(bucket, updated_at)` — dla
    * proposala terminalnego `updated_at` = moment decyzji (nie jest już potem dotykany, patrz komentarz
-   * w `nightly.service.ts`). `withdrawn` wyłączone (samo-wycofanie maszynowe, nie decyzja człowieka).
+   * w `nightly.service.ts`). `withdrawn` wyłączone (samo-wycofanie maszynowe, nie decyzja człowieka); od v1.6 (A2) wyłączone
+   * też auto-akceptacje (`auto_approved_at IS NOT NULL`) — to decyzje maszyny, nie recenzenta.
    * `approvedWithEdits` to PODZBIÓR `approved` (approved AND edited_payload IS NOT NULL), nie osobna
    * rozłączna kategoria.
    */
@@ -132,6 +133,9 @@ export class UsageService {
     const ts = dateTruncExpr(filter.bucket, proposals.updatedAt);
     const conditions = [
       inArray(proposals.status, ['approved', 'rejected']),
+      // v1.6 A2 (G8): wykres mierzy decyzje CZŁOWIEKA — auto-akceptacje maszynowe nie wchodzą ani do
+      // „zatwierdzonych", ani do „z edycją". Własne serie auto mode → A4.
+      isNull(proposals.autoApprovedAt),
       gte(proposals.updatedAt, filter.from),
       lt(proposals.updatedAt, filter.to),
     ];

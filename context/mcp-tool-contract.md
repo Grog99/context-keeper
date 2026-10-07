@@ -127,8 +127,20 @@ liczy jedno miejsce: `memory/read-scope.ts` (`readScopeCondition` / `isReadable`
 
 **Zasady:**
 
-- Zapis human-gated, fire-and-forget: powstaje propozycja, a pamięć jest widoczna dopiero po
-  zatwierdzeniu. Statusy `pending` / `duplicate_pending` / `already_exists` nie są błędami.
+- Zapis fire-and-forget, w dwóch trybach zależnych od projektu (opis jest statyczny i nazywa oba):
+  **human-gated** (domyślny) — powstaje propozycja, a pamięć jest widoczna dopiero po zatwierdzeniu;
+  **auto mode** (v1.6, opt-in per projekt) — zapis, który przejdzie bezpieczniki serwera, jest
+  zatwierdzany od razu i wraca jako `approved`. Statusy `pending` / `duplicate_pending` /
+  `already_exists` / `approved` nie są błędami.
+- `approved` (tylko auto mode): `id` to zawsze id **pamięci** — nowej, a przy `supersedes` korygowanego
+  celu (bez zmiany id) — więc nadaje się od razu do `get_memory` i jako `targetId` relacji. Przy
+  `pending` z `supersedes` `id` jest id **propozycji** korekty (nie celu) — opis ostrzega, żeby nie
+  przekazywać go do `get_memory`.
+- Zapis zawrócony przez bezpiecznik auto mode zwraca zwykłe `pending`; **powód zawrócenia nigdy nie
+  trafia do agenta** (nie uczy się omijać hamulca) — widzi go recenzent w kolejce. Tryb projektu jest
+  niewidoczny i niezmienialny przez MCP (żadne narzędzie nie czyta ani nie zmienia przełącznika;
+  `save_memory` nie ma pola auto); agent ma obsłużyć oba statusy i nie ponawiać zapisu `pending`,
+  żeby uzyskać `approved`.
 - Zapis zawsze trafia do projektu z nagłówka/tokena, nigdy do `global` (promocja do global to akcja
   człowieka).
 - `supersedes`: tylko `fact`/`document` własnego projektu, ten sam `kind` co cel; nigdy `event` ani
@@ -216,7 +228,7 @@ liczy jedno miejsce: `memory/read-scope.ts` (`readScopeCondition` / `isReadable`
 | | `create_project` — nazwa wygląda jak sekret | `secret_blocked` |
 | Transport (HTTP) | zły/brak/nieusable bearer (projektowy lub konta — ten sam komunikat) | `401` |
 | | rate limit — per token × projekt × narzędzie (klucz `tokenId:projectId`); narzędzia konta per token (`tokenId:account`), `create_project` z własnym niskim limitem; przed auth throttle per IP | `429` + `Retry-After` |
-| Nie-błąd (status w wyniku `save_memory`) | — | `pending` / `duplicate_pending` / `already_exists` |
+| Nie-błąd (status w wyniku `save_memory`) | — | `pending` / `duplicate_pending` / `already_exists` / `approved` (v1.6, tylko auto mode) |
 
 Błędy scope'u projektu sprawdzane są na początku handlera narzędzia (`requireProject()`) — przed naszą
 walidacją (`validation_error`) i logiką narzędzia, bez skutków ubocznych (audyt, `search_events`) i bez

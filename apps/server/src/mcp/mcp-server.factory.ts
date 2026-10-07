@@ -229,8 +229,9 @@ export function createMcpServer(
           .describe(
             'Optional. Typed, directed edges FROM this memory (the one being saved/corrected) TO ' +
               'existing memories in YOUR project — up to 16. Each entry is {type, targetId} with ' +
-              'type one of "caused_by" | "follows" | "context_for". Same human-gated proposal as the ' +
-              'rest of this call: edges only appear after a human approves. targetId can be a fact, ' +
+              'type one of "caused_by" | "follows" | "context_for". Same proposal as the ' +
+              'rest of this call: edges exist only once it is approved (immediately in auto mode, ' +
+              'after human review otherwise). targetId can be a fact, ' +
               'document, or event (events ARE allowed as relation targets, unlike supersedes) in YOUR ' +
               'project — not global, not another project, not itself. An unknown/out-of-scope ' +
               'targetId returns the same not_found error as get_memory; a global targetId returns ' +

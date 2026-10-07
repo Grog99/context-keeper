@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { auditEventType, memoryKind, memoryScope, memoryStatus, proposalOrigin, proposalStatus, proposalType, relationType } from '../db/schema/enums';
 import { AUDIT_QUERY_MAX_LIMIT } from '../audit/audit.service';
+import { AUTO_MODE_MAX_DAILY_LIMIT } from '../db/schema/projects';
 import { decodeKeysetCursor } from '../common/keyset-cursor';
 import { LLM_CALL_CAP_MAX, LLM_CALL_CAP_MIN, LLM_TIMEOUT_MAX_MS, LLM_TIMEOUT_MIN_MS } from '../llm/llm.constants';
 import { isValidLlmEndpointUrl } from '../llm/llm-settings.service';
@@ -89,6 +90,11 @@ export const memoriesListQuery = z.strictObject({
   status: z.enum(memoryStatus.enumValues).optional(),
   tags: stringOrArray.optional(),
   q: z.string().max(HEADER_MAX_LEN).optional(),
+  // Filtr „auto-zaakceptowane" (roadmap v1.6, A2, G6) — tylko literał 'true' (brak filtra = param pominięty).
+  autoApproved: z
+    .literal('true')
+    .transform(() => true as const)
+    .optional(),
 });
 export type MemoriesListQuery = z.output<typeof memoriesListQuery>;
 
@@ -222,6 +228,9 @@ export type CreateProjectBody = z.output<typeof createProjectBody>;
 export const updateProjectBody = z.strictObject({
   includeEventsInDefaultSearch: z.boolean().optional(),
   slug: z.string().max(200).optional(),
+  // Auto mode (roadmap v1.6, A2): przełącznik i dzienny limit auto-akceptacji (1..10000, całkowity).
+  autoMode: z.boolean().optional(),
+  autoModeDailyLimit: z.number().int().min(1).max(AUTO_MODE_MAX_DAILY_LIMIT).optional(),
 });
 export type UpdateProjectBody = z.output<typeof updateProjectBody>;
 

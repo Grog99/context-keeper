@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   doublePrecision,
   index,
   jsonb,
@@ -18,6 +19,25 @@ export interface SimilarMemoryHit {
   id: string;
   distance: number;
 }
+
+/**
+ * Powody, dla których bezpiecznik auto mode zawrócił zapis do kolejki (roadmap v1.6, A2, G5 + D2).
+ * Zbiór zamknięty, w stałej kolejności (CHECK `proposals_auto_hold_reasons_check` i typ dashboardu go
+ * lustrują). Celowo `text[]` + CHECK, nie `pgEnum` — nowa wartość enuma w migracji wpada w 55P04.
+ * - `near_duplicate` — create z niepustym `similar_memories` (A1),
+ * - `not_computed` — brak sygnału/wektora (provider down, budżet czasu) — zapis nie może wejść bez wektora,
+ * - `human_target` — korekta treści napisanej/poprawionej przez człowieka,
+ * - `daily_limit` — wyczerpany limit auto-akceptacji w oknie 24 h,
+ * - `auto_failed` — bezpieczniki przeszły, ale `approve({auto})` rzuciło wyjątek (błąd po stronie serwera).
+ */
+export const AUTO_HOLD_REASONS = [
+  'near_duplicate',
+  'not_computed',
+  'human_target',
+  'daily_limit',
+  'auto_failed',
+] as const;
+export type AutoHoldReason = (typeof AUTO_HOLD_REASONS)[number];
 
 /**
  * Kolejka akceptacji — każda treściowa mutacja (§4). Kolejka to tabela, nie flaga na dokumencie
@@ -50,6 +70,15 @@ export const proposals = pgTable(
     // Bez backfillu — stare propozycje zostają NULL. Zapis `supersedes` (type='update'), eventy i
     // propozycje nocnego joba: zawsze NULL.
     similarMemories: jsonb('similar_memories').$type<SimilarMemoryHit[]>(),
+    // Auto mode (roadmap v1.6, A2) — dwa wzajemnie wykluczające się stany:
+    // - `auto_hold_reasons` (NOT NULL ⇒ niepusty zbiór z `AUTO_HOLD_REASONS`): projekt miał auto mode, ale
+    //   bezpiecznik zawrócił ten zapis do człowieka (G5); NULL = nic nie zawrócono (też projekt bez auto
+    //   mode i zapisy sprzed A2). Zapisywane best-effort, po utworzeniu propozycji.
+    // - `auto_approved_at`: propozycję zatwierdziła maszyna (`approve({auto:true})`) — liczy się do limitu
+    //   (c) i jest wykluczana z wykresu „wyników propozycji" (G8).
+    // Brak backfillu; `confidence`/`auto_eligible` zostają nieużywane.
+    autoHoldReasons: text('auto_hold_reasons').array().$type<AutoHoldReason[]>(),
+    autoApprovedAt: timestamp('auto_approved_at', { withTimezone: true }),
 
     scope: memoryScope('scope').notNull(),
     projectId: text('project_id').references(() => projects.id, { onDelete: 'restrict' }),
@@ -68,6 +97,15 @@ export const proposals = pgTable(
     index('proposals_origin_idx').on(t.origin),
     index('proposals_project_idx').on(t.projectId),
     index('proposals_content_hash_idx').on(t.contentHash),
+    // Licznik limitu (c) i filtr G8: auto-akceptacje projektu w oknie 24 h.
+    index('proposals_project_auto_approved_idx')
+      .on(t.projectId, t.autoApprovedAt)
+      .where(sql`${t.autoApprovedAt} IS NOT NULL`),
+    check(
+      'proposals_auto_hold_reasons_check',
+      sql`${t.autoHoldReasons} IS NULL OR (cardinality(${t.autoHoldReasons}) > 0 AND ${t.autoHoldReasons} <@ ARRAY['near_duplicate','not_computed','human_target','daily_limit','auto_failed']::text[])`,
+    ),
+    check('proposals_auto_state_check', sql`${t.autoApprovedAt} IS NULL OR ${t.autoHoldReasons} IS NULL`),
     // Unikalność slugu wśród OCZEKUJĄCYCH propozycji `create_project` (roadmap v1.5, ticket #14).
     // Predykat celowo NIE używa `type = 'create_project'`: drizzle stosuje wszystkie oczekujące
     // migracje w JEDNEJ transakcji, a Postgres zabrania użycia nowej wartości enuma w transakcji,
