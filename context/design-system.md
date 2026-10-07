@@ -325,9 +325,9 @@ Bazujemy na shadcn (kopiowane do repo → pełna kontrola). Poniżej — bazowe 
 | `type` | Render |
 |---|---|
 | `create` | jeden blok „nowa treść" — cały body na zielonym tint `success-subtle`, lewy pasek success. |
-| `update` | word-level inline diff (nagłówek + treść, ten sam renderer dla obu): niezmienione słowa zwykłym tekstem, usunięte pod `<del>` (`bg-danger-subtle`/`text-danger-foreground`, przekreślenie), dodane pod `<ins>` (`bg-success-subtle`/`text-success-foreground`, podkreślenie), legenda `−/+` nad blokiem. Poniżej progu czytelności (patrz akapit „Inline diff (`update`)") fallback do dawnego układu dwóch bloków `del`/`add` obok siebie. |
+| `update` | word-level inline diff (nagłówek + treść, ten sam renderer dla obu): niezmienione słowa zwykłym tekstem, usunięte pod `<del>` (`bg-danger-subtle`/`text-danger-foreground`, przekreślenie), dodane pod `<ins>` (`bg-success-subtle`/`text-success-foreground`, podkreślenie), legenda `−/+` nad blokiem. Poniżej progu czytelności (patrz akapit „Inline diff (`update`)") fallback do dawnego układu dwóch bloków `del`/`add` obok siebie. Gdy tagi się zmieniły (dla każdego `update`) — dodatkowy blok „tagi": usunięte pod `<del>`, dodane pod `<ins>`. Update z detektora LLM (v1.6 B2) dostaje nad diffem notkę `info` z ikoną `bot`: „Werdykt modelu · <kategoria>" + uzasadnienie (zwykły tekst). |
 | `merge` | trzy karty: **A** + **B** (obie → archiwum, `neutral`/przekreślone nagłówki) **→ C** (nowa, `success`). Ikona `git-merge`. |
-| `delete`/`prune` | tombstone — cały rekord przygaszony, `danger` label „do archiwizacji", powód (np. „stale: last_accessed 94 dni, access_count 0"). |
+| `delete`/`prune` | tombstone — cały rekord przygaszony, `danger` label „do archiwizacji", powód (np. „stale: last_accessed 94 dni, access_count 0"). `delete` z detektora LLM (v1.6 B2) zamiast arytmetycznego powodu pokazuje notkę `info` (ikona `bot`) „Werdykt modelu · <kategoria: efemeryczny / pusty>" + uzasadnienie modelu. |
 
 **Inline diff (`update`)** — word-level diff liczony przez [`diff`](https://www.npmjs.com/package/diff) (jsdiff) `diffWords`, w `apps/dashboard/src/lib/text-diff.ts` (`computeInlineWordDiff`), osobno dla nagłówka i dla treści. Diff ignoruje białe znaki przy porównaniu równości, ale zachowuje je w outpucie — poprawne dla zawijanej prozy PL/EN; białe znaki na granicy zmiany są zawsze renderowane jako zwykły tekst, nigdy pod `<del>`/`<ins>`, żeby tint nie obejmował samej spacji. Cztery nieomijalne/omijalne guardy z typowanym powodem fallbacku:
 
@@ -565,12 +565,13 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
      **klucz API** — write-only: pokazuje wyłącznie „ustawiony" / „brak", przyciski `Zmień` (otwiera pole `type=password`) i `Usuń`
      (za potwierdzeniem), wartość nigdy nie wraca do przeglądarki; pole jest wyłączone z podpowiedzią „ustaw `SECRETS_ENCRYPTION_KEY`
      na serwerze", gdy serwer nie ma klucza szyfrującego; **limit wywołań na przebieg** (domyślnie 100); **timeout** w sekundach
-     (domyślnie 30); `Zapisz`; błędy z API inline pod formularzem (nie tylko toast).
+     (domyślnie 30); **okno przeglądu (dni)** (domyślnie 1, 1–365 — detektor LLM ocenia fakty zatwierdzone w ostatnich N dniach; podniesienie to
+     jednorazowy przemiał starszych wpisów w granicach limitu wywołań); `Zapisz`; błędy z API inline pod formularzem (nie tylko toast).
   4. **„Sprawdź połączenie"** — przycisk secondary obok `Zapisz`; wyłączony przy niezapisanych zmianach lub bez zapisanego
      endpointu i modelu; stan pending; wynik inline: `OK · <model> · 412 ms` albo czytelny błąd (status, bez klucza). To jedno
      testowe wywołanie na żądanie — **bez żywej sondy** w pasku zdrowia ani w metrykach (płatne wywołanie).
   5. **„Ostatni przebieg"** — czas (względny + absolutny w tooltipie), stan LLM z `nightly_run`, tabela liczników (`tabular-nums`):
-     wywołania, błędy, pominięte (limit · bezpiecznik · sekret · klucz). Lista wpisów pominiętych przez skaner sekretów:
+     wywołania, błędy, pominięte (limit · bezpiecznik · sekret · klucz), propozycje detektora (do usunięcia · do skrócenia). Lista wpisów pominiętych przez skaner sekretów:
      `MonoId` linkujące do `/pamiec?id=…` + chip z typem sekretu. Gdy nie było jeszcze udanego przebiegu — `EmptyState`.
 
 ---

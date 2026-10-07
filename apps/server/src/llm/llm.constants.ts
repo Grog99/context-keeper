@@ -14,6 +14,19 @@ export const LLM_CALL_CAP_MAX = 10_000;
 export const LLM_TIMEOUT_MIN_MS = 1_000;
 export const LLM_TIMEOUT_MAX_MS = 300_000;
 
+/** Szerokość okna przeglądu LLM (G6): fakty z `created_at` w ostatnich N dniach. Jedno źródło dla CHECK-a
+ * migracji 0018, schematu REST i serwisu. Wartość domyślna to PUNKT STARTOWY (pomiar najpierw). */
+export const LLM_DEFAULT_SCAN_WINDOW_DAYS = 1;
+export const LLM_SCAN_WINDOW_MIN_DAYS = 1;
+export const LLM_SCAN_WINDOW_MAX_DAYS = 365;
+
+/** Ile wywołań detektora LLM leci równolegle (B2 prune, B3 conflicts) — dźwignia czasu ręcznego triggera
+ * (`cap/N × latencja`), a zarazem mieszczące się w domyślnym `OLLAMA_NUM_PARALLEL`. */
+export const LLM_DETECTOR_CONCURRENCY = 4;
+
+/** Maks. długość uzasadnienia modelu w payloadzie (G4) — dłuższe jest przycinane, nie odrzucane. */
+export const LLM_RATIONALE_REASON_MAX_LEN = 300;
+
 /** Bezpiecznik (G8): po tylu KOLEJNYCH błędach logicznych wywołań reszta przebiegu pomija LLM. Martwy
  * provider kosztuje wtedy `K × timeout`, nie `cap × timeout` pod advisory lockiem. */
 export const LLM_BREAKER_THRESHOLD = 3;

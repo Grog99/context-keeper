@@ -1,4 +1,4 @@
-import { Archive, CheckCircle, FileDiff, GitMerge, Minus, Plus, Trash2, type LucideIcon } from 'lucide-react';
+import { Archive, Bot, CheckCircle, FileDiff, GitMerge, Minus, Plus, Trash2, type LucideIcon } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
 import { formatAbsoluteTime } from '../lib/format';
 import { computeInlineWordDiff, WORD_DIFF_MAX_CHARS, type InlineDiffResult, type InlineDiffSegment } from '../lib/text-diff';
@@ -55,6 +55,73 @@ function DiffLabel({ children }: { children: ReactNode }) {
   return <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-faint">{children}</p>;
 }
 
+/** Etykiety kategorii werdyktu modelu (`ProposalRationale.category`); nieznana kategoria (np. dołożona przez
+ * B3) pokazuje się surowo — SPA nie psuje się na nowej wartości. */
+const RATIONALE_CATEGORY_LABEL: Record<string, string> = {
+  ephemeral: 'efemeryczny',
+  empty: 'pusty',
+  verbose: 'rozwlekły',
+  untidy: 'nieuporządkowany',
+};
+
+/** Notka z werdyktem detektora LLM (G4): kategoria + uzasadnienie modelu, ton `info` jak `DedupHint`.
+ * Uzasadnienie to zwykły tekst (React escapuje, bez markdownu). Renderowana tylko, gdy `rationale` jest. */
+function RationaleNote({ rationale }: { rationale: DiffRationale }) {
+  return (
+    <div
+      role="note"
+      aria-label="Uzasadnienie modelu"
+      className="mb-3.5 flex items-start gap-2.5 rounded-md border border-info bg-info-subtle px-3 py-2.5 text-xs text-info-foreground"
+    >
+      <Bot className="mt-0.5 size-[15px] shrink-0 text-info" />
+      <div>
+        <p className="font-semibold">
+          Werdykt modelu · {RATIONALE_CATEGORY_LABEL[rationale.category] ?? rationale.category}
+        </p>
+        <p className="mt-0.5 whitespace-pre-wrap">{rationale.reason}</p>
+      </div>
+    </div>
+  );
+}
+
+/** Wiersz „tagi" w diffie `update`: usunięte pod `<del>`, dodane pod `<ins>` (te same klasy co `InlineDiff`,
+ * D7 — kolor nie jest jedynym sygnałem), niezmienione jako zwykły tekst. */
+function TagsDiffBlock({ before, after }: { before: string[]; after: string[] }) {
+  const removed = before.filter((t) => !after.includes(t));
+  const added = after.filter((t) => !before.includes(t));
+  const kept = after.filter((t) => before.includes(t));
+  return (
+    <div className="mb-3.5 overflow-hidden rounded-md border border-border">
+      <div className="flex items-center gap-2 border-b border-border bg-muted px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+        <FileDiff className="size-3.5" />
+        tagi
+      </div>
+      <div role="group" aria-label="tagi" className="flex flex-wrap gap-x-2 gap-y-1 px-3.5 py-2 font-mono text-[12.5px] text-foreground">
+        {kept.map((t) => (
+          <span key={`k-${t}`}>{t}</span>
+        ))}
+        {removed.map((t) => (
+          <del
+            key={`d-${t}`}
+            className="rounded-[3px] bg-danger-subtle px-[2px] text-danger-foreground line-through decoration-danger"
+          >
+            {t}
+          </del>
+        ))}
+        {added.map((t) => (
+          <ins
+            key={`a-${t}`}
+            className="rounded-[3px] bg-success-subtle px-[2px] text-success-foreground underline decoration-success"
+          >
+            {t}
+          </ins>
+        ))}
+        {before.length === 0 && after.length === 0 && <span className="text-faint">(brak)</span>}
+      </div>
+    </div>
+  );
+}
+
 export interface CreateDiffData {
   kind: MemoryKind;
   header: string;
@@ -65,9 +132,19 @@ export interface CreateDiffData {
   eventTime?: string | null;
 }
 
+/** Werdykt detektora LLM nocnego joba (roadmap v1.6 B2, G4) — kategoria + uzasadnienie modelu. Brak przy
+ * recency prune, update agenta i edycji człowieka (te diffy wyglądają jak dotąd). */
+export interface DiffRationale {
+  category: string;
+  reason: string;
+}
+
 export interface UpdateDiffData {
   before: { header: string; body: string };
   after: { header: string; body: string };
+  /** Tagi przed/po — wiersz „tagi" pojawia się, gdy zbiory się różnią (dla KAŻDEGO update, nie tylko z LLM). */
+  tags?: { before: string[]; after: string[] };
+  rationale?: DiffRationale;
 }
 
 export interface MergeSource {
@@ -85,6 +162,7 @@ export interface DeleteDiffData {
   header: string;
   body: string;
   reason?: string;
+  rationale?: DiffRationale;
 }
 
 /** §8.2 — komponent zależny od `type` proposala (FR-D1), tabela §8.2 design-systemu:
@@ -267,10 +345,17 @@ function UpdateDiff({ data }: { data: UpdateDiffData }) {
   );
   const [headerForceInline, setHeaderForceInline] = useState(false);
   const [bodyForceInline, setBodyForceInline] = useState(false);
+  const tagsChanged = useMemo(() => {
+    if (!data.tags) return false;
+    const before = new Set(data.tags.before);
+    const after = new Set(data.tags.after);
+    return before.size !== after.size || [...after].some((t) => !before.has(t));
+  }, [data.tags]);
 
   return (
     <div>
       <DiffLabel>Diff — aktualizacja (update)</DiffLabel>
+      {data.rationale && <RationaleNote rationale={data.rationale} />}
       <DiffField
         diff={headerDiff}
         delLabel="− nagłówek (poprzedni)"
@@ -292,7 +377,10 @@ function UpdateDiff({ data }: { data: UpdateDiffData }) {
         forceInline={bodyForceInline}
         onToggleForceInline={() => setBodyForceInline((v) => !v)}
       />
-      {!headerDiff && !bodyDiff && <p className="text-xs text-faint">Brak zmian w nagłówku/treści (zmienione tylko tagi/kind).</p>}
+      {tagsChanged && data.tags && <TagsDiffBlock before={data.tags.before} after={data.tags.after} />}
+      {!headerDiff && !bodyDiff && !tagsChanged && (
+        <p className="text-xs text-faint">Brak zmian w nagłówku/treści/tagach (zmieniony tylko kind).</p>
+      )}
     </div>
   );
 }
@@ -336,6 +424,7 @@ export function DiffView(props: DiffViewProps) {
       return (
         <div>
           <DiffLabel>Diff — do archiwizacji (delete)</DiffLabel>
+          {props.data.rationale && <RationaleNote rationale={props.data.rationale} />}
           <DiffBlock variant="del" icon={Trash2} label={`${props.data.memoryId} → archiwum`} body={props.data.body} tomb />
           {props.data.reason && <p className="mt-1 font-mono text-xs text-muted-foreground">powód: {props.data.reason}</p>}
         </div>

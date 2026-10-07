@@ -33,8 +33,37 @@ export interface CreatePayload {
   relations?: RelationPayloadEntry[];
 }
 
+/** Detektory nocnego joba oparte na modelu (roadmap v1.6; B2 prune, B3 dołoży 'llm-conflicts'). */
+export const LLM_DETECTORS = ['llm-prune'] as const;
+export type LlmDetector = (typeof LLM_DETECTORS)[number];
+
+/** Kategorie werdyktu (G1/G5) — maszynowo czytelne; B3 dołoży 'contradiction'. */
+export const LLM_PRUNE_CATEGORIES = ['ephemeral', 'empty', 'verbose', 'untidy'] as const;
+export type ProposalRationaleCategory = (typeof LLM_PRUNE_CATEGORIES)[number];
+
+/** Werdykt detektora LLM zapisany w payloadzie (G4): kategoria + uzasadnienie dla recenzenta. Zapis
+ * rozumowania maszyny, NIE treść pamięci — approve go ignoruje, edit-before-approve go zachowuje (`...base`).
+ * Obecność = znacznik „warunek z detektora LLM" dla `reconcile` (ust. 13, wyłączenie z orphan-withdraw). */
+export interface ProposalRationale {
+  detector: LlmDetector;
+  category: ProposalRationaleCategory;
+  reason: string;
+}
+
+function isPlainRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** Czy payload niesie werdykt detektora LLM (znacznik ust. 13). Defensywnie — payload to nietypowany jsonb. */
+export function isLlmDetectedPayload(payload: unknown): boolean {
+  if (!isPlainRecord(payload) || !isPlainRecord(payload.rationale)) return false;
+  const detector = payload.rationale.detector;
+  return typeof detector === 'string' && (LLM_DETECTORS as readonly string[]).includes(detector);
+}
+
 /** Payload `type=update` — patch (pola pominięte = "bez zmian", scalane z aktualnym wierszem
- * w `ProposalsService.approve` PRZED materializacją i (re)embeddingiem). `affectedIds=[memoryId]`. */
+ * w `ProposalsService.approve` PRZED materializacją i (re)embeddingiem). `affectedIds=[memoryId]`.
+ * Nocny job (detektor LLM prune) produkuje `update` wyłącznie z `header`/`body`/`tags` — nigdy `kind`. */
 export interface UpdatePayload {
   memoryId: string;
   header?: string;
@@ -43,6 +72,8 @@ export interface UpdatePayload {
   kind?: MemoryKind;
   /** Attach-on-save (roadmap v1.2) — jak w `CreatePayload`, tylko dla `saveAsSupersede`. */
   relations?: RelationPayloadEntry[];
+  /** Werdykt detektora LLM (G4) — opcjonalny: brak przy update agenta i edycji człowieka (wstecznie zgodne). */
+  rationale?: ProposalRationale;
 }
 
 /** Payload `type=merge` — pełny kształt wynikowej pamięci C (`memoryId` = id domintowany dla C,
@@ -55,9 +86,11 @@ export interface MergePayload {
   kind: MemoryKind;
 }
 
-/** Payload `type=delete` — sama referencja, `affectedIds=[memoryId]` niesie to, co ma być archiwizowane. */
+/** Payload `type=delete` — referencja, `affectedIds=[memoryId]` niesie to, co ma być archiwizowane.
+ * `rationale` (opcjonalne) dokłada tylko detektor LLM; recency prune go nie ma i działa jak dotąd. */
 export interface DeletePayload {
   memoryId: string;
+  rationale?: ProposalRationale;
 }
 
 /** Payload `type=create_project` (roadmap v1.5, scope B) — propozycja założenia projektu przez agenta z

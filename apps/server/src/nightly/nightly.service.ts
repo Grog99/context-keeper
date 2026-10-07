@@ -13,10 +13,14 @@ import { LlmRunBudget } from '../llm/llm-budget';
 import { LlmService } from '../llm/llm.service';
 import { EMPTY_LLM_COUNTERS, type NightlyLlmReport } from '../llm/llm.types';
 import { computeStaleIds } from '../proposals/proposals.service';
+import { isLlmDetectedPayload } from '../proposals/proposals.types';
 import { UsageService } from '../usage/usage.service';
 import { buildClusters, pickCanonicalMerge, type NeighborPair } from './dedup-cluster';
+import { runLlmPrune } from './llm-prune';
+import { llmWindowStart, selectWindowFacts } from './llm-window';
 import {
   conditionKey,
+  EMPTY_LLM_PRUNE_COUNTERS,
   PRUNE_SCORER,
   type DetectedCondition,
   type NightlyConditionType,
@@ -46,6 +50,7 @@ const EMPTY_COUNTERS: NightlyCounters = {
   skippedCap: 0,
   searchEventsPruned: 0,
   ...EMPTY_LLM_COUNTERS,
+  ...EMPTY_LLM_PRUNE_COUNTERS,
 };
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -75,7 +80,7 @@ const NEIGHBOR_SCAN_CONCURRENCY = 10;
 
 /**
  * Nocny job — proposer, NIE executor (plan Fazy 6 §1 "Overall shape"). Jedyny producent proposali
- * `origin='nightly'` (`type` ograniczony do merge/delete); NIGDY nie woła `ProposalsService.approve()`
+ * `origin='nightly'` (`type` ograniczony do merge/delete/update); NIGDY nie woła `ProposalsService.approve()`
  * i nigdy nie pisze do `memories`/`embeddings` — wyłącznie do `proposals`/`staging_embeddings`/
  * `audit_log`. Uruchamiany przez CLI `run-nightly` ALBO ręcznie z dashboardu (roadmap v1.1, ekran
  * "Operacje" → `POST /api/nightly/run`, `NightlyController`) — oba wejścia wołają dokładnie ten sam
@@ -91,7 +96,15 @@ const NEIGHBOR_SCAN_CONCURRENCY = 10;
  * Od roadmap v1.6 job ma OPCJONALNY krok LLM (opt-in w Ustawieniach, domyślnie wyłączony): `runLocked`
  * otwiera na starcie budżet przebiegu (`LlmService.openRunBudget`) i dokłada jego liczniki + blok `llm`
  * do wyniku. Fail-open (ust. 3): żadna awaria ustawień/providera nie zamienia przebiegu w `failed`.
- * Sam B1 nie ma jeszcze żadnego detektora korzystającego z modelu — budżet jest otwierany, ale nie wołany.
+ *
+ * Detektor LLM prune (B2, `detectLlmPrune`) to trzeci detektor obok dedup/merge i recency prune: ocenia
+ * fakty (`kind=fact`, approved) z OKNA po `created_at` (ustawienie `scan_window_days`, domyślnie 1 dzień),
+ * jeden wpis na wywołanie przez `LlmRunBudget`, i produkuje zwykłe warunki `delete`/`update` dla wspólnej
+ * ścieżki politeness -> reconcile -> cap -> apply. Pod model NIE trafia fakt z klastra merge, kwalifikujący
+ * się do recency prune ani z pending proposalem (dowolnego pochodzenia). Warunki z detektora LLM niosą
+ * `payload.rationale` i są wyłączone z orphan-withdraw (ust. 13): okno to „detektor przestał patrzeć", nie
+ * „warunek ustał", więc taki proposal żyje do decyzji człowieka. Znane, zaakceptowane zachowanie (B2):
+ * odrzucony proposal LLM może wrócić, dopóki fakt jest w oknie (job pozostaje bezstanowy).
  */
 @Injectable()
 export class NightlyService {
@@ -184,9 +197,8 @@ export class NightlyService {
 
   private async runLocked(actor: string): Promise<{ counters: NightlyCounters; llm: NightlyLlmReport }> {
     const budget = await this.openLlmBudget(actor);
-    // B2/B3: detektory korzystające z modelu dostają tu `budget` i wołają `budget.call(...)` — jedyna droga
-    // do providera (cap, bezpiecznik, skaner sekretów, liczniki). B1 nie ma jeszcze żadnego, więc krok
-    // nie wykonuje ani jednego żądania, niezależnie od ustawień.
+    // Detektory korzystające z modelu (B2 prune, B3) dostają `budget` i wołają `budget.call(...)` — jedyna
+    // droga do providera (cap, bezpiecznik, skaner sekretów, liczniki). Krok B2: `detectLlmPrune` niżej.
     const activeModel = this.embedding.model;
     const facts = await this.loadApprovedFacts(activeModel);
     const factById = new Map(facts.map((f) => [f.id, f]));
@@ -222,7 +234,8 @@ export class NightlyService {
 
     const mergeConditions = clusters.map((ids) => this.buildMergeCondition(ids, factById));
     const pruneConditions = this.buildPruneConditions(facts, clusteredIds);
-    const allDetected = [...mergeConditions, ...pruneConditions];
+    const llmPrune = await this.detectLlmPrune(budget, facts, clusteredIds, pruneConditions);
+    const allDetected = [...mergeConditions, ...pruneConditions, ...llmPrune.conditions];
 
     // Politeness gate (plan §5 pkt 5): pomiń warunki, których affectedIds nakładają się na pending
     // proposal spoza nightly — redukcja "reviewer churn". Efekt uboczny (zamierzony): jeśli dla
@@ -256,11 +269,16 @@ export class NightlyService {
     let created = 0;
     let mergeProposed = 0;
     let pruneProposed = 0;
+    let llmPruneDeleteProposed = 0;
+    let llmPruneUpdateProposed = 0;
     for (const cond of finalToCreate) {
       await this.createProposal(cond, actor);
       created++;
       if (cond.type === 'merge') mergeProposed++;
-      else pruneProposed++;
+      else if (cond.detector === 'llm-prune') {
+        if (cond.type === 'delete') llmPruneDeleteProposed++;
+        else llmPruneUpdateProposed++;
+      } else pruneProposed++;
     }
 
     // Sparowane withdraw (Fix 2, code review commit d057871): odpowiednik "replace" liczony WYŁĄCZNIE
@@ -306,6 +324,10 @@ export class NightlyService {
         skippedPoliteness,
         skippedCap,
         searchEventsPruned,
+        llmPruneCandidates: llmPrune.candidates,
+        llmPruneKept: llmPrune.kept,
+        llmPruneDeleteProposed,
+        llmPruneUpdateProposed,
         ...budget.counters(),
       },
       llm: budget.report(),
@@ -314,8 +336,8 @@ export class NightlyService {
 
   /** Otwiera budżet LLM przebiegu. Odczyt ustawień z bazy, który się nie uda, daje stan `unavailable` —
    * nigdy `failed` (fail-open, ust. 3). Nieczytelny klucz (G7) jest widoczny jako `llm.state` w metadanych
-   * przebiegu + jedno ostrzeżenie w logu; liczniki `llmSkippedKeyUnreadable` rosną dopiero z wywołań
-   * detektorów (od B2). */
+   * przebiegu + jedno ostrzeżenie w logu; detektory nie ruszają przy
+   * `!budget.enabled` (ust. 15), więc `llmSkippedKeyUnreadable` zostaje 0 — sygnałem jest `llm.state`. */
   private async openLlmBudget(actor: string): Promise<LlmRunBudget> {
     try {
       const budget = await this.llm.openRunBudget(actor);
@@ -330,6 +352,54 @@ export class NightlyService {
       this.logger.error(`[nightly] nie udało się odczytać ustawień LLM (fail-open, krok LLM pominięty): ${message}`);
       return LlmRunBudget.unavailable();
     }
+  }
+
+  // ---- detekcja: LLM prune (B2) -------------------------------------------
+
+  /**
+   * Detektor LLM prune. Przy `!budget.enabled` NIE wybiera kandydatów ani nie buduje promptów (ust. 15) —
+   * domyślny stan daje dokładnie dzisiejszy przebieg. Wyłączenia z oceny: fakty spoza okna `created_at`
+   * (G6), z klastra merge (ust. 17), kwalifikujące się do recency prune (ust. 21 — wygrywa tańszy,
+   * deterministyczny `delete`) i z pending proposalem dowolnego pochodzenia (ust. 22). Fail-open: wyjątek
+   * (np. awaria zapytania o pending) jest łapany i logowany — przebieg i proposale dedup/recency idą dalej.
+   */
+  private async detectLlmPrune(
+    budget: LlmRunBudget,
+    facts: FactRow[],
+    clusteredIds: Set<string>,
+    pruneConditions: DetectedCondition[],
+  ): Promise<{ conditions: DetectedCondition[]; candidates: number; kept: number }> {
+    if (!budget.enabled) return { conditions: [], candidates: 0, kept: 0 };
+    let candidateCount = 0;
+    try {
+      const recencyIds = new Set(pruneConditions.flatMap((c) => c.affectedIds));
+      const pendingIds = await this.loadPendingAffectedIds();
+      const windowStart = llmWindowStart(new Date(), budget.scanWindowDays);
+      const candidates = selectWindowFacts(facts, {
+        windowStart,
+        exclude: [clusteredIds, recencyIds, pendingIds],
+      });
+      candidateCount = candidates.length;
+      const result = await runLlmPrune({ budget, candidates, config: this.config });
+      return { conditions: result.conditions, candidates: candidateCount, kept: result.kept };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `[nightly] detektor LLM prune nie powiódł się (fail-open, przebieg kontynuowany): ${message}`,
+      );
+      return { conditions: [], candidates: candidateCount, kept: 0 };
+    }
+  }
+
+  /** Pamięci dotknięte JAKIMKOLWIEK pending proposalem (też nightly) — fakt z pending proposalem nie idzie
+   * pod model (ust. 22): ponowna ocena to czysty koszt, a przy nondeterminizmie dałaby drugą, inną
+   * propozycję na tym samym wpisie. */
+  private async loadPendingAffectedIds(): Promise<Set<string>> {
+    const rows = await this.db
+      .select({ affectedIds: proposals.affectedIds })
+      .from(proposals)
+      .where(eq(proposals.status, 'pending'));
+    return new Set(rows.flatMap((r) => r.affectedIds));
   }
 
   // ---- detekcja: dedup (ANN) ---------------------------------------------
@@ -473,6 +543,7 @@ export class NightlyService {
 
     return {
       type: 'merge',
+      detector: 'dedup',
       scope: first.scope,
       projectId: first.projectId,
       affectedIds: clusterIds,
@@ -508,6 +579,7 @@ export class NightlyService {
       if (!score.eligible) continue;
       out.push({
         type: 'delete',
+        detector: 'recency',
         scope: fact.scope,
         projectId: fact.projectId,
         affectedIds: [fact.id],
@@ -554,11 +626,13 @@ export class NightlyService {
       const staleIds = computeStaleIds(versionMap, baseVersions, r.affectedIds);
       return {
         id: r.id,
-        // Nightly PRODUKUJE wyłącznie merge/delete (`NightlyConditionType`) — rzut bezpieczny, bo
+        // Nightly PRODUKUJE wyłącznie merge/delete/update (`NightlyConditionType`) — rzut bezpieczny, bo
         // filtr `origin='nightly'` wyżej gwarantuje, że to zawsze wiersz zapisany przez ten serwis.
         type: r.type as NightlyConditionType,
         affectedIds: r.affectedIds,
         stale: staleIds.length > 0,
+        // Czytamy kolumnę `payload` (nie `edited_payload`): edycje jej nie ruszają, a `rationale` i tak przeżywa edit.
+        exemptFromOrphanWithdraw: isLlmDetectedPayload(r.payload),
       };
     });
   }
@@ -583,7 +657,16 @@ export class NightlyService {
       eventType: 'proposal_created',
       actor,
       affectedIds: cond.affectedIds,
-      metadata: { proposalId, type: cond.type, origin: 'nightly', conditionKey: cond.conditionKey },
+      metadata: {
+        proposalId,
+        type: cond.type,
+        origin: 'nightly',
+        conditionKey: cond.conditionKey,
+        detector: cond.detector,
+        ...('rationale' in cond.payload && cond.payload.rationale
+          ? { category: cond.payload.rationale.category }
+          : {}),
+      },
     });
   }
 

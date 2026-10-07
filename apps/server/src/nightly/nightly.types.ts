@@ -1,13 +1,17 @@
 import type { MemoryScope } from '../db/schema/enums';
 import type { LlmCounters, NightlyLlmReport } from '../llm/llm.types';
-import type { DeletePayload, MergePayload } from '../proposals/proposals.types';
+import type { DeletePayload, LlmDetector, MergePayload, UpdatePayload } from '../proposals/proposals.types';
 
 /**
  * Typ warunku wykrywanego przez nocny job (plan Fazy 6 §1 "Overall shape"). Nightly jest producentem
- * WYŁĄCZNIE tych dwóch typów proposali — `create`/`update` mają innych producentów (agent-save /
- * przyszły human-edit), nigdy nocny job.
+ * WYŁĄCZNIE tych trzech typów proposali — `create` ma innych producentów (agent-save), nigdy nocny job.
+ * `update` pochodzi wyłącznie z detektora LLM (roadmap v1.6 B2, G5: tylko `header`/`body`/`tags`, nigdy `kind`).
  */
-export type NightlyConditionType = 'merge' | 'delete';
+export type NightlyConditionType = 'merge' | 'delete' | 'update';
+
+/** Detektor, który wykrył warunek — używany WYŁĄCZNIE w procesie (liczniki, metadane audytu); trwałym
+ * znacznikiem w bazie jest `payload.rationale` (G4), nie to pole. B3 rozszerza `LlmDetector`. */
+export type NightlyDetector = 'dedup' | 'recency' | LlmDetector;
 
 /**
  * Warunek wykryty w bieżącym przebiegu, PRZED reconcile (plan §2 "nightly.types.ts").
@@ -15,13 +19,14 @@ export type NightlyConditionType = 'merge' | 'delete';
  */
 export interface DetectedCondition {
   type: NightlyConditionType;
+  detector: NightlyDetector;
   scope: MemoryScope;
   projectId: string | null;
   affectedIds: string[];
   /** `{ [memoryId]: number }` — wersja `memories.version`, na podstawie której policzono warunek
    * (optimistic concurrency, tak samo jak `proposals.base_versions` gdzie indziej w kodzie). */
   baseVersions: Record<string, number>;
-  payload: MergePayload | DeletePayload;
+  payload: MergePayload | DeletePayload | UpdatePayload;
   conditionKey: string;
 }
 
@@ -69,6 +74,26 @@ export interface PruneScorer {
 
 export const PRUNE_SCORER = Symbol('PRUNE_SCORER');
 
+/** Liczniki detektora LLM prune (B2) — płaskie pola `NightlyCounters`, osobno od recency `pruneProposed`
+ * i od liczników budżetu `llm*` (`LlmCounters`). */
+export interface LlmPruneCounters {
+  /** Fakty wybrane do oceny po wszystkich wyłączeniach (okno, merge, recency, pending). */
+  llmPruneCandidates: number;
+  /** Udane werdykty bez propozycji (`keep` albo `update` bez realnej zmiany). */
+  llmPruneKept: number;
+  /** Utworzone propozycje `delete` z detektora LLM (po reconcile i capie). */
+  llmPruneDeleteProposed: number;
+  /** Utworzone propozycje `update` z detektora LLM (po reconcile i capie). */
+  llmPruneUpdateProposed: number;
+}
+
+export const EMPTY_LLM_PRUNE_COUNTERS: LlmPruneCounters = {
+  llmPruneCandidates: 0,
+  llmPruneKept: 0,
+  llmPruneDeleteProposed: 0,
+  llmPruneUpdateProposed: 0,
+};
+
 /**
  * Liczniki jednego przebiegu — trafiają do audytu `nightly_run` (metadata) i podsumowania CLI.
  * Pięć pierwszych pól to dosłowny kontrakt z planu §2 ("NightlyCounters"); `skippedPoliteness` i
@@ -76,7 +101,7 @@ export const PRUNE_SCORER = Symbol('PRUNE_SCORER');
  * truncation" z §5 pkt 5-6 planu (politeness gate i flood backstop muszą być POLICZALNE, nie tylko
  * zalogowane jednym zdaniem).
  */
-export interface NightlyCounters extends LlmCounters {
+export interface NightlyCounters extends LlmCounters, LlmPruneCounters {
   created: number;
   withdrawn: number;
   /** Wykryty warunek dopasował istniejący pending nightly proposal, wciąż aktualny — brak akcji. */
@@ -97,6 +122,8 @@ export interface NightlyCounters extends LlmCounters {
   // `llmSkippedBreaker`, `llmSkippedSecret`, `llmSkippedKeyUnreadable`): płaskie, addytywne, więc trafiają do
   // `nightly_run.metadata`, podsumowania CLI i lustra typów dashboardu bez osobnej ścieżki. Przy wyłączonym
   // kroku (domyślnie) wszystkie wynoszą 0.
+  // + pola `LlmPruneCounters` (B2: `llmPruneCandidates`, `llmPruneKept`, `llmPruneDeleteProposed`,
+  // `llmPruneUpdateProposed`): liczniki detektora LLM prune, rozłączne z recency `pruneProposed`.
 }
 
 export interface NightlyRunResult {

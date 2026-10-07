@@ -39,6 +39,8 @@ const CALL_CAP_MIN = 1;
 const CALL_CAP_MAX = 10_000;
 const TIMEOUT_MIN_S = 1;
 const TIMEOUT_MAX_S = 300;
+const WINDOW_MIN_DAYS = 1;
+const WINDOW_MAX_DAYS = 365;
 
 const RUN_STATE_LABEL: Record<LlmRunState, string> = {
   disabled: 'wyłączony',
@@ -131,6 +133,7 @@ function LlmForm({ settings }: { settings: LlmSettings }) {
   const [model, setModel] = useState(settings.model ?? '');
   const [callCap, setCallCap] = useState(String(settings.callCap));
   const [timeoutSec, setTimeoutSec] = useState(String(Math.round(settings.timeoutMs / 1000)));
+  const [windowDays, setWindowDays] = useState(String(settings.scanWindowDays));
   const [keyMode, setKeyMode] = useState<'keep' | 'set' | 'clear'>('keep');
   const [keyValue, setKeyValue] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
@@ -140,8 +143,10 @@ function LlmForm({ settings }: { settings: LlmSettings }) {
   const timeoutNum = parseIntStrict(timeoutSec);
   const capValid = capNum !== null && capNum >= CALL_CAP_MIN && capNum <= CALL_CAP_MAX;
   const timeoutValid = timeoutNum !== null && timeoutNum >= TIMEOUT_MIN_S && timeoutNum <= TIMEOUT_MAX_S;
+  const windowNum = parseIntStrict(windowDays);
+  const windowValid = windowNum !== null && windowNum >= WINDOW_MIN_DAYS && windowNum <= WINDOW_MAX_DAYS;
   const keyValid = keyMode !== 'set' || keyValue.trim() !== '';
-  const formValid = capValid && timeoutValid && keyValid;
+  const formValid = capValid && timeoutValid && windowValid && keyValid;
 
   const dirty =
     enabled !== settings.enabled ||
@@ -149,6 +154,7 @@ function LlmForm({ settings }: { settings: LlmSettings }) {
     model.trim() !== (settings.model ?? '') ||
     callCap.trim() !== String(settings.callCap) ||
     timeoutSec.trim() !== String(Math.round(settings.timeoutMs / 1000)) ||
+    windowDays.trim() !== String(settings.scanWindowDays) ||
     keyMode !== 'keep';
 
   const saveMutation = useMutation({
@@ -169,7 +175,7 @@ function LlmForm({ settings }: { settings: LlmSettings }) {
   });
 
   function handleSave(): void {
-    if (!formValid || capNum === null || timeoutNum === null) return;
+    if (!formValid || capNum === null || timeoutNum === null || windowNum === null) return;
     const apiKey: LlmApiKeyAction =
       keyMode === 'set' ? { action: 'set', value: keyValue.trim() } : keyMode === 'clear' ? { action: 'clear' } : { action: 'keep' };
     saveMutation.mutate({
@@ -178,6 +184,7 @@ function LlmForm({ settings }: { settings: LlmSettings }) {
       model: model.trim() === '' ? null : model.trim(),
       callCap: capNum,
       timeoutMs: timeoutNum * 1000,
+      scanWindowDays: windowNum,
       apiKey,
     });
   }
@@ -348,6 +355,24 @@ function LlmForm({ settings }: { settings: LlmSettings }) {
           </Field>
         </div>
 
+        <div className="grid grid-cols-2 gap-4">
+          <Field
+            id="llm-window"
+            label="Okno przeglądu (dni)"
+            hint={`${WINDOW_MIN_DAYS}–${WINDOW_MAX_DAYS}. Detektor ocenia fakty zatwierdzone w ostatnich N dniach (domyślnie 1). Jednorazowe podniesienie przemieli starsze wpisy — w granicach limitu wywołań.`}
+            invalid={!windowValid}
+          >
+            <Input
+              id="llm-window"
+              inputMode="numeric"
+              value={windowDays}
+              onChange={(e) => setWindowDays(e.target.value)}
+              aria-invalid={!windowValid}
+              className="tabular-nums"
+            />
+          </Field>
+        </div>
+
         {saveMutation.isError && (
           <div role="alert" className="rounded-md border border-danger bg-danger-subtle px-3 py-2 text-xs text-danger-foreground">
             {describeApiError(saveMutation.error)}
@@ -469,6 +494,8 @@ function LastRun({ lastRun }: { lastRun: LlmSettingsResponse['lastRun'] }) {
                   ['Pominięte — bezpiecznik', lastRun.counters.llmSkippedBreaker],
                   ['Pominięte — sekret', lastRun.counters.llmSkippedSecret],
                   ['Pominięte — klucz', lastRun.counters.llmSkippedKeyUnreadable],
+                  ['Propozycje — do usunięcia', lastRun.counters.llmPruneDeleteProposed],
+                  ['Propozycje — do skrócenia', lastRun.counters.llmPruneUpdateProposed],
                 ] as const
               ).map(([label, value]) => (
                 <tr key={label} className="border-b border-border last:border-b-0">

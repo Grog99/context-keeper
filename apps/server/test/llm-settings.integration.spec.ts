@@ -30,6 +30,7 @@ const BASE_UPDATE: LlmSettingsUpdate = {
   model: null,
   callCap: 100,
   timeoutMs: 30000,
+  scanWindowDays: 1,
   apiKey: { action: 'keep' },
 };
 
@@ -87,7 +88,7 @@ describe('LlmSettingsService + LlmService (integration, testcontainers) — road
   beforeEach(async () => {
     await db
       .update(llmSettings)
-      .set({ enabled: false, endpoint: null, model: null, apiKeyCiphertext: null, callCap: 100, timeoutMs: 30000 })
+      .set({ enabled: false, endpoint: null, model: null, apiKeyCiphertext: null, callCap: 100, timeoutMs: 30000, scanWindowDays: 1 })
       .where(eq(llmSettings.id, LLM_GLOBAL_SETTINGS_ID));
   });
 
@@ -103,6 +104,7 @@ describe('LlmSettingsService + LlmService (integration, testcontainers) — road
       model: null,
       callCap: 100,
       timeoutMs: 30000,
+      scanWindowDays: 1,
       apiKey: 'none',
       encryptionKeyConfigured: true,
     });
@@ -161,6 +163,7 @@ describe('LlmSettingsService + LlmService (integration, testcontainers) — road
         model: 'gpt-x',
         callCap: 50,
         timeoutMs: 20000,
+        scanWindowDays: 1,
         apiKey: { action: 'set', value: `  ${SENTINEL}  ` },
       },
       'human-dashboard',
@@ -254,6 +257,38 @@ describe('LlmSettingsService + LlmService (integration, testcontainers) — road
     const noKey = services(undefined);
     expect(await noKey.settings.getPublic()).toMatchObject({ apiKey: 'unreadable', encryptionKeyConfigured: false });
     expect(await noKey.settings.loadRunConfig()).toEqual({ state: 'key_unreadable' });
+  });
+
+  it('okno przeglądu (G6): zapis 7 trafia do loadRunConfig i budżetu, audyt niesie zmianę {from:1,to:7}', async () => {
+    const { settings, llm } = services(KEY_A);
+    const dto = await settings.update(
+      { ...BASE_UPDATE, enabled: true, endpoint: 'https://a/v1/chat/completions', model: 'm', scanWindowDays: 7 },
+      'human-dashboard',
+    );
+    expect(dto.scanWindowDays).toBe(7);
+    expect((await rawRow()).scanWindowDays).toBe(7);
+
+    const cfg = await settings.loadRunConfig();
+    expect(cfg).toMatchObject({ state: 'ready', scanWindowDays: 7 });
+    expect((await llm.openRunBudget('nightly')).scanWindowDays).toBe(7);
+
+    const events = await db.select().from(auditLog).where(eq(auditLog.eventType, 'instance_settings_changed'));
+    expect(events[events.length - 1].metadata).toMatchObject({ changes: { scanWindowDays: { from: 1, to: 7 } } });
+  });
+
+  it.each([0, 366, 1.5, -1])('okno przeglądu %s -> validation_error i brak zapisu', async (value) => {
+    const { settings } = services(KEY_A);
+    await expect(settings.update({ ...BASE_UPDATE, scanWindowDays: value }, 'human-dashboard')).rejects.toMatchObject({
+      code: 'validation_error',
+      message: expect.stringContaining('Okno przeglądu'),
+    });
+    expect((await rawRow()).scanWindowDays).toBe(1);
+  });
+
+  it('okno przeglądu: granice 1 i 365 są dozwolone', async () => {
+    const { settings } = services(KEY_A);
+    expect((await settings.update({ ...BASE_UPDATE, scanWindowDays: 365 }, 'human-dashboard')).scanWindowDays).toBe(365);
+    expect((await settings.update({ ...BASE_UPDATE, scanWindowDays: 1 }, 'human-dashboard')).scanWindowDays).toBe(1);
   });
 
   it('bez redeployu: po update świeże loadRunConfig() widzi nowy model na TEJ SAMEJ instancji serwisu', async () => {

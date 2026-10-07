@@ -36,6 +36,11 @@ export interface ProposalPayloadShape {
    * (`apps/server/src/proposals/proposals.types.ts`): nazwa i ZNORMALIZOWANY slug nowego projektu. */
   name?: string;
   slug?: string;
+  /** Werdykt detektora LLM nocnego joba (roadmap v1.6 B2, G4) — lustro `ProposalRationale`
+   * (`apps/server/src/proposals/proposals.types.ts`) na payloadach `delete` i `update`. Pola jako `string`
+   * (nie unie), by dołożenie kategorii/detektora przez B3 nie psuło typów SPA. Brak przy recency prune,
+   * update agenta i edycji człowieka. */
+  rationale?: { detector: string; category: string; reason: string };
 }
 
 /** Pozycja podpowiedzi „podobne do istniejących" (A1) — lustro `ProposalSimilarMemory`
@@ -374,6 +379,11 @@ export interface NightlyCounters {
   llmSkippedBreaker: number;
   llmSkippedSecret: number;
   llmSkippedKeyUnreadable: number;
+  // Liczniki detektora LLM prune (roadmap v1.6 B2) — lustro `LlmPruneCounters` (`nightly/nightly.types.ts`).
+  llmPruneCandidates: number;
+  llmPruneKept: number;
+  llmPruneDeleteProposed: number;
+  llmPruneUpdateProposed: number;
 }
 
 /** Lustro `LlmRunState` (`apps/server/src/llm/llm.types.ts`). */
@@ -412,6 +422,8 @@ export interface LlmSettings {
   model: string | null;
   callCap: number;
   timeoutMs: number;
+  /** Okno przeglądu detektorów LLM w dniach (B2, G6). */
+  scanWindowDays: number;
   apiKey: LlmApiKeyState;
   /** `false` → serwer nie ma `SECRETS_ENCRYPTION_KEY` (zapis klucza API odrzucany). */
   encryptionKeyConfigured: boolean;
@@ -425,7 +437,16 @@ export interface LlmSettingsResponse {
     status: 'success';
     counters: Pick<
       NightlyCounters,
-      'llmCalls' | 'llmErrors' | 'llmSkippedCap' | 'llmSkippedBreaker' | 'llmSkippedSecret' | 'llmSkippedKeyUnreadable'
+      | 'llmCalls'
+      | 'llmErrors'
+      | 'llmSkippedCap'
+      | 'llmSkippedBreaker'
+      | 'llmSkippedSecret'
+      | 'llmSkippedKeyUnreadable'
+      | 'llmPruneCandidates'
+      | 'llmPruneKept'
+      | 'llmPruneDeleteProposed'
+      | 'llmPruneUpdateProposed'
     >;
     llm: NightlyLlmReport | null;
   } | null;
@@ -439,6 +460,7 @@ export interface LlmSettingsUpdate {
   model: string | null;
   callCap: number;
   timeoutMs: number;
+  scanWindowDays: number;
   apiKey: LlmApiKeyAction;
 }
 

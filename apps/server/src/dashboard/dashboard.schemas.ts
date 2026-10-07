@@ -2,7 +2,14 @@ import { z } from 'zod';
 import { auditEventType, memoryKind, memoryScope, memoryStatus, proposalOrigin, proposalStatus, proposalType, relationType } from '../db/schema/enums';
 import { AUDIT_QUERY_MAX_LIMIT } from '../audit/audit.service';
 import { decodeKeysetCursor } from '../common/keyset-cursor';
-import { LLM_CALL_CAP_MAX, LLM_CALL_CAP_MIN, LLM_TIMEOUT_MAX_MS, LLM_TIMEOUT_MIN_MS } from '../llm/llm.constants';
+import {
+  LLM_CALL_CAP_MAX,
+  LLM_CALL_CAP_MIN,
+  LLM_SCAN_WINDOW_MAX_DAYS,
+  LLM_SCAN_WINDOW_MIN_DAYS,
+  LLM_TIMEOUT_MAX_MS,
+  LLM_TIMEOUT_MIN_MS,
+} from '../llm/llm.constants';
 import { isValidLlmEndpointUrl } from '../llm/llm-settings.service';
 import { HEADER_MAX_LEN } from '../memory/validation';
 import { LIST_SCOPES } from '../memory/memory-admin.service';
@@ -262,6 +269,7 @@ export const llmSettingsBody = z.strictObject({
   model: z.string().trim().max(200).nullable(),
   callCap: z.number().int().min(LLM_CALL_CAP_MIN).max(LLM_CALL_CAP_MAX),
   timeoutMs: z.number().int().min(LLM_TIMEOUT_MIN_MS).max(LLM_TIMEOUT_MAX_MS),
+  scanWindowDays: z.number().int().min(LLM_SCAN_WINDOW_MIN_DAYS).max(LLM_SCAN_WINDOW_MAX_DAYS),
   apiKey: z.discriminatedUnion('action', [
     z.strictObject({ action: z.literal('keep') }),
     z.strictObject({ action: z.literal('set'), value: z.string().trim().min(1).max(4096) }),

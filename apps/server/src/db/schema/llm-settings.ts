@@ -16,7 +16,10 @@ import { projects } from './projects';
  * `api_key_ciphertext`: szyfrogram `v1:<iv>:<tag>:<ct>` (AES-256-GCM, `common/secret-box.ts`) — jawny
  * klucz nie trafia do bazy ani do `pg_dump`. Nigdy nie wychodzi przez REST (write-only, G6).
  *
- * CHECK-i dublują walidację serwisu (obrona w głębi): zakresy cap/timeout i spójność „włączony ⇒
+ * `scan_window_days` (ticket `nightly-llm-prune`, G6): szerokość okna przeglądu detektorów LLM (B2/B3) po
+ * `memories.created_at`, domyślnie 1 dzień, zakres 1–365; czytana świeżo per przebieg razem z cap/timeout.
+ *
+ * CHECK-i dublują walidację serwisu (obrona w głębi): zakresy cap/timeout/okna i spójność „włączony ⇒
  * endpoint i model" (G14) — niekompletna konfiguracja nie da się zapisać jako włączona nawet z pominięciem API.
  */
 export const llmSettings = pgTable(
@@ -30,12 +33,15 @@ export const llmSettings = pgTable(
     apiKeyCiphertext: text('api_key_ciphertext'),
     callCap: integer('call_cap').notNull().default(100),
     timeoutMs: integer('timeout_ms').notNull().default(30000),
+    scanWindowDays: integer('scan_window_days').notNull().default(1),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     unique('llm_settings_project_id_key').on(t.projectId).nullsNotDistinct(),
     check('llm_settings_call_cap_check', sql`${t.callCap} BETWEEN 1 AND 10000`),
     check('llm_settings_timeout_ms_check', sql`${t.timeoutMs} BETWEEN 1000 AND 300000`),
+    // Literały 1/365 dublują LLM_SCAN_WINDOW_MIN_DAYS/MAX_DAYS (`llm.constants.ts`) — tak jak cap/timeout.
+    check('llm_settings_scan_window_days_check', sql`${t.scanWindowDays} BETWEEN 1 AND 365`),
     check(
       'llm_settings_enabled_complete_check',
       sql`NOT ${t.enabled} OR (${t.endpoint} IS NOT NULL AND ${t.model} IS NOT NULL)`,
