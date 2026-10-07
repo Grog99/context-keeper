@@ -15,9 +15,11 @@ import {
   proposals,
   stagingEmbeddings,
   type MemoryRow,
+  type SimilarMemoryHit,
 } from '../db/schema';
+import { withTimeout } from '../common/with-timeout';
 import { findAnnNeighbors } from '../embeddings/ann-search';
-import { EmbeddingService, toPgVectorLiteral } from '../embeddings/embedding.service';
+import { EmbeddingService, toPgVectorLiteral, type EmbedMemoryResult } from '../embeddings/embedding.service';
 import type { ProjectContext } from '../projects/projects.service';
 import type { RelationPayloadEntry, UpdatePayload } from '../proposals/proposals.types';
 import { UsageService } from '../usage/usage.service';
@@ -37,6 +39,7 @@ import type {
 } from './memory.types';
 import { normalizeHeader, normalizeTags, validateBody, validateEventTime } from './validation';
 import { isReadable, readScopeCondition, type ReadScope } from './read-scope';
+import { findNearDuplicates } from './near-duplicates';
 import { rrfFuse } from './rrf';
 
 const DEFAULT_SEARCH_KINDS: MemoryKindFilter[] = ['fact', 'document'];
@@ -188,8 +191,9 @@ export class MemoryService {
 
     // Faza 4 seam: staged wektor (zapisywany niżej, best-effort) czeka na PROMOCJĘ do `embeddings`
     // przy akceptacji proposala — promocja żyje w `ProposalsService.approve` (Faza 4), NIE tutaj.
-    // FR-M3 hint "podobne do" wciąż nie jest zbudowany (poza zakresem Fazy 4) — dzisiejszy staged
-    // wektor to tylko dedup-hint na przyszłość, nieużywany jeszcze przy klasyfikacji create/duplicate.
+    // Hint FR-M3 "podobne do" (roadmap v1.6, A1) liczymy TUTAJ, na tym samym wektorze, zaraz po
+    // embeddingu (niżej) — wynik trafia do `proposals.similar_memories`. Advisory: nic nie jest
+    // suppresowane ani odrzucane po podobieństwie, status zwrotny `pending` się nie zmienia.
     const mintedMemoryId = generateId(ID_PREFIX.memory);
     const proposalId = generateId(ID_PREFIX.proposal);
     // Attach-on-save (roadmap v1.2): walidowane TERAZ (zanim proposal w ogóle powstanie — spójnie
@@ -229,7 +233,15 @@ export class MemoryService {
 
     // Best-effort staged embedding (§7 tech-stack "embedding nigdy nie blokuje proposala"):
     // provider down/timeout -> `embedMemoryBestEffort` zwraca null, proposal już powyżej powstał.
-    const staged = await this.embedding.embedMemoryBestEffort(kind, header, body, tags);
+    // Embedding I wyszukanie podobnych dzielą JEDEN twardy budżet `EMBEDDING_SAVE_TIMEOUT_MS` (deadline
+    // liczony od teraz) — przekroczenie = stan "nie policzono" (NULL), nigdy wolniejszy zapis.
+    const budgetMs = this.config.get('EMBEDDING_SAVE_TIMEOUT_MS');
+    const deadline = Date.now() + budgetMs;
+    const staged = await this.embedding.embedMemoryBestEffort(kind, header, body, tags, budgetMs);
+    // Detekcja prawie-duplikatów (A1): tylko fact/document (event = zawsze NULL, G4); `null` = nie
+    // policzono (brak wektora / deadline / błąd bazy), `[]` = policzono, brak podobnych.
+    const similar =
+      staged && kind !== 'event' ? await this.detectNearDuplicates(staged, kind, ctx.projectId, deadline) : null;
     if (staged) {
       await this.db.insert(stagingEmbeddings).values(
         staged.chunks.map((c) => ({
@@ -243,7 +255,57 @@ export class MemoryService {
       );
     }
 
+    // Kolejność insert → compute → UPDATE: proposal był już wstawiony do bazy przed jakimkolwiek
+    // wywołaniem providera/ANN (inwariant "proposal powstaje zawsze"), a NULL zostaje prawdziwy przy
+    // każdej awarii. `updatedAt` celowo NIE ruszamy — to nie jest edycja treści.
+    if (similar !== null) {
+      try {
+        await this.db.update(proposals).set({ similarMemories: similar }).where(eq(proposals.id, proposalId));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`near-duplicate: zapis wyniku nie powiódł się (NULL zostaje): ${message}`);
+      }
+    }
+
+    // A2 (bezpiecznik auto mode) podepnie się TU — `similar` jest już znane w obrębie tego samego wywołania.
     return { id: mintedMemoryId, status: 'pending' };
+  }
+
+  /**
+   * Podpowiedź „podobne do istniejących" (A1) w ramach POZOSTAŁEGO budżetu zapisu. Fail-open: brak
+   * budżetu, timeout albo błąd bazy → `null` ("nie policzono"), nigdy wyjątek — zapis nie może przez
+   * to paść. `withTimeout` nie przerywa zapytania w locie, ale `findNearDuplicates` sprawdza deadline
+   * między zapytaniami, więc po przekroczeniu budżetu w locie jest co najwyżej jedno.
+   */
+  private async detectNearDuplicates(
+    staged: EmbedMemoryResult,
+    kind: 'fact' | 'document',
+    projectId: string,
+    deadline: number,
+  ): Promise<SimilarMemoryHit[] | null> {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      this.logger.warn('near-duplicate fail-open (NULL): budżet zapisu wyczerpany przez embedding');
+      return null;
+    }
+    try {
+      return await withTimeout(
+        findNearDuplicates({
+          db: this.db,
+          queryVectors: staged.chunks.map((c) => c.vector),
+          embeddingModel: staged.model,
+          kind,
+          projectId,
+          maxDistance: this.config.get('NEAR_DUPLICATE_DISTANCE'),
+          deadline,
+        }),
+        remaining,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`near-duplicate fail-open (NULL): ${message}`);
+      return null;
+    }
   }
 
   /**
@@ -383,7 +445,9 @@ export class MemoryService {
       metadata: { proposalId, kind, type: 'update', supersedes: targetId, ...this.attribution(ctx) },
     });
 
-    // Best-effort staged embedding na POPRAWIONEJ treści — sam wzorzec co create-path wyżej.
+    // Best-effort staged embedding na POPRAWIONEJ treści — sam wzorzec co create-path wyżej. BEZ
+    // detekcji prawie-duplikatów: korekta z definicji przypomina swój cel, więc `similar_memories`
+    // zostaje NULL (ticket near-duplicate-detection, G3).
     const staged = await this.embedding.embedMemoryBestEffort(kind, header, body, tags);
     if (staged) {
       await this.db.insert(stagingEmbeddings).values(
