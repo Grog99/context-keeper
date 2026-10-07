@@ -1,6 +1,7 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowUpRight, RefreshCw, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   AlertDialog,
@@ -21,6 +22,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Textarea } from '../components/ui/textarea';
 import { Input } from '../components/ui/input';
 import { BulkFailuresDialog } from '../components/BulkFailuresDialog';
+import { DedupHint } from '../components/DedupHint';
 import { DiffView } from '../components/DiffView';
 import { EmptyState } from '../components/EmptyState';
 import { KindMarker } from '../components/KindMarker';
@@ -232,6 +234,8 @@ export function QueueScreen() {
   const selectedProposals = proposalsList.filter((p) => selectedIds.has(p.id));
   const selectedCount = selectedProposals.length;
   const selectedStaleCount = selectedProposals.filter((p) => p.stale).length;
+  // A1 (G10): zaznaczone propozycje z podpowiedzią „podobne do istniejących" — bulk approve nie otwiera detalu.
+  const selectedSimilarCount = selectedProposals.filter((p) => p.hasSimilar).length;
   const allSelected = proposalsList.length > 0 && proposalsList.every((p) => selectedIds.has(p.id));
   const selectAllState: boolean | 'indeterminate' = allSelected ? true : selectedCount > 0 ? 'indeterminate' : false;
   const bulkFailuresOpen = bulkFailures !== null;
@@ -536,6 +540,7 @@ export function QueueScreen() {
                   tags={p.summary.tags}
                   createdAt={p.createdAt}
                   stale={p.stale}
+                  similarHint={p.hasSimilar}
                   selected={p.id === selectedId}
                   onClick={() => setSelectedId(p.id)}
                   selectable
@@ -643,6 +648,16 @@ export function QueueScreen() {
                   {selectedStaleCount} {pluralProposals(selectedStaleCount)} nieaktualnych (stale)
                 </b>{' '}
                 — ich zatwierdzenie się nie powiedzie; zostaną wskazane w podsumowaniu i zostaną zaznaczone.
+              </>
+            )}
+            {selectedSimilarCount > 0 && (
+              <>
+                {' '}
+                <b className="font-semibold text-info">
+                  {selectedSimilarCount} {pluralProposals(selectedSimilarCount)} z podpowiedzią „podobne do
+                  istniejących"
+                </b>{' '}
+                — zatwierdzenie bez otwarcia detalu może wprowadzić prawie-duplikat.
               </>
             )}
           </AlertDialogDescription>
@@ -766,6 +781,10 @@ function ProposalDetail({
   const tags = effective.tags ?? beforeMemory?.tags ?? [];
   // Patch `update` bez zmiany kind i `delete` nie niosą `kind` — wtedy kind pamięci, której dotyczą.
   const kind = effective.kind ?? beforeMemory?.kind;
+  const navigate = useNavigate();
+  // A1: tylko wciąż dostępne (approved) pamięci z podpowiedzi — zarchiwizowane/usunięte znikają po cichu;
+  // null (nie policzono) i [] (brak podobnych) → pusta lista → blok się nie renderuje.
+  const similar = (proposal.similarMemories ?? []).filter((s) => s.available);
 
   return (
     <>
@@ -798,6 +817,9 @@ function ProposalDetail({
             </>
           )}
         </div>
+
+        {/* Podpowiedź A1 pod nagłówkiem, PRZED relacjami i zakładkami (§9.1); klik w id → podgląd pamięci. */}
+        <DedupHint similarIds={similar.map((s) => s.id)} onSelect={(id) => navigate(`/pamiec?id=${id}`)} />
 
         {effective.relations && effective.relations.length > 0 && (
           <ProposalRelations relations={effective.relations} headers={relationHeaders} />
@@ -851,6 +873,11 @@ function ProposalDetail({
           onEdit={onEdit}
           onApproveAsReplacement={onApproveAsReplacement}
           searchSupersedeCandidates={searchSupersedeCandidates}
+          supersedeSuggestions={
+            proposal.type === 'create'
+              ? similar.map((s) => ({ id: s.id, header: s.header ?? s.id, scope: s.scope ?? undefined }))
+              : undefined
+          }
           stale={proposal.stale}
           staleReason={proposal.stale ? `Zmienione od utworzenia propozycji: ${proposal.staleIds.join(', ')}.` : undefined}
           busy={busy}

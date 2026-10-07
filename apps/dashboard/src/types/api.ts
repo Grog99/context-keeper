@@ -38,6 +38,17 @@ export interface ProposalPayloadShape {
   slug?: string;
 }
 
+/** Pozycja podpowiedzi „podobne do istniejących" (A1) — lustro `ProposalSimilarMemory`
+ * (`apps/server/src/proposals/proposals.types.ts`). `available:false` = pamięć zarchiwizowana / przycięta /
+ * usunięta po zapisie propozycji (`header`/`scope` wtedy `null`) — UI pokazuje tylko dostępne. */
+export interface ProposalSimilarMemory {
+  id: string;
+  distance: number;
+  available: boolean;
+  header: string | null;
+  scope: MemoryScope | null;
+}
+
 export interface ProposalView {
   id: string;
   type: ProposalType;
@@ -54,6 +65,8 @@ export interface ProposalView {
   updatedAt: string;
   stale: boolean;
   staleIds: string[];
+  /** A1: `null` = nie policzono, `[]` = policzono, brak podobnych, lista = ≤3 pozycje rosnąco po odległości. */
+  similarMemories: ProposalSimilarMemory[] | null;
 }
 
 /** Pola wiersza kolejki wyprowadzone SERWEROWO z efektywnego payloadu (`coalesce(edited_payload,
@@ -70,7 +83,7 @@ export interface ProposalListSummary {
 
 /** Lekki element listy kolejki (`GET /api/proposals`) — lustro `ProposalListItem`; celowo BEZ
  * `payload`/`editedPayload`/`baseVersions`/`affectedIds` (pełny widok: `GET /api/proposals/:id` ->
- * `ProposalView`). Znacznik podpowiedzi prawie-duplikatu (A1) dojdzie tu razem z projekcją SQL. */
+ * `ProposalView`). Znacznik podpowiedzi prawie-duplikatu (A1) to `hasSimilar`. */
 export interface ProposalListItem {
   id: string;
   type: ProposalType;
@@ -84,6 +97,8 @@ export interface ProposalListItem {
   /** `edited_payload IS NOT NULL`. */
   edited: boolean;
   stale: boolean;
+  /** A1: podpowiedź ma choć jedną wciąż zatwierdzoną pamięć (ta sama reguła co `available` w detalu). */
+  hasSimilar: boolean;
 }
 
 /** Strona `GET /api/proposals` — lustro `ProposalListPage`. `total` liczone z TYMI SAMYMI filtrami co

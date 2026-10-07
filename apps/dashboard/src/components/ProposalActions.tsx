@@ -1,5 +1,7 @@
 import { Check, ChevronDown, Lock, Pencil, Replace, X } from 'lucide-react';
 import { useState } from 'react';
+import type { MemoryScope } from '../types/domain';
+import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from './ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
@@ -7,15 +9,31 @@ import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 export interface SupersedeCandidate {
   id: string;
   header: string;
+  /** Zasięg kandydata — `global` dostaje znaczek (zamiennik pamięci globalnej dotyczy wszystkich projektów). */
+  scope?: MemoryScope;
+}
+
+/** Wiersz kandydata — wspólny dla wyników wyszukiwania i grupy „Podobne (podpowiedź)". */
+function SupersedeCandidateItem({ candidate, onPick }: { candidate: SupersedeCandidate; onPick: () => void }) {
+  return (
+    <CommandItem value={candidate.id} onSelect={onPick}>
+      <span className="min-w-0 flex-1 truncate">{candidate.header}</span>
+      {candidate.scope === 'global' && <Badge variant="neutral" className="h-[18px] shrink-0 px-1.5">global</Badge>}
+      <span className="ml-auto shrink-0 font-mono text-xs text-faint">{candidate.id}</span>
+    </CommandItem>
+  );
 }
 
 function SupersedeSplitButton({
   onSelect,
   search,
+  suggested,
   disabled,
 }: {
   onSelect: (id: string) => void;
   search?: (query: string) => Promise<SupersedeCandidate[]>;
+  /** Pamięci z podpowiedzi A1 — widoczne bez wpisywania frazy (dopóki pole wyszukiwania jest puste). */
+  suggested?: SupersedeCandidate[];
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -37,6 +55,11 @@ function SupersedeSplitButton({
     }
   }
 
+  function pick(id: string) {
+    onSelect(id);
+    setOpen(false);
+  }
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -53,19 +76,16 @@ function SupersedeSplitButton({
           <CommandInput placeholder="Szukaj pamięci do zastąpienia…" value={query} onValueChange={handleQueryChange} />
           <CommandList>
             <CommandEmpty>{loading ? 'Szukam…' : 'Brak wyników.'}</CommandEmpty>
+            {query.trim() === '' && suggested && suggested.length > 0 && (
+              <CommandGroup heading="Podobne (podpowiedź)">
+                {suggested.map((candidate) => (
+                  <SupersedeCandidateItem key={candidate.id} candidate={candidate} onPick={() => pick(candidate.id)} />
+                ))}
+              </CommandGroup>
+            )}
             <CommandGroup>
               {results.map((candidate) => (
-                <CommandItem
-                  key={candidate.id}
-                  value={candidate.id}
-                  onSelect={() => {
-                    onSelect(candidate.id);
-                    setOpen(false);
-                  }}
-                >
-                  <span className="min-w-0 flex-1 truncate">{candidate.header}</span>
-                  <span className="ml-auto shrink-0 font-mono text-xs text-faint">{candidate.id}</span>
-                </CommandItem>
+                <SupersedeCandidateItem key={candidate.id} candidate={candidate} onPick={() => pick(candidate.id)} />
               ))}
             </CommandGroup>
           </CommandList>
@@ -82,6 +102,8 @@ export interface ProposalActionsProps {
   onApproveAsReplacement: (targetId: string) => void;
   /** Wyszukiwanie kandydatów do supersession (§8.2, Q8 planu) — bez precomputed listy. */
   searchSupersedeCandidates?: (query: string) => Promise<SupersedeCandidate[]>;
+  /** Kandydaci z podpowiedzi „podobne do istniejących" (A1) — grupa „Podobne" na górze listy, bez wpisywania frazy. */
+  supersedeSuggestions?: SupersedeCandidate[];
   stale?: boolean;
   staleReason?: string;
   busy?: boolean;
@@ -101,6 +123,7 @@ export function ProposalActions({
   onEdit,
   onApproveAsReplacement,
   searchSupersedeCandidates,
+  supersedeSuggestions,
   stale,
   staleReason,
   busy,
@@ -136,7 +159,12 @@ export function ProposalActions({
           </Button>
         )}
         {canSupersede && (
-          <SupersedeSplitButton onSelect={onApproveAsReplacement} search={searchSupersedeCandidates} disabled={busy} />
+          <SupersedeSplitButton
+            onSelect={onApproveAsReplacement}
+            search={searchSupersedeCandidates}
+            suggested={supersedeSuggestions}
+            disabled={busy}
+          />
         )}
         {position && <span className="ml-auto font-mono text-[11px] text-faint">{position}</span>}
       </div>

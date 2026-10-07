@@ -318,7 +318,7 @@ Bazujemy na shadcn (kopiowane do repo → pełna kontrola). Poniżej — bazowe 
 
 **`MonoId`** — `mem_…`/`ck_…`/`rev_…` w mono `text-xs`, klik = kopiuj (toast). Token zawsze maskowany poza jednorazowym reveal.
 
-**`ProposalRow`** — wiersz kolejki `h-12`: `[StatusChip] [KindMarker] [type ikona] Header (truncate) … [OriginPath] [tagi ≤2 + „+N"] [czas rel.]`. Stale → dodatkowy `danger` badge po prawej. Hover `surface-muted`, aktywny `accent-subtle` + lewy pasek `2px` iris. `kind` (v1.4) tymi samymi kanałami co wiersz pamięci (§2.3): `KindGutter` przy lewej krawędzi (ustępuje paskowi zaznaczenia) + `KindMarker`; propozycja bez `kind` w payloadzie (patch `update` bez zmiany kind, `delete`) dostaje pusty slot 22px, żeby tytuły się nie rozjeżdżały.
+**`ProposalRow`** — wiersz kolejki `h-12`: `[StatusChip] [KindMarker] [type ikona] Header (truncate) … [OriginPath] [tagi ≤2 + „+N"] [czas rel.]`. Stale → dodatkowy `danger` badge po prawej. Hover `surface-muted`, aktywny `accent-subtle` + lewy pasek `2px` iris. `kind` (v1.4) tymi samymi kanałami co wiersz pamięci (§2.3): `KindGutter` przy lewej krawędzi (ustępuje paskowi zaznaczenia) + `KindMarker`; propozycja bez `kind` w payloadzie (patch `update` bez zmiany kind, `delete`) dostaje pusty slot 22px, żeby tytuły się nie rozjeżdżały. Podpowiedź „podobne do istniejących" (v1.6, A1) → ikona `sparkles` w kolorze `info` tuż za tytułem (`similarHint`; tooltip + `aria-label`) — sygnał dla recenzenta zatwierdzającego bez otwierania detalu.
 
 **`DiffView`** — **zależny od `type`** (FR-D1). Najbardziej produktowy komponent:
 
@@ -340,9 +340,9 @@ A11y (§10, P2 — kolor nigdy nie jest jedynym sygnałem): usunięcia/dodania n
 
 Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashboard/package.json` — świadomie **bez** `@types/diff` (ten pakiet typuje starszy kształt v5 i przesłoniłby własne typy v9 dołączone w paczce; `moduleResolution: "Bundler"` poprawnie rozwiązuje jej mapę `exports`).
 
-**`ProposalActions`** — sticky bar u dołu detalu: `Zatwierdź` (primary, skrót **A**), `Odrzuć` (ghost-danger, **R**), `Edytuj` (secondary, **E**), oraz split-button **`Zatwierdź jako zamiennik ▾`** (**S**, wybór X spośród „similar/affected"). Przy `stale` → primary **disabled** + inline alert z powodem i CTA „Przejrzyj różnicę / Zaktualizuj bazę".
+**`ProposalActions`** — sticky bar u dołu detalu: `Zatwierdź` (primary, skrót **A**), `Odrzuć` (ghost-danger, **R**), `Edytuj` (secondary, **E**), oraz split-button **`Zatwierdź jako zamiennik ▾`** (**S**, wybór X spośród „similar/affected"). Gdy propozycja ma podpowiedź A1 (`supersedeSuggestions`), lista kandydatów zaczyna się grupą **„Podobne (podpowiedź)"** — widoczną bez wpisywania frazy (dopóki pole wyszukiwania jest puste; po wpisaniu fraza przejmuje listę); kandydat z zasięgiem `global` ma znaczek `global`. Przy `stale` → primary **disabled** + inline alert z powodem i CTA „Przejrzyj różnicę / Zaktualizuj bazę".
 
-**`DedupHint`** — pod headerem, `info` alert inline: `sparkles` + „Podobne do: `mem_x`, `mem_y`" (klik → podgląd). Nie blokuje (advisory, FR-M3).
+**`DedupHint`** — pod headerem, `info` alert inline: `sparkles` + „Podobne do: `mem_x`, `mem_y`" (klik → podgląd). Nie blokuje (advisory, FR-M3). W kolejce (v1.6, A1) id pochodzą z `proposals.similar_memories`; klik nawiguje do `/pamiec?id=<id>` (przeglądarka pamięci); pozycje niedostępne (pamięć zarchiwizowana / usunięta po zapisie) są pomijane, a gdy nie zostaje żadna — blok się nie renderuje.
 
 **`RevisionTimeline`** — pionowa oś w detalu pamięci: każda rewizja = `rev_…` (mono), autor (origin), czas, akcja (`created`/`edited`/`promote`/`superseded-by`). Supersession linkuje do zamiennika.
 
@@ -417,7 +417,11 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
   listy); lista `ProposalRow` z własnym checkboxem per wiersz (klik w checkbox rozłączny od klika w
   wiersz — pierwszy toggle'uje zaznaczenie, drugi otwiera podgląd); `QueueBulkBar` pod paskiem filtrów,
   WYŁĄCZNIE gdy zaznaczenie niepuste — licznik + „Zatwierdź (N)"/„Odrzuć (N)"/„Anuluj zaznaczenie".
-  Badge stale widoczny na wierszu.
+  Badge stale widoczny na wierszu. Wiersz z podpowiedzią „podobne do istniejących" (v1.6, A1/G10) ma
+  ikonę `sparkles` (`info`) za tytułem; `hasSimilar` jest liczone serwerowo i uwzględnia tylko wciąż
+  zatwierdzone pamięci, więc znacznik zgadza się z blokiem w detalu. Dialog bulk approve dopisuje
+  „N propozycji z podpowiedzią „podobne do istniejących" — zatwierdzenie bez otwarcia detalu może
+  wprowadzić prawie-duplikat" (kolor `info`, tylko gdy N > 0, jak ostrzeżenie o stale).
   **Skala (nightly-scale):** lista to **jedna strona najstarszych oczekujących** (FIFO, domyślnie 100 —
   serwer zwraca lekkie elementy bez `payload`; tytuł/`kind`/tagi wiersza pochodzą z `summary`), bez
   „Załaduj więcej" i bez przewijania nieskończonego. W pasku filtrów, przy przycisku odświeżania, stoi
@@ -427,7 +431,7 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
   rozstrzygnięciu widocznych" (zatwierdzone znikają, następne wskakują przy pollingu co 15 s).
   **Bulk i „zaznacz wszystkie" działają wyłącznie na widocznych wierszach** (inwariant z v1.3 bez zmian:
   „wszystkie" nigdy nie znaczy „wszystkie w bazie"; aria-label checkboxa podaje liczbę widocznych).
-- **Prawa:** header + `OriginPath` + `type` + `kind` (`KindMarker` + nazwa, v1.4; dla `update`/`delete` bez `kind` w payloadzie — kind pamięci, której dotyczą) + tagi; `DedupHint` (jeśli jest); Tabs `Diff`/`Metadane`/`Rewizje`; sticky `ProposalActions`. Detal ładuje się po wyborze wiersza z `GET /api/proposals/:id` (lista jest lekka) — do czasu odpowiedzi szkielet, przy błędzie stan błędu z „Spróbuj ponownie"; `A`/`R`/`E`/`S` i przyciski akcji działają dopiero na załadowanym detalu zaznaczonego wiersza; detal sąsiadów ±1 jest prefetchowany przy `j/k`; pozycja w `ProposalActions` to `numer wiersza / total`.
+- **Prawa:** header + `OriginPath` + `type` + `kind` (`KindMarker` + nazwa, v1.4; dla `update`/`delete` bez `kind` w payloadzie — kind pamięci, której dotyczą) + tagi; `DedupHint` (jeśli podpowiedź A1 ma dostępne pamięci; bezpośrednio pod nagłówkiem, przed relacjami i zakładkami); Tabs `Diff`/`Metadane`/`Rewizje`; sticky `ProposalActions` (pamięci z podpowiedzi są kandydatami „Zatwierdź jako zamiennik" bez wpisywania frazy). Detal ładuje się po wyborze wiersza z `GET /api/proposals/:id` (lista jest lekka) — do czasu odpowiedzi szkielet, przy błędzie stan błędu z „Spróbuj ponownie"; `A`/`R`/`E`/`S` i przyciski akcji działają dopiero na załadowanym detalu zaznaczonego wiersza; detal sąsiadów ±1 jest prefetchowany przy `j/k`; pozycja w `ProposalActions` to `numer wiersza / total`.
 - **Stany specjalne:** `stale` → primary disabled + alert danger z powodem; `edit-before-approve` → header/body stają się edytowalne inline, akcja zmienia się na „Zatwierdź z edycją" (badge „approved with edits"). Bulk (roadmap v1.3): potwierdzenie przez `AlertDialog` (ostrzeżenie o `stale` dla approve, wspólne pole `reason` dla reject); po operacji sukcesy znikają z zaznaczenia, porażki zostają zaznaczone i widoczne przez „Szczegóły" na toaście (`BulkFailuresDialog`, id + kod + komunikat).
 - **Propozycja `create_project` (v1.5, onboarding przez MCP)** — nie niesie treści pamięci. Tytuł wiersza i detalu: „Nowy projekt: ‹nazwa› (‹slug›)” (`projectProposalTitle`), ikona wiersza `FolderPlus`; brak `KindMarker` (bez `kind`). Tab „Diff” pokazuje zamiast `DiffView` podgląd `ProjectProposalPreview`: `dl` Nazwa / Slug (mono) / Nagłówek MCP `X-Context-Keeper-Project: ‹slug›` + notka w ramce: zatwierdzenie utworzy projekt **bez tokena**, agenci z tokenem konta i tym nagłówkiem zaczną pracować od razu, token projektowy (np. CI) można wydać później na ekranie Projekty, odrzucenie zwalnia slug. Tab „Rewizje”: „Nie dotyczy”. `ProposalActions` bez „Edytuj” i „Zatwierdź jako zamiennik” (`PROPOSAL_CAPABILITIES` w `lib/proposals.ts`). Typ `create_project` jest w filtrze `type`. Approve (pojedynczy i bulk) odświeża listę projektów — `ContextSwitcher` i ekran Projekty widzą nowy projekt bez przeładowania. Propozycja ma `scope='global'`, `project_id=NULL`, więc w przełączniku kontekstu widać ją pod „Global”/„Wszystkie” (osobny filtr → backlog).
 - **Klawiatura:** `j/k` nawigacja, `A/R/E`, `S` zamiennik, `x` zaznacz/odznacz (bulk, roadmap v1.3 — `A`/`R` świadomie zostają jednoelementowe, bulk zawsze wymaga jawnego kliknięcia), `Enter` otwiera, `/` search (dla `create_project` `E`/`S` nieaktywne).

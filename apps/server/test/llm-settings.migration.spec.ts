@@ -7,12 +7,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { migrateUpTo, REAL_MIGRATIONS_FOLDER } from './helpers/migrations';
 
 /**
- * Migracja 0016 (roadmap v1.6, ticket nightly-llm-provider: tabela `llm_settings` + dwie wartości
+ * Migracja 0017 (roadmap v1.6, ticket nightly-llm-provider: tabela `llm_settings` + dwie wartości
  * `audit_event_type`) jako REALNY UPGRADE z 0015 na bazie z danymi — nie świeża baza. Dane (projekt,
  * pamięć, wpis audytu) powstają PRZED migracją i muszą przeżyć nietknięte; zasiew wiersza instancji
  * i oba CHECK-i / unikalność `NULLS NOT DISTINCT` muszą działać na bazie po upgrade'dzie.
  */
-describe('migracja 0016 — upgrade 0015 → 0016 na niepustej bazie (testcontainers)', () => {
+describe('migracja 0017 — upgrade 0016 → 0017 na niepustej bazie (testcontainers)', () => {
   let container: StartedPostgreSqlContainer;
   let pool: Pool;
   let tmpFolder: string | undefined;
@@ -21,7 +21,7 @@ describe('migracja 0016 — upgrade 0015 → 0016 na niepustej bazie (testcontai
     container = await new PostgreSqlContainer('pgvector/pgvector:pg18-trixie').start();
     pool = new Pool({ connectionString: container.getConnectionUri() });
 
-    tmpFolder = await migrateUpTo(pool, '0016_');
+    tmpFolder = await migrateUpTo(pool, '0017_');
 
     await pool.query("INSERT INTO projects (id, name, slug) VALUES ('proj_a', 'A', 'proj-a')");
     await pool.query(
@@ -32,7 +32,7 @@ describe('migracja 0016 — upgrade 0015 → 0016 na niepustej bazie (testcontai
       `INSERT INTO audit_log (id, event_type, actor, affected_ids) VALUES ('evt_a', 'human_edit', 'human-dashboard', ARRAY['mem_a'])`,
     );
 
-    // Realny upgrade: tylko wpis 0016 (osobna transakcja drizzle) nad istniejącymi wierszami.
+    // Realny upgrade: tylko wpis 0017 (osobna transakcja drizzle) nad istniejącymi wierszami.
     await migrate(drizzle(pool), { migrationsFolder: REAL_MIGRATIONS_FOLDER });
   });
 

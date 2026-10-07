@@ -149,6 +149,7 @@ export function DevPreviewScreen() {
             projectName="acme"
             tags={['infra', 'database', 'postgres']}
             createdAt={minutesAgo(2)}
+            similarHint
             selected={selectedRow === 'a'}
             onClick={() => setSelectedRow('a')}
           />
@@ -299,6 +300,10 @@ export function DevPreviewScreen() {
             onEdit={() => {}}
             onApproveAsReplacement={() => {}}
             searchSupersedeCandidates={fakeSearch}
+            supersedeSuggestions={[
+              { id: 'mem_a41f', header: 'Klient acme używa PostgreSQL 15 na produkcji' },
+              { id: 'mem_88ac0f', header: 'Domyślna wersja PostgreSQL w projektach', scope: 'global' },
+            ]}
             position="1 / 4"
           />
         </div>

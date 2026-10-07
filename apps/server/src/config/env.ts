@@ -109,6 +109,18 @@ export const envSchema = z
     TAGS_MAX: z.coerce.number().int().positive().default(10),
     TAG_MAX_LEN: z.coerce.number().int().positive().default(40),
 
+    // Detekcja prawie-duplikatów przy zapisie (roadmap v1.6, A1). Próg "podejrzanego duplikatu" —
+    // dystans kosinusowy `<=>` między nową propozycją agenta a zatwierdzoną pamięcią: poniżej/równo =
+    // wpis w podpowiedzi „podobne do istniejących" (`proposals.similar_memories`), a później (A2)
+    // sygnał bezpiecznika auto mode. NIEZALEŻNY od NIGHTLY_DEDUP_DISTANCE (tamten celowo wąski, "scal
+    // wąsko"; ten ma łapać parafrazy). Wartość jest SPECYFICZNA DLA MODELU embeddingów:
+    // - domyślne 0.20 zmierzone dla bge-m3 (domyślny preset `multilingual`, 2026-10-07): łapie 86%
+    //   parafraz (36/42), 0% niepowiązanych próbek (najbliższa niepowiązana: 0.311);
+    // - preset `api` z text-embedding-3-small (żywa instancja dogfood) MUSI jawnie ustawić
+    //   NEAR_DUPLICATE_DISTANCE=0.13 w env (Coolify): 79% parafraz PL→PL (23/29), 0 fałszywych
+    //   alarmów w tle (kolejne różne pary dopiero od 0.138); przy 0.20 ten model dawałby szum.
+    NEAR_DUPLICATE_DISTANCE: z.coerce.number().positive().max(2).default(0.2),
+
     // Nocny job (§8, Faza 6). NIGHTLY_CRON/NIGHTLY_TZ to kontrakt dla ZEWNĘTRZNEGO schedulera
     // (Faza 8, installer/infra) — `run-nightly` CLI ich nie czyta, odpala się natychmiast po
     // wywołaniu. Progi poniżej to knoby dostrajane na realnych danych (PRD §11), wartości domyślne

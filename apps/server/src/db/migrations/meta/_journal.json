@@ -117,8 +117,15 @@
     {
       "idx": 16,
       "version": "7",
-      "when": 1791321332067,
-      "tag": "0016_llm_settings",
+      "when": 1791321336484,
+      "tag": "0016_proposals_similar_memories",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791353924489,
+      "tag": "0017_llm_settings",
       "breakpoints": true
     }
   ]

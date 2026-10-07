@@ -1,6 +1,6 @@
 {
-  "id": "3bd03229-7b9c-446d-8805-967af91eef9c",
-  "prevId": "ad6e4835-130f-43f7-9d21-cefba35f2beb",
+  "id": "4a728040-ea92-4a7f-acef-7599ad678126",
+  "prevId": "3bd03229-7b9c-446d-8805-967af91eef9c",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1375,6 +1375,112 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
+    },
+    "public.llm_settings": {
+      "name": "llm_settings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "endpoint": {
+          "name": "endpoint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "api_key_ciphertext": {
+          "name": "api_key_ciphertext",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "call_cap": {
+          "name": "call_cap",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 100
+        },
+        "timeout_ms": {
+          "name": "timeout_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 30000
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "llm_settings_project_id_projects_id_fk": {
+          "name": "llm_settings_project_id_projects_id_fk",
+          "tableFrom": "llm_settings",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "llm_settings_project_id_key": {
+          "name": "llm_settings_project_id_key",
+          "nullsNotDistinct": true,
+          "columns": [
+            "project_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "llm_settings_call_cap_check": {
+          "name": "llm_settings_call_cap_check",
+          "value": "\"llm_settings\".\"call_cap\" BETWEEN 1 AND 10000"
+        },
+        "llm_settings_timeout_ms_check": {
+          "name": "llm_settings_timeout_ms_check",
+          "value": "\"llm_settings\".\"timeout_ms\" BETWEEN 1000 AND 300000"
+        },
+        "llm_settings_enabled_complete_check": {
+          "name": "llm_settings_enabled_complete_check",
+          "value": "NOT \"llm_settings\".\"enabled\" OR (\"llm_settings\".\"endpoint\" IS NOT NULL AND \"llm_settings\".\"model\" IS NOT NULL)"
+        }
+      },
+      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -1399,7 +1505,9 @@
         "backup_completed",
         "project_settings_changed",
         "relation_created",
-        "relation_removed"
+        "relation_removed",
+        "llm_secret_skipped",
+        "instance_settings_changed"
       ]
     },
     "public.memory_kind": {

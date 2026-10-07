@@ -22,6 +22,7 @@ import type {
   MemoryKind,
   MemoryScope,
   MemorySource,
+  MemoryStatus,
   ProposalOrigin,
   RevisionAction,
 } from '../db/schema/enums';
@@ -51,6 +52,7 @@ import type {
   ProposalListItem,
   ProposalListPage,
   ProposalPayload,
+  ProposalSimilarMemory,
   ProposalView,
   RelationPayloadEntry,
   RejectOptions,
@@ -263,6 +265,14 @@ export class ProposalsService {
           name: sql<string | null>`${eff} ->> 'name'`,
           slug: sql<string | null>`${eff} ->> 'slug'`,
           edited: sql<boolean>`${proposals.editedPayload} is not null`,
+          // A1 (G10): znacznik wiersza = podpowiedź ma choć jedną wciąż ZATWIERDZONĄ pamięć (ta sama reguła
+          // co `available` w `toViews`). `jsonb_array_elements(NULL)` -> zero wierszy -> false, więc stan
+          // "nie policzono" i `[]` nie dają znacznika; archiwum/purge/delete po zapisie też go gasi.
+          hasSimilar: sql<boolean>`exists (
+            select 1 from jsonb_array_elements(${proposals.similarMemories}) as h(e)
+            join memories m on m.id = h.e ->> 'id'
+            where m.status = 'approved'
+          )`,
           cursorTs: keysetTs(proposals.createdAt),
         })
         .from(proposals)
@@ -300,6 +310,7 @@ export class ProposalsService {
         },
         edited: row.edited,
         stale: computeStaleIds(versionMap, baseVersions, row.affectedIds).length > 0,
+        hasSimilar: row.hasSimilar,
       };
     });
     return { items, nextCursor: page.nextCursor, total: totalRow?.total ?? 0 };
@@ -811,9 +822,33 @@ export class ProposalsService {
     return new Map(versionRows.map((r) => [r.id, r.version]));
   }
 
+  /** Pamięci wskazane przez podpowiedź A1 (display-only, bez locka): jedno zapytanie `idsAny` na wszystkie
+   * id. Brakujący wiersz (hard-purge / delete) po prostu nie trafia do mapy — wołający traktuje to jak
+   * "niedostępna". */
+  private async loadSimilarTargets(
+    ids: string[],
+  ): Promise<Map<string, { header: string; status: MemoryStatus; scope: MemoryScope }>> {
+    if (ids.length === 0) return new Map();
+    const rows = await this.db
+      .select({ id: memories.id, header: memories.header, status: memories.status, scope: memories.scope })
+      .from(memories)
+      .where(idsAny(memories.id, ids));
+    return new Map(rows.map((r) => [r.id, { header: r.header, status: r.status, scope: r.scope }]));
+  }
+
   private async toViews(rows: ProposalRow[]): Promise<ProposalView[]> {
     const versionMap = await this.loadVersionMap(
       Array.from(new Set(rows.flatMap((r) => r.affectedIds))),
+    );
+    // Podpowiedź A1: wszystkie id z podpowiedzi wszystkich wierszy, rozwiązane jednym zapytaniem.
+    const similarTargets = await this.loadSimilarTargets(
+      Array.from(
+        new Set(
+          rows.flatMap((r) =>
+            (r.similarMemories ?? []).map((h) => h.id).filter((id): id is string => typeof id === 'string'),
+          ),
+        ),
+      ),
     );
 
     return rows.map((row) => {
@@ -835,6 +870,21 @@ export class ProposalsService {
         updatedAt: row.updatedAt.toISOString(),
         stale: staleIds.length > 0,
         staleIds,
+        similarMemories: row.similarMemories
+          ? row.similarMemories
+              .filter((h) => typeof h.id === 'string')
+              .map((h): ProposalSimilarMemory => {
+                const target = similarTargets.get(h.id);
+                const available = target?.status === 'approved';
+                return {
+                  id: h.id,
+                  distance: h.distance,
+                  available,
+                  header: available ? target.header : null,
+                  scope: available ? target.scope : null,
+                };
+              })
+          : null,
       };
     });
   }
