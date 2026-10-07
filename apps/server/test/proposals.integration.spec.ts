@@ -87,10 +87,11 @@ describe('ProposalsService (integration, testcontainers) — kolejka akceptacji 
       envSchema.parse({ DATABASE_URL: 'postgres://unused', ...envOverrides }),
     );
     const embeddingService = new EmbeddingService(provider, config);
+    const proposalsService = new ProposalsService(db, config, audit, embeddingService);
     return {
       config,
-      memoryService: new MemoryService(db, config, audit, embeddingService, new UsageService(db)),
-      proposalsService: new ProposalsService(db, config, audit, embeddingService),
+      memoryService: new MemoryService(db, config, audit, embeddingService, new UsageService(db), proposalsService),
+      proposalsService,
     };
   }
 

@@ -708,6 +708,8 @@ describe('MCP e2e v1.5 — token konta + X-Context-Keeper-Project', () => {
         expect(body.hint).toContain(ONBOARDING_SETUP_STEPS);
         expect(text).not.toContain(accountToken);
         expect(text).not.toMatch(TOKEN_LIKE);
+        // v1.6 A2: stan auto mode nie wychodzi przez MCP
+        expect(text).not.toMatch(/autoMode|auto_mode/);
       });
     });
 

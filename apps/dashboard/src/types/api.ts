@@ -1,5 +1,6 @@
 import type {
   AuditEventType,
+  AutoHoldReason,
   EffectiveTokenStatus,
   MemoryKind,
   MemoryScope,
@@ -72,6 +73,10 @@ export interface ProposalView {
   staleIds: string[];
   /** A1: `null` = nie policzono, `[]` = policzono, brak podobnych, lista = ≤3 pozycje rosnąco po odległości. */
   similarMemories: ProposalSimilarMemory[] | null;
+  /** A2: powody zawrócenia z auto mode; `null` = nic nie zawrócono (też projekt bez auto mode). */
+  autoHoldReasons: AutoHoldReason[] | null;
+  /** A2: ISO czas maszynowej auto-akceptacji; `null` = nie auto-zaakceptowana. */
+  autoApprovedAt: string | null;
 }
 
 /** Pola wiersza kolejki wyprowadzone SERWEROWO z efektywnego payloadu (`coalesce(edited_payload,
@@ -104,6 +109,8 @@ export interface ProposalListItem {
   stale: boolean;
   /** A1: podpowiedź ma choć jedną wciąż zatwierdzoną pamięć (ta sama reguła co `available` w detalu). */
   hasSimilar: boolean;
+  /** A2: powody zawrócenia z auto mode (znacznik wiersza); `null` = nic nie zawrócono. */
+  autoHoldReasons: AutoHoldReason[] | null;
 }
 
 /** Strona `GET /api/proposals` — lustro `ProposalListPage`. `total` liczone z TYMI SAMYMI filtrami co
@@ -168,6 +175,9 @@ export interface MemoryListItem {
   version: number;
   /** Tylko `kind=event` (roadmap v1.2, "kind=event episodic") — null dla fact/document. */
   eventTime: string | null;
+  /** A2 (G6): ISO czas auto-akceptacji BIEŻĄCEJ treści; `null` = treść nie pochodzi z auto mode
+   * (albo człowiek zmienił ją później). */
+  autoApprovedAt: string | null;
 }
 
 export interface MemoryDetail extends MemoryListItem {
@@ -224,6 +234,10 @@ export interface ProjectListItem {
    * domyślnego `kind` w `search_memory` gdy agent go nie poda jawnie. Edytowany w
    * `ProjectSettingsDialog`. */
   includeEventsInDefaultSearch: boolean;
+  /** Auto mode (roadmap v1.6, A2) — zapisy agenta, które przejdą bezpieczniki, zatwierdza maszyna. */
+  autoMode: boolean;
+  /** Dzienny limit auto-akceptacji (okno kroczące 24 h), 1..10000. */
+  autoModeDailyLimit: number;
 }
 
 /** Lustro `ProjectTokenDto` (`apps/server/src/dashboard/projects.controller.ts`) — wiersz w dialogu

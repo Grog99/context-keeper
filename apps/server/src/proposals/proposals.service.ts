@@ -30,6 +30,7 @@ import type { MemoryRelationRow, MemoryRow, ProposalRow } from '../db/schema';
 import { EmbeddingService } from '../embeddings/embedding.service';
 import { normalizeHeader, normalizeTags, validateBody } from '../memory/validation';
 import { insertProject } from '../projects/project-rows';
+import { AutoApprovalRefusedError, countAutoApprovalsInWindow } from './auto-mode';
 import { ProposalError } from './proposals.errors';
 import { isMemoryProposalType } from './proposals.types';
 import type {
@@ -273,6 +274,7 @@ export class ProposalsService {
             join memories m on m.id = h.e ->> 'id'
             where m.status = 'approved'
           )`,
+          autoHoldReasons: proposals.autoHoldReasons,
           cursorTs: keysetTs(proposals.createdAt),
         })
         .from(proposals)
@@ -311,6 +313,7 @@ export class ProposalsService {
         edited: row.edited,
         stale: computeStaleIds(versionMap, baseVersions, row.affectedIds).length > 0,
         hasSimilar: row.hasSimilar,
+        autoHoldReasons: row.autoHoldReasons ?? null,
       };
     });
     return { items, nextCursor: page.nextCursor, total: totalRow?.total ?? 0 };
@@ -348,6 +351,20 @@ export class ProposalsService {
         '--supersedes jest dozwolony wyłącznie dla proposali typu create',
       );
     }
+    // Auto mode (roadmap v1.6, A2): maszynowa akceptacja dotyczy WYŁĄCZNIE zapisów agenta create/update
+    // w projekcie — nocny job i create_project nigdy (defence-in-depth, ticket #3).
+    if (
+      opts.auto &&
+      (preRow.origin !== 'agent' ||
+        (preRow.type !== 'create' && preRow.type !== 'update') ||
+        opts.supersedes ||
+        !preRow.projectId)
+    ) {
+      throw new ProposalError(
+        'validation_error',
+        'Auto-akceptacja jest dozwolona wyłącznie dla propozycji agenta create/update w projekcie',
+      );
+    }
 
     // Rozwiązana treść do (re)embeddingu — poza transakcją (sieć). Dla `update` czytamy AKTUALNY
     // wiersz bez locka wyłącznie jako podstawę do embeddingu spekulacyjnego: jeśli coś zmieni
@@ -369,7 +386,14 @@ export class ProposalsService {
         kind: p.kind ?? current?.kind ?? 'fact',
       };
     }
-    const embeddingPrep = resolved ? await this.prepareEmbeddings(preRow.id, resolved) : null;
+    const embeddingPrep = resolved
+      ? await this.prepareEmbeddings(preRow.id, resolved, opts.recomputeEmbedding ?? true)
+      : null;
+    // Auto-akceptacja nigdy nie tworzy pamięci bez wektora ani nie kasuje wektorów celu korekty
+    // (decyzja D1) — bez promowalnego stagingu zostaje w kolejce.
+    if (opts.auto && embeddingPrep?.disposition !== 'promoted') {
+      throw new AutoApprovalRefusedError('no_vector');
+    }
 
     return this.db.transaction(async (tx) => {
       const [propRow] = await tx.select().from(proposals).where(eq(proposals.id, id)).for('update');
@@ -383,6 +407,24 @@ export class ProposalsService {
         );
       }
 
+      // Auto mode: blokada wiersza projektu serializuje auto-akceptacje projektu (FOR NO KEY UPDATE nie
+      // koliduje z FOR KEY SHARE biorącym przez FK zwykłe zapisy i akceptacje człowieka — te nie czekają).
+      // Przełącznik i limit czytane TU, z bazy (autorytatywnie, nie z kontekstu żądania), potem przeliczenie
+      // okna 24 h — przekroczenie limitu przy równoległych zapisach jest wykluczone. Kolejność blokad:
+      // proposal → projekt → memories (ORDER BY id); człowiek nigdy nie blokuje projektu → brak cyklu.
+      if (opts.auto) {
+        const autoProjectId = propRow.projectId as string; // gwarantowane guardem przed transakcją
+        const [proj] = await tx
+          .select({ autoMode: projects.autoMode, dailyLimit: projects.autoModeDailyLimit })
+          .from(projects)
+          .where(eq(projects.id, autoProjectId))
+          .for('no key update');
+        if (!proj?.autoMode) throw new AutoApprovalRefusedError('disabled');
+        const used = await countAutoApprovalsInWindow(tx, autoProjectId);
+        if (used >= proj.dailyLimit) throw new AutoApprovalRefusedError('daily_limit');
+      }
+
+      const now = new Date();
       const payload = pickEffectivePayload(propRow);
       const affectedIds = [...propRow.affectedIds];
       const supersedeId = opts.supersedes;
@@ -438,6 +480,7 @@ export class ProposalsService {
             scope: propRow.scope,
             projectId: propRow.projectId,
             origin: propRow.origin,
+            autoApprovedAt: opts.auto ? now : null,
           });
           materializedId = created.id;
           await this.writeRevision(tx, {
@@ -483,7 +526,9 @@ export class ProposalsService {
               tags: updatePayload.tags ?? target.tags,
               kind: updatePayload.kind ?? target.kind,
               version: sql`${memories.version} + 1`,
-              updatedAt: new Date(),
+              updatedAt: now,
+              // G6: auto-korekta ustawia znacznik „treść z auto mode", zatwierdzenie korekty przez człowieka go zdejmuje.
+              autoApprovedAt: opts.auto ? now : null,
             })
             .where(eq(memories.id, target.id));
           await this.writeRevision(tx, { memoryId: target.id, action: 'edited', actor, snapshot });
@@ -610,7 +655,10 @@ export class ProposalsService {
       // Staging żyje 1:1 z proposalem — po materializacji (albo próbie, dla delete i tak zawsze pusty)
       // nie ma już czego promować; sprzątamy niezależnie od dyspozycji embeddingu.
       await tx.delete(stagingEmbeddings).where(eq(stagingEmbeddings.proposalId, propRow.id));
-      await tx.update(proposals).set({ status: 'approved', updatedAt: new Date() }).where(eq(proposals.id, id));
+      await tx
+        .update(proposals)
+        .set({ status: 'approved', updatedAt: now, ...(opts.auto ? { autoApprovedAt: now } : {}) })
+        .where(eq(proposals.id, id));
 
       await this.audit.log(
         {
@@ -624,6 +672,7 @@ export class ProposalsService {
           metadata: {
             proposalId: id,
             type: propRow.type,
+            ...(opts.auto ? { auto: true } : {}),
             ...(supersedeRow ? { supersededId: supersedeRow.id } : {}),
             ...(createdProjectId ? { projectId: createdProjectId, ...createdProjectMeta } : {}),
           },
@@ -885,6 +934,8 @@ export class ProposalsService {
                 };
               })
           : null,
+        autoHoldReasons: row.autoHoldReasons ?? null,
+        autoApprovedAt: row.autoApprovedAt ? row.autoApprovedAt.toISOString() : null,
       };
     });
   }
@@ -908,7 +959,13 @@ export class ProposalsService {
   private async materializeMemory(
     tx: Tx,
     payload: CreatePayload | MergePayload,
-    ctx: { scope: MemoryScope; projectId: string | null; origin: ProposalOrigin },
+    ctx: {
+      scope: MemoryScope;
+      projectId: string | null;
+      origin: ProposalOrigin;
+      /** v1.6 A2: znacznik „treść z auto mode" (G6) — `null` dla akceptacji człowieka/merge. */
+      autoApprovedAt?: Date | null;
+    },
   ): Promise<MemoryRow> {
     const [row] = await tx
       .insert(memories)
@@ -924,6 +981,7 @@ export class ProposalsService {
         source: ORIGIN_TO_SOURCE[ctx.origin],
         version: 0,
         approvedAt: new Date(),
+        autoApprovedAt: ctx.autoApprovedAt ?? null,
         // Tylko `kind='event'` (roadmap v1.3, "kind=event przez agenta") — `CreatePayload.eventTime`
         // niesie ISO string (jsonb), `MergePayload` nigdy nie ma tego pola (nocny job produkuje
         // wyłącznie `kind='fact'`, `nightly.service.ts`), stąd `in` zamiast optional chaining.
@@ -1095,7 +1153,12 @@ export class ProposalsService {
   private async archiveMemory(tx: Tx, row: MemoryRow, actor: string): Promise<void> {
     await tx
       .update(memories)
-      .set({ status: 'archived', version: sql`${memories.version} + 1`, updatedAt: new Date() })
+      .set({
+        status: 'archived',
+        version: sql`${memories.version} + 1`,
+        updatedAt: new Date(),
+        autoApprovedAt: null, // G6: decyzja człowieka (merge/delete/supersede) zdejmuje znacznik auto mode
+      })
       .where(eq(memories.id, row.id));
     await tx.delete(embeddings).where(eq(embeddings.memoryId, row.id));
     const deletedRelations = await tx
@@ -1151,7 +1214,11 @@ export class ProposalsService {
    * - inaczej -> `embedMemoryBestEffort` (fail-open): chunki -> `recomputed`; `null` -> `vectorless`
    *   (materializacja i tak przechodzi, memory zostaje bez wektorów do czasu `reembed`, NFR-8).
    */
-  private async prepareEmbeddings(proposalId: string, resolved: ResolvedContent): Promise<EmbeddingPrep> {
+  private async prepareEmbeddings(
+    proposalId: string,
+    resolved: ResolvedContent,
+    recomputeEmbedding = true,
+  ): Promise<EmbeddingPrep> {
     const staged = await this.db
       .select()
       .from(stagingEmbeddings)
@@ -1168,6 +1235,9 @@ export class ProposalsService {
         })),
       };
     }
+
+    // Auto-akceptacja (v1.6 A2) nie woła providera drugi raz (budżet czasu zapisu) — brak stagingu = vectorless.
+    if (!recomputeEmbedding) return { disposition: 'vectorless', chunks: [] };
 
     const computed = await this.embedding.embedMemoryBestEffort(
       resolved.kind,

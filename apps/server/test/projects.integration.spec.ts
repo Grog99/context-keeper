@@ -144,6 +144,38 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
     });
   });
 
+  describe('auto mode — ustawienia projektu (roadmap v1.6, A2)', () => {
+    it('nowy projekt: auto_mode=false, limit 50', async () => {
+      const { project } = await service.createProject('auto-mode-defaults');
+      expect(project.autoMode).toBe(false);
+      expect(project.autoModeDailyLimit).toBe(50);
+    });
+
+    it('updateProject utrwala autoMode i limit; pola pominięte nie są nadpisywane', async () => {
+      const { project } = await service.createProject('auto-mode-update');
+      const on = await service.updateProject(project.id, { autoMode: true });
+      expect(on).toMatchObject({ autoMode: true, autoModeDailyLimit: 50 });
+      const limited = await service.updateProject(project.id, { autoModeDailyLimit: 12 });
+      expect(limited).toMatchObject({ autoMode: true, autoModeDailyLimit: 12 });
+      const both = await service.updateProject(project.id, {
+        autoMode: false,
+        autoModeDailyLimit: 3,
+        includeEventsInDefaultSearch: true,
+      });
+      expect(both).toMatchObject({ autoMode: false, autoModeDailyLimit: 3, includeEventsInDefaultSearch: true });
+      const noop = await service.updateProject(project.id, {});
+      expect(noop).toMatchObject({ autoMode: false, autoModeDailyLimit: 3 });
+    });
+
+    it('limit poza 1..10000 odrzuca CHECK w bazie', async () => {
+      const { project } = await service.createProject('auto-mode-check');
+      // drizzle opakowuje błąd pg w DrizzleQueryError — kod SQLSTATE siedzi w `cause`
+      await expect(service.updateProject(project.id, { autoModeDailyLimit: 0 })).rejects.toMatchObject({
+        cause: { code: '23514', constraint: 'projects_auto_mode_daily_limit_check' },
+      });
+    });
+  });
+
   describe('resolveByToken — lookup + createToken (dual resolution)', () => {
     it('właściwy projekt dla poprawnego tokena, null dla złego/garbage', async () => {
       const { project, token } = await service.createProject('beta');
@@ -886,6 +918,8 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
           projectId: project.id,
           projectName: 'Scope Target',
           includeEventsInDefaultSearch: false,
+          autoMode: false,
+          autoModeDailyLimit: 50,
           tokenId: account.tokenRow.id,
           tokenLabel: 'acc-scope',
         },

@@ -56,6 +56,7 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
 
       const save = tools.find((t) => t.name === 'save_memory')!;
       expect(save.description).toMatch(/pending/i);
+      expect(save.description).toMatch(/approved/); // roadmap v1.6 A2 — status auto mode
       expect(save.description).toMatch(/secret/i);
       expect(save.description).toMatch(/one atomic fact/i);
       expect(save.description).toMatch(/supersede|correct/i);

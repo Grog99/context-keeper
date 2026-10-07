@@ -39,7 +39,7 @@ Uzupełnienia z sesji domykania planu przed kodem (wpięte in-place):
 
 ## 1. Streszczenie
 
-Context Keeper to samodzielna aplikacja (self-hosted) pełniąca rolę **czystej, autorytatywnej pamięci** dla agentów AI. Agenci łączą się przez remote MCP, wyszukują kontekst do zadań i proponują zapis nowych faktów. Kluczowa cecha: **żadna treść nie trafia do pamięci bez zatwierdzenia przez człowieka** (human-gated writes). Dashboard służy do przeglądu, edycji i akceptacji, a nocny job **proponuje** (nie wykonuje) porządki: dedup, merge, prune.
+Context Keeper to samodzielna aplikacja (self-hosted) pełniąca rolę **czystej, autorytatywnej pamięci** dla agentów AI. Agenci łączą się przez remote MCP, wyszukują kontekst do zadań i proponują zapis nowych faktów. Kluczowa cecha: **żadna treść nie trafia do pamięci bez zatwierdzenia przez człowieka** (human-gated writes) — domyślnie; od v1.6 właściciel może per projekt włączyć **auto mode**, w którym zapisy agenta przechodzące bezpieczniki zatwierdza maszyna (z pełnym śladem w kolejce i audycie), a pozostałe czekają na człowieka. Dashboard służy do przeglądu, edycji i akceptacji, a nocny job **proponuje** (nie wykonuje) porządki: dedup, merge, prune.
 
 **Zasada przewodnia:** prosto w v1, ale schema i architektura gotowe na rozszerzenia.
 
@@ -71,7 +71,7 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 
 **Skala:** kilka projektów, sporo dokumentów, kilku agentów jednocześnie miejscami.
 
-**Warunek żywotności v1:** cała wartość stoi na tym, że **jeden recenzent nadąża zatwierdzać**. v1 zakłada wolumen zapisów mieszczący się w przepustowości jednego człowieka; powyżej tego potrzebny anti-fatigue (auto-allow — v2).
+**Warunek żywotności v1:** cała wartość stoi na tym, że **jeden recenzent nadąża zatwierdzać**. v1 zakłada wolumen zapisów mieszczący się w przepustowości jednego człowieka; powyżej tego potrzebny anti-fatigue (bulk approve/reject — v1.3; auto-allow jako **auto mode** per projekt — v1.6).
 
 ---
 
@@ -81,7 +81,7 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 
 - **Remote MCP server** (oficjalny `@modelcontextprotocol/sdk`) z 3 narzędziami: `search_memory`, `get_memory`, `save_memory`.
 - **Scope pamięci:** `global` | `project`; projekt wyznaczany przez credential (token per projekt), nie przez argument agenta (v1.5: token projektowy → jego projekt; token konta → projekt z nagłówka `X-Context-Keeper-Project` w commitowanym `.mcp.json` — dalej nie argument agenta).
-- **Pełna kolejka akceptacji** — każda treściowa mutacja to `proposal`; nic nie wchodzi do pamięci bez akceptacji. **Optimistic concurrency** (stale = blokada + badge).
+- **Pełna kolejka akceptacji** — każda treściowa mutacja to `proposal`; nic nie wchodzi do pamięci bez akceptacji (człowieka, albo — w projekcie z auto mode, v1.6 — maszynowej po bezpiecznikach). **Optimistic concurrency** (stale = blokada + badge).
 - **Dwa rodzaje pamięci (`kind`):** `fact` (fakty accreted przez agenta, mutowalne) i `document` (dokumenty authored przez człowieka: PRD, roadmap — kanon, permanentne; w v1 human-only).
 - **Hybrid retrieval** — wektor + full-text, fuzja RRF, dwufazowy (nagłówki → pełne body); FTS-only fallback przy embedding-down.
 - **Dashboard** (4 ekrany) + **przełącznik aktywnego kontekstu** (`Wszystkie`/`Global`/projekt) + **human-create** (tworzenie faktów i dokumentów, import `.md`).
@@ -136,7 +136,7 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 
 - **FR-M1** `search_memory(query, tags?, kind?, all_projects?)` → `[{id, header, tags, score}]` (+ `excerpt` dla `document`, + `project` w trybie cross). Scope: projekt (z tokena albo nagłówka) + `global`. Domyślnie `fact`+`document`; opcjonalny filtr `kind`. Przy embedding-down → **FTS-only** (ciche). **(v1.5)** `all_projects: true` — tylko token konta — przeszukuje `global` + wszystkie projekty instancji w jednej puli rankingu (bez preferencji bieżącego projektu); każdy wynik niesie `project` (slug źródła albo `null` dla global); token projektowy dostaje `validation_error`.
 - **FR-M2** `get_memory(id)` → pełne body; bumpuje `last_accessed_at`/`access_count`. **Egzekwuje scope zależny od typu tokena (v1.5):** token projektowy — projekt + `global`, poza scope **lub** nieistniejące → identyczne **`not_found`** (anty-probing IDOR); token konta — pamięć dowolnego projektu instancji + `global` (anty-IDOR niczego tu nie chroni: token konta i tak czyta każdy projekt przez zmianę nagłówka). Zapis (`supersedes`/`relations`) zawsze tylko w projekcie z nagłówka.
-- **FR-M3** `save_memory(header, body, tags)` → proposal, `{id, status}`. Embedding + dedup z **twardym budżetem czasu** (po timeoucie `pending` bez embeddingu, doembed przy akceptacji). **Dedup advisory:** twardy `duplicate_pending` tylko exact-match do pending; exact do approved → `already_exists`; **podobne → proposal zawsze powstaje + hint** (embedding nie odróżnia korekty od duplikatu).
+- **FR-M3** `save_memory(header, body, tags)` → proposal, `{id, status}`. Embedding + dedup z **twardym budżetem czasu** (po timeoucie `pending` bez embeddingu, doembed przy akceptacji). **Dedup advisory:** twardy `duplicate_pending` tylko exact-match do pending; exact do approved → `already_exists`; **podobne → proposal zawsze powstaje + hint** (embedding nie odróżnia korekty od duplikatu). Status zwrotny `pending` — a w projekcie z **auto mode** (v1.6) zapis, który przeszedł bezpieczniki, wraca jako `approved` z id pamięci (przy `supersedes` — korygowanego celu); zapis zawrócony przez bezpiecznik to zwykłe `pending`, bez powodu dla agenta (powód widzi recenzent w kolejce).
 - **FR-M4** Zapisy agenta **tylko project-scoped**. Promocja do `global` = akcja człowieka.
 - **FR-M5** Agent w v1 tylko **tworzy** (`create`). Korekta faktu = nowy `create` + human-mediated supersession.
 - **FR-M6** Auth: statyczny bearer w `Authorization`. Dwa typy (v1.5): **token projektowy** — serwer mapuje token → `project_id`; **token konta** — działa w każdym projekcie instancji, projekt wskazuje nagłówek `X-Context-Keeper-Project: <slug>` z commitowanego `.mcp.json`. Niepowodzenie wyboru projektu = błąd tool-level (FR-M7), nie HTTP. **Zweryfikowany dla Claude Code**; OAuth → roadmapa.
@@ -150,7 +150,7 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 - **FR-Q1** Każda treściowa mutacja (`create`/`update`/`merge`/`delete`) przechodzi przez tabelę `proposals`.
 - **FR-Q2** Zatwierdzenie **aplikuje zmianę transakcyjnie** (row-lock na dotknięte pamięci); odrzucone zostają do audytu.
 - **FR-Q3** Pending żyje tylko w `proposals` → search (materialized memories) widzi tylko `approved`.
-- **FR-Q4** Bramka wg **origin**: `source=agent`/`nightly` → kolejka; `source=human` → commit bezpośredni + `revision`.
+- **FR-Q4** Bramka wg **origin**: `source=agent`/`nightly` → kolejka; `source=human` → commit bezpośredni + `revision`. **Wyjątek (v1.6, auto mode per projekt):** `source=agent` `create`/`update` w projekcie z włączonym auto mode przechodzi bezpieczniki (prawie-duplikat, brak sygnału/wektora, korekta treści człowieka, dzienny limit) i — gdy żaden nie zadziała — jest zatwierdzany maszynowo tą samą ścieżką co akceptacja człowieka (aktor `auto-mode:<project_id>`); propozycje nocnego joba i `create_project` zawsze czekają na człowieka.
 - **FR-Q5** Zapisy techniczne (`access_count`, `last_accessed_at`) idą bezpośrednio, z pominięciem kolejki.
 - **FR-Q6** Edit-before-approve: recenzent zmienia header/body przed akceptacją; commit odzwierciedla edycję, oryginalny payload zostaje w proposalu („approved with edits") + `revision` + re-embed.
 - **FR-Q7** **Optimistic concurrency:** proposal na istniejące pamięci zapisuje `base_versions`; przy akceptacji sprawdzane w transakcji. Drift → **stale** (blokada + badge), człowiek decyduje/aktualizuje. Podwójna akceptacja rozwiązuje się sama.
@@ -224,7 +224,7 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 
 ## 9. Kryteria sukcesu
 
-- **Czystość store'u:** 0 treściowych zapisów, które weszły do pamięci bez akceptacji człowieka.
+- **Czystość store'u:** projekty bez auto mode — 0 treściowych zapisów, które weszły do pamięci bez akceptacji człowieka. Projekty z auto mode (v1.6) — każda akceptacja maszynowa zostawia `approved` proposal, wpis audytu `proposal_approved` z aktorem `auto-mode:<project_id>` i znacznik `memories.auto_approved_at` (filtr „auto-zaakceptowane" w przeglądarce); żaden zapis nie omija skanera sekretów i walidacji.
 - **Znajdywalność:** `recall@k` na małym labelowanym zestawie `zapytanie → oczekiwane memory_id` (smoke-test regresji).
 - **Przepustowość recenzenta:** głębokość kolejki stabilna w czasie (metryka w dashboardzie).
 - **Brak cichych utrat wiedzy:** każdy `archive`/`merge`/`delete` ma ślad w audycie i możliwość odtworzenia z `revisions`.
@@ -245,7 +245,7 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 1. **`kind=event` (episodic)** — zdarzenia z czasem. Auto-commit + age-decay w trust-tierze „unreviewed", memory-relations + 1-hop graph boost, timeline (`reverted-by`/`relates-to`).
 2. **`conflicts_report`** — wykrywanie sprzeczności same-topic w nocnym jobie, ewentualnie z weryfikacją AI.
 3. **Memory Worth** — prune po współwystępowaniu z sukcesem/porażką. Wymaga `report_outcome(memory_ids, success)` + tabeli `outcome`. Prune projektowany jako **pluggable** już w v1.
-4. **Anti-fatigue kolejki** — bulk approve/reject, auto-allow po N spójnych decyzjach (`confidence`/`auto_eligible` w `proposals` — schema gotowa).
+4. **Anti-fatigue kolejki** — bulk approve/reject (zrealizowane w v1.3); auto-allow zrealizowane w v1.6 jako **auto mode per projekt z bezpiecznikami** (nie „po N spójnych decyzjach"); `confidence`/`auto_eligible` w `proposals` zostają nieużywane (forward-compat).
 5. **Per-user auth** + kontrola dostępu per-projekt dla człowieka.
 6. **Edycja pamięci przez agenta** (`supersedes: id`), agent-proposed edycje dokumentów, wiele tokenów per projekt + **graceful rotation**.
 7. **OAuth 2.1 + PKCE** dla MCP (Desktop/web-connector).

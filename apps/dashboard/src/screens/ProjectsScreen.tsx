@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Folder, KeyRound, Plus, Settings, ShieldAlert } from 'lucide-react';
+import { Bot, Folder, KeyRound, Plus, Settings, ShieldAlert } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { Badge } from '../components/ui/badge';
@@ -126,6 +126,14 @@ export function ProjectsScreen() {
                     <span className="inline-flex items-center gap-1.5">
                       <Folder className="size-3.5 text-faint" />
                       {project.name}
+                      {project.autoMode && (
+                        <Badge
+                          variant="info"
+                          title={`Auto mode włączony — limit ${project.autoModeDailyLimit} / 24 h`}
+                        >
+                          <Bot className="size-3" aria-hidden /> auto
+                        </Badge>
+                      )}
                     </span>
                   </td>
                   <td className="px-3.5 py-2.5">

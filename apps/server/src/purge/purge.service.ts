@@ -151,6 +151,7 @@ export class PurgeService {
           body: '',
           tags: [],
           status: 'purged',
+          autoApprovedAt: null, // G6: purge (akcja człowieka) zdejmuje znacznik auto mode — tombstone nie wisi w filtrze „auto"
           version: sql`${memories.version} + 1`,
           updatedAt: new Date(),
         })

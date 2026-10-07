@@ -83,8 +83,16 @@ describe('MemoryService (integration, testcontainers)', () => {
     const cfg = new AppConfigService(
       envSchema.parse({ DATABASE_URL: 'postgres://unused', ...envOverrides }),
     );
+    const embeddingService = new EmbeddingService(provider, cfg);
     return {
-      memory: new MemoryService(db, cfg, audit, new EmbeddingService(provider, cfg), new UsageService(db)),
+      memory: new MemoryService(
+        db,
+        cfg,
+        audit,
+        embeddingService,
+        new UsageService(db),
+        new ProposalsService(db, cfg, audit, embeddingService),
+      ),
       config: cfg,
     };
   }
@@ -103,7 +111,15 @@ describe('MemoryService (integration, testcontainers)', () => {
     // starego zachowania FTS-only, więc te testy zostają nietknięte przez dodanie ramienia wektorowego.
     const downProvider = new StubEmbeddingProvider('down-stub');
     downProvider.throwOnEmbed = true;
-    memory = new MemoryService(db, config, audit, new EmbeddingService(downProvider, config), new UsageService(db));
+    const downEmbedding = new EmbeddingService(downProvider, config);
+    memory = new MemoryService(
+      db,
+      config,
+      audit,
+      downEmbedding,
+      new UsageService(db),
+      new ProposalsService(db, config, audit, downEmbedding),
+    );
 
     const created = await projects.createProject('memory-test-a');
     projectA = { projectId: created.project.id, projectName: created.project.name };

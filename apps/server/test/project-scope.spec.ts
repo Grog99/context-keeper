@@ -3,6 +3,7 @@ import type { ProjectRow } from '../src/db/schema';
 import {
   readProjectHeader,
   resolveProjectScope,
+  toProjectContext,
   type ProjectScopeLookups,
 } from '../src/projects/project-scope';
 import type { PublicTokenRow } from '../src/projects/projects.service';
@@ -13,6 +14,8 @@ const X: ProjectRow = {
   slug: 'mcp-e2e',
   createdAt: new Date(0),
   includeEventsInDefaultSearch: false,
+  autoMode: false,
+  autoModeDailyLimit: 50,
 };
 const Y: ProjectRow = { ...X, id: 'proj_y', name: 'Y Project', slug: 'mcp-e2e-y', includeEventsInDefaultSearch: true };
 
@@ -56,6 +59,13 @@ describe('readProjectHeader', () => {
   });
 });
 
+describe('toProjectContext — auto mode (roadmap v1.6, A2)', () => {
+  it('niesie autoMode i autoModeDailyLimit z wiersza projektu', () => {
+    const ctx = toProjectContext({ ...X, autoMode: true, autoModeDailyLimit: 7 }, token('proj_x'));
+    expect(ctx).toMatchObject({ autoMode: true, autoModeDailyLimit: 7 });
+  });
+});
+
 describe('resolveProjectScope — token projektowy', () => {
   it('bez nagłówka -> projekt tokena, kontekst z atrybucją tokena', async () => {
     const { lookups, calls } = fakeLookups();
@@ -66,6 +76,8 @@ describe('resolveProjectScope — token projektowy', () => {
         projectId: 'proj_x',
         projectName: 'X Project',
         includeEventsInDefaultSearch: false,
+        autoMode: false,
+        autoModeDailyLimit: 50,
         tokenId: 'tok_1',
         tokenLabel: 'agent-one',
       },
@@ -111,6 +123,8 @@ describe('resolveProjectScope — token konta', () => {
         projectId: 'proj_y',
         projectName: 'Y Project',
         includeEventsInDefaultSearch: true,
+        autoMode: false,
+        autoModeDailyLimit: 50,
         tokenId: 'tok_1',
         tokenLabel: 'agent-one',
       },

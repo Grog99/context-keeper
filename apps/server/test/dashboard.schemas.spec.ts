@@ -128,6 +128,22 @@ describe('dashboard.schemas — happy paths kształtowane dokładnie jak SPA wys
     });
   });
 
+  it('updateProjectBody: autoMode (boolean) i autoModeDailyLimit (1..10000) — roadmap v1.6, A2', () => {
+    expect(updateProjectBody.parse({ autoMode: true })).toEqual({ autoMode: true });
+    expect(updateProjectBody.parse({ autoMode: false })).toEqual({ autoMode: false });
+    expect(updateProjectBody.parse({ autoModeDailyLimit: 1 })).toEqual({ autoModeDailyLimit: 1 });
+    expect(updateProjectBody.parse({ autoModeDailyLimit: 10000 })).toEqual({ autoModeDailyLimit: 10000 });
+    expect(updateProjectBody.parse({ autoMode: true, autoModeDailyLimit: 20, slug: 'x' })).toEqual({
+      autoMode: true,
+      autoModeDailyLimit: 20,
+      slug: 'x',
+    });
+  });
+
+  it('memoriesListQuery: autoApproved="true" -> true (filtr „auto-zaakceptowane", A2)', () => {
+    expect(memoriesListQuery.parse({ autoApproved: 'true' })).toEqual({ autoApproved: true });
+  });
+
   it('createProjectBody: opcjonalny slug (v1.5) — kształt, nie format', () => {
     expect(createProjectBody.parse({ name: 'X', slug: 'Bad_Slug' })).toEqual({ name: 'X', slug: 'Bad_Slug' });
   });
@@ -260,6 +276,20 @@ describe('dashboard.schemas — body: brakujące wymagane pole / zły typ / unde
 
   it('updateProjectBody: includeEventsInDefaultSearch="true" (string, nie boolean) -> invalid', () => {
     expect(updateProjectBody.safeParse({ includeEventsInDefaultSearch: 'true' }).success).toBe(false);
+  });
+
+  it('updateProjectBody: autoMode nie-boolean, limit 0/-1/1.5/10001/string -> invalid', () => {
+    expect(updateProjectBody.safeParse({ autoMode: 'true' }).success).toBe(false);
+    expect(updateProjectBody.safeParse({ autoMode: 1 }).success).toBe(false);
+    for (const bad of [0, -1, 1.5, 10001, '10', null]) {
+      expect(updateProjectBody.safeParse({ autoModeDailyLimit: bad }).success).toBe(false);
+    }
+  });
+
+  it("memoriesListQuery: autoApproved='false' / '1' / '' -> invalid (tylko literał 'true')", () => {
+    for (const bad of ['false', '1', '', true]) {
+      expect(memoriesListQuery.safeParse({ autoApproved: bad }).success).toBe(false);
+    }
   });
 
   it('updateProjectBody: slug nie-string / za długi / nieznany klucz -> invalid', () => {

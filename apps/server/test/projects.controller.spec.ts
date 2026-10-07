@@ -16,6 +16,8 @@ function projectRow(overrides: Partial<ProjectRow> = {}): ProjectRow {
     name: 'Projekt',
     slug: 'old-slug',
     includeEventsInDefaultSearch: false,
+    autoMode: false,
+    autoModeDailyLimit: 50,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     ...overrides,
   } as ProjectRow;
@@ -40,8 +42,19 @@ function setup(opts: { current?: ProjectRow | null; afterSlug?: ProjectRow } = {
       state = opts.afterSlug ?? { ...current!, slug };
       return state;
     },
-    updateProject: async (_id: string, u: { includeEventsInDefaultSearch?: boolean }) => {
-      state = { ...state!, includeEventsInDefaultSearch: u.includeEventsInDefaultSearch! };
+    updateProject: async (
+      _id: string,
+      u: { includeEventsInDefaultSearch?: boolean; autoMode?: boolean; autoModeDailyLimit?: number },
+    ) => {
+      // jak UPDATE: pola `undefined` nie nadpisują wiersza
+      state = {
+        ...state!,
+        ...(u.includeEventsInDefaultSearch !== undefined
+          ? { includeEventsInDefaultSearch: u.includeEventsInDefaultSearch }
+          : {}),
+        ...(u.autoMode !== undefined ? { autoMode: u.autoMode } : {}),
+        ...(u.autoModeDailyLimit !== undefined ? { autoModeDailyLimit: u.autoModeDailyLimit } : {}),
+      };
       return state;
     },
     createProject: async (name: string, options: unknown) => {
@@ -94,6 +107,48 @@ describe('ProjectsController.update — slug + audyt (roadmap v1.5, scope C)', (
     await controller.update('proj_1', { includeEventsInDefaultSearch: true }, NO_QUERY);
     expect(logged).toHaveLength(1);
     expect(logged[0].metadata).toMatchObject({ field: 'includeEventsInDefaultSearch' });
+  });
+
+  it('włączenie auto mode loguje dokładnie jeden wpis {field:autoMode, from:false, to:true}', async () => {
+    const { controller, logged } = setup();
+    const result = await controller.update('proj_1', { autoMode: true }, NO_QUERY);
+    expect(result.autoMode).toBe(true);
+    expect(logged).toEqual([
+      {
+        eventType: 'project_settings_changed',
+        actor: DASHBOARD_ACTOR,
+        metadata: { projectId: 'proj_1', field: 'autoMode', from: false, to: true },
+      },
+    ]);
+  });
+
+  it('ta sama wartość autoMode / limitu nie loguje nic (brak realnej zmiany)', async () => {
+    const { controller, logged } = setup();
+    await controller.update('proj_1', { autoMode: false, autoModeDailyLimit: 50 }, NO_QUERY);
+    expect(logged).toEqual([]);
+  });
+
+  it('zmiana limitu loguje {field:autoModeDailyLimit, from:50, to:10}', async () => {
+    const { controller, logged } = setup();
+    await controller.update('proj_1', { autoModeDailyLimit: 10 }, NO_QUERY);
+    expect(logged.map((l) => l.metadata)).toEqual([
+      { projectId: 'proj_1', field: 'autoModeDailyLimit', from: 50, to: 10 },
+    ]);
+  });
+
+  it('wszystkie cztery pola w jednym PATCH: kolejność slug → includeEvents → autoMode → limit', async () => {
+    const { controller, logged } = setup();
+    await controller.update(
+      'proj_1',
+      { slug: 'new-slug', includeEventsInDefaultSearch: true, autoMode: true, autoModeDailyLimit: 7 },
+      NO_QUERY,
+    );
+    expect(logged.map((l) => l.metadata.field)).toEqual([
+      'slug',
+      'includeEventsInDefaultSearch',
+      'autoMode',
+      'autoModeDailyLimit',
+    ]);
   });
 
   it('nieznany projekt -> NotFoundException, bez audytu', async () => {

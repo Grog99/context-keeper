@@ -8,12 +8,15 @@ import { scanForSecrets } from '../common/secret-scanner';
 import { AppConfigService } from '../config/config.service';
 import { DB, type Database } from '../db/db.tokens';
 import {
+  AUTO_MODE_DEFAULT_DAILY_LIMIT,
+  auditLog,
   embeddings,
   memories,
   memoryRelations,
   projects,
   proposals,
   stagingEmbeddings,
+  type AutoHoldReason,
   type MemoryRow,
   type SimilarMemoryHit,
 } from '../db/schema';
@@ -21,8 +24,11 @@ import { withTimeout } from '../common/with-timeout';
 import { findAnnNeighbors } from '../embeddings/ann-search';
 import { EmbeddingService, toPgVectorLiteral, type EmbedMemoryResult } from '../embeddings/embedding.service';
 import type { ProjectContext } from '../projects/projects.service';
+import { AutoApprovalRefusedError, autoModeActor, countAutoApprovalsInWindow } from '../proposals/auto-mode';
+import { ProposalsService } from '../proposals/proposals.service';
 import type { RelationPayloadEntry, UpdatePayload } from '../proposals/proposals.types';
 import { UsageService } from '../usage/usage.service';
+import { evaluateAutoModeGuards } from './auto-mode-guards';
 import { classifyDedup } from './dedup';
 import { eventDecayFactor } from './decay';
 import { graphBoostFactor, selectBoostedIds, type RelationEdge } from './graph-boost';
@@ -59,7 +65,8 @@ const MAX_RELATIONS_PER_SAVE = 16;
  * Warstwa logiki pamięci (§4-6 tech-stack) — reużywalna później przez kolejkę akceptacji (Faza 4)
  * i dashboard (Faza 5). Save → proposal (+ best-effort staged embedding, Faza 3), search → hybryda
  * FTS+wektor fuzjowana RRF (fail-open do FTS-only przy embedding-down), get → approved w scope
- * + bump technicznego licznika.
+ * + bump technicznego licznika. Od roadmap v1.6 (A2) projekt z auto mode może zatwierdzić zapis od razu
+ * (`decideAutoMode` → `ProposalsService.approve({auto:true})`); domyślnie zapis czeka w kolejce.
  */
 @Injectable()
 export class MemoryService {
@@ -71,6 +78,7 @@ export class MemoryService {
     private readonly audit: AuditService,
     private readonly embedding: EmbeddingService,
     private readonly usage: UsageService,
+    private readonly proposalsService: ProposalsService,
   ) {}
 
   /**
@@ -81,6 +89,9 @@ export class MemoryService {
    * Gdy `input.supersedes` jest ustawione (roadmap v1.2 "Edycja pamięci przez agenta"), zapis nie
    * mintuje nowej pamięci — deleguje do `saveAsSupersede()`, która produkuje proposal
    * `type='update'` na ISTNIEJĄCYM id (korekta in-place) zamiast `type='create'`.
+   *
+   * Wynik: `pending`/`duplicate_pending`/`already_exists` jak dotąd; w projekcie z auto mode dodatkowo
+   * `approved` (A2) — `id` jest wtedy id PAMIĘCI (korygowanego celu), nie propozycji.
    */
   async save(input: SaveMemoryInput, ctx: ProjectContext): Promise<SaveMemoryResult> {
     const kind = input.kind ?? 'fact';
@@ -192,8 +203,9 @@ export class MemoryService {
     // Faza 4 seam: staged wektor (zapisywany niżej, best-effort) czeka na PROMOCJĘ do `embeddings`
     // przy akceptacji proposala — promocja żyje w `ProposalsService.approve` (Faza 4), NIE tutaj.
     // Hint FR-M3 "podobne do" (roadmap v1.6, A1) liczymy TUTAJ, na tym samym wektorze, zaraz po
-    // embeddingu (niżej) — wynik trafia do `proposals.similar_memories`. Advisory: nic nie jest
-    // suppresowane ani odrzucane po podobieństwie, status zwrotny `pending` się nie zmienia.
+    // embeddingu (niżej) — wynik trafia do `proposals.similar_memories`. Sam hint jest advisory: nic nie
+    // jest suppresowane ani odrzucane po podobieństwie; dopiero auto mode (A2, `decideAutoMode` na końcu)
+    // używa go jako bezpiecznika (a) i może zwrócić `approved`.
     const mintedMemoryId = generateId(ID_PREFIX.memory);
     const proposalId = generateId(ID_PREFIX.proposal);
     // Attach-on-save (roadmap v1.2): walidowane TERAZ (zanim proposal w ogóle powstanie — spójnie
@@ -267,8 +279,18 @@ export class MemoryService {
       }
     }
 
-    // A2 (bezpiecznik auto mode) podepnie się TU — `similar` jest już znane w obrębie tego samego wywołania.
-    return { id: mintedMemoryId, status: 'pending' };
+    // Auto mode (roadmap v1.6, A2): proposal i staging już istnieją, `similar` jest znane — decyzja
+    // auto/kolejka. Zwracamy id PAMIĘCI w obu przypadkach (G1): przy `approved` pamięć już istnieje, przy
+    // `pending` to id, które dostanie po zatwierdzeniu (jak dotąd).
+    const status = await this.decideAutoMode({
+      ctx,
+      proposalId,
+      type: 'create',
+      kind,
+      similar,
+      vectorStaged: staged !== null,
+    });
+    return { id: mintedMemoryId, status };
   }
 
   /**
@@ -314,7 +336,8 @@ export class MemoryService {
    * zamiast mintować nową pamięć — `ProposalsService.approve` już umie zaaplikować `type='update'`
    * (merge payload, bump version, revision `edited` z prior snapshotem, delete-then-insert
    * embeddingów, `assertNotStale` po `affectedIds`/`baseVersions`), więc tu tylko WALIDUJEMY target
-   * i budujemy proposal — zero zmian w `proposals/*`.
+   * i budujemy proposal. Od A2 (auto mode) na końcu może też od razu zatwierdzić korektę
+   * (`decideAutoMode`) — wtedy zwraca `approved` z id CELU zamiast id propozycji.
    *
    * Semantyka = wyłącznie zamiana treści (decyzja produktowa #2 z planu): `header`+`body` ZAWSZE
    * niosą pełną poprawioną treść (wymagane jak przy zwykłym save, walidowane przez `save()` PRZED
@@ -462,7 +485,108 @@ export class MemoryService {
       );
     }
 
-    return { id: proposalId, status: 'pending' };
+    // Auto mode (A2): korekta agenta — przy `approved` zwracamy id CELU (pamięć, G1), przy `pending` id
+    // propozycji (jak dotąd).
+    const status = await this.decideAutoMode({
+      ctx,
+      proposalId,
+      type: 'update',
+      kind,
+      similar: null,
+      vectorStaged: staged !== null,
+      target: row,
+    });
+    return status === 'approved' ? { id: targetId, status } : { id: proposalId, status };
+  }
+
+  /**
+   * Decyzja auto mode (roadmap v1.6, A2) — wołana PO utworzeniu propozycji (i stagingu embeddingu), więc
+   * zapis jest już bezpiecznie utrwalony (inwariant „proposal powstaje zawsze"). Projekt bez auto mode →
+   * `pending` bez żadnej pracy ekstra (zachowanie bit-w-bit jak przed A2). Z auto mode: bezpieczniki
+   * (`evaluateAutoModeGuards`) → przy jakimkolwiek powodzie powody trafiają na propozycję (G5) i zapis
+   * zostaje `pending`; bez powodów `ProposalsService.approve({auto:true})` — ta sama ścieżka co akceptacja
+   * człowieka (promocja stagingu, rewizja, relacje, audyt `proposal_approved`), z aktorem maszynowym.
+   *
+   * Fail-safe (ticket #6): NIGDY nie rzuca. Wyjątek z `approve` → `pending`; `daily_limit` (wyścig na limicie
+   * rozstrzygnięty w transakcji) → powód `daily_limit`; `no_vector` → `not_computed`; `disabled` (auto mode
+   * wyłączony w międzyczasie) → bez powodu; każdy inny błąd → powód `auto_failed` (D2) + ostrzeżenie w logu.
+   * Agent w żadnym z tych przypadków nie dostaje powodu — wyłącznie `pending` (G1).
+   */
+  private async decideAutoMode(p: {
+    ctx: ProjectContext;
+    proposalId: string;
+    type: 'create' | 'update';
+    kind: SaveMemoryKind;
+    similar: SimilarMemoryHit[] | null;
+    vectorStaged: boolean;
+    target?: MemoryRow;
+  }): Promise<'approved' | 'pending'> {
+    if (p.ctx.autoMode !== true) return 'pending';
+    const { ctx, proposalId } = p;
+    try {
+      const humanTarget =
+        p.type === 'update' && p.target !== undefined
+          ? p.target.source === 'human' || (await this.hasHumanEdit(p.target.id))
+          : false;
+      const approvalsInWindow = await countAutoApprovalsInWindow(this.db, ctx.projectId);
+      const reasons = evaluateAutoModeGuards({
+        type: p.type,
+        kind: p.kind,
+        similar: p.similar,
+        vectorStaged: p.vectorStaged,
+        humanTarget,
+        approvalsInWindow,
+        dailyLimit: ctx.autoModeDailyLimit ?? AUTO_MODE_DEFAULT_DAILY_LIMIT,
+      });
+      if (reasons.length > 0) {
+        await this.persistHoldReasons(proposalId, reasons);
+        return 'pending';
+      }
+
+      await this.proposalsService.approve(proposalId, {
+        actor: autoModeActor(ctx.projectId),
+        auto: true,
+        recomputeEmbedding: false,
+      });
+      return 'approved';
+    } catch (err) {
+      if (err instanceof AutoApprovalRefusedError) {
+        if (err.reason === 'daily_limit') await this.persistHoldReasons(proposalId, ['daily_limit']);
+        else if (err.reason === 'no_vector') await this.persistHoldReasons(proposalId, ['not_computed']);
+        return 'pending'; // 'disabled' — auto mode wyłączony w międzyczasie, nic nie zawrócono
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`auto mode: auto-akceptacja ${proposalId} nie powiodła się (zostaje pending): ${message}`);
+      await this.persistHoldReasons(proposalId, ['auto_failed']);
+      return 'pending';
+    }
+  }
+
+  /** Cel korekty miał kiedykolwiek ręczną edycję człowieka (audyt `human_edit` z jego id w `affected_ids`, G3). */
+  private async hasHumanEdit(memoryId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: auditLog.id })
+      .from(auditLog)
+      .where(and(eq(auditLog.eventType, 'human_edit'), arrayOverlaps(auditLog.affectedIds, [memoryId])))
+      .limit(1);
+    return row !== undefined;
+  }
+
+  /**
+   * Utrwala powody zawrócenia na propozycji (G5) — best-effort: błąd bazy nie może zmienić wyniku zapisu
+   * (propozycja i tak zostaje `pending`). Warunek `status='pending'` chroni przed nadpisaniem propozycji,
+   * którą w międzyczasie zatwierdził człowiek. `updatedAt` celowo nie ruszamy (to nie edycja treści).
+   */
+  private async persistHoldReasons(proposalId: string, reasons: AutoHoldReason[]): Promise<void> {
+    try {
+      await this.db
+        .update(proposals)
+        .set({ autoHoldReasons: reasons })
+        .where(and(eq(proposals.id, proposalId), eq(proposals.status, 'pending')));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`auto mode: zapis powodów zawrócenia (${proposalId}) nie powiódł się: ${message}`);
+    }
   }
 
   /**

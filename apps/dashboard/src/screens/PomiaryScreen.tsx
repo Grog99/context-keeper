@@ -184,7 +184,8 @@ export function PomiaryScreen() {
             <p className="mb-2.5 text-xs text-muted-foreground">
               "Zaakceptowane z edycją" to PODZBIÓR zaakceptowanych (recenzent poprawił treść przed zatwierdzeniem),
               nie osobna, rozłączna kategoria. Samo-wycofania nocnego joba (<code>withdrawn</code>) są pominięte —
-              to nie decyzja człowieka.
+              to nie decyzja człowieka. Auto-akceptacje (auto mode) nie są tu liczone — wykres pokazuje wyłącznie
+              decyzje człowieka.
             </p>
             <div className="rounded-lg border border-border bg-surface p-3">
               <ProposalOutcomeChart buckets={data.proposalSeries.buckets} bucket={data.range.bucket} />

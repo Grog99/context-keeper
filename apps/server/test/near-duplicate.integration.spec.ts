@@ -106,9 +106,10 @@ describe('Detekcja prawie-duplikatów przy zapisie (A1, integration, testcontain
       }),
     );
     const embeddingService = new EmbeddingService(provider, config);
+    const proposalsService = new ProposalsService(db, config, audit, embeddingService);
     return {
-      memoryService: new MemoryService(db, config, audit, embeddingService, new UsageService(db)),
-      proposalsService: new ProposalsService(db, config, audit, embeddingService),
+      memoryService: new MemoryService(db, config, audit, embeddingService, new UsageService(db), proposalsService),
+      proposalsService,
     };
   }
 
