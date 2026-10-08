@@ -3,7 +3,10 @@
 Rzeczy świadomie odłożone poza bieżącą wersję. Nie są porzucone — czekają na decyzję albo na sygnał
 z danych (część jest **warunkowa**). Aktywny plan i to, co robimy teraz → [`roadmap.md`](roadmap.md).
 
-**Aktualizacja:** 2026-10-06 · domknięcie v1.5: trzy pozycje długu testowego 🟠 (Vitest w
+**Aktualizacja:** 2026-10-08 · domknięcie v1.6: z [`roadmap.md`](roadmap.md) wróciło strojenie
+limitów nocnego jobu (C2, warunkowe — czeka na realną mieszankę propozycji z prune i
+`conflicts_report`); lepszy prune, `conflicts_report`, auto mode i dług 🟠 #5/#7 zrobione w v1.6.
+2026-10-06 — domknięcie v1.5: trzy pozycje długu testowego 🟠 (Vitest w
 `apps/dashboard`, test throttlingu logowania, test `surface.middleware`) przeszły do
 [`roadmap.md`](roadmap.md), v1.7 („Luki w testach z przeglądu technicznego"); doszedł filtr kolejki
 dla propozycji projektów (odłożony z v1.5). 2026-10-03 — sesja planowania v1.5–v1.6: lepszy prune
@@ -54,8 +57,16 @@ Legenda: ⬜ przed nami · ⏸️ warunkowe (czeka na sygnał / decyzję)
   nakładają się na różne fakty, żaden próg tego nie naprawi). Dotyczy i hintu „podobne do istniejących",
   i samego retrievalu. Wymaga `reembed` — decyzja o presecie przy deployu. **Poza zakresem A1.**
 
-> `conflicts_report` i „lepszy prune w nocnym jobie" → [`roadmap.md`](roadmap.md), v1.6 (dzielą skan
-> i mały model, więc idą razem; przeniesione z v1.4 razem z auto mode).
+- **Strojenie limitów nocnego jobu** ⏸️ — sufit pending propozycji nocnych, podział capu
+  `NIGHTLY_MAX_PROPOSALS_PER_RUN` (dziś 200) na projekty, priorytet typów przy obcinaniu (dziś
+  leksykograficzny po `conditionKey`, rozkład na projekty przypadkowy), liczniki per projekt. Ticket
+  C2 `nightly-queue-tuning`; pytania wejściowe P7–P10 na końcu
+  [`.tickets/nightly-scale.md`](../.tickets/nightly-scale.md). Odłożone z v1.6 (2026-10-08).
+  **Warunkowe:** wracamy, gdy włączony LLM (prune + `conflicts_report`) da realną mieszankę propozycji
+  albo cap zacznie obcinać przebiegi (`skippedCap > 0` w logu / licznikach nocnego jobu).
+
+> `conflicts_report` i „lepszy prune w nocnym jobie" → zrobione w v1.6
+> ([`archive/roadmap-2026-10-08-v1.6-complete.md`](archive/roadmap-2026-10-08-v1.6-complete.md)).
 
 ## Kolejka akceptacji
 
@@ -67,8 +78,8 @@ Legenda: ⬜ przed nami · ⏸️ warunkowe (czeka na sygnał / decyzję)
   globalnych. Osobny filtr / widok propozycji projektów. Odłożone z v1.5 (2026-10-05): na start
   wystarcza istniejący filtr typu.
 
-> Auto mode per projekt → [`roadmap.md`](roadmap.md), v1.6 (zastąpił dawne „Auto-allow po N
-> spójnych decyzjach", patrz „Wycięte").
+> Auto mode per projekt → zrobione w v1.6 (zastąpił dawne „Auto-allow po N spójnych decyzjach",
+> patrz „Wycięte").
 
 ## Auth i dostęp
 
@@ -96,7 +107,7 @@ Z przeglądu technicznego 2026-07-29 → [`tech-review.md`](tech-review.md) (tam
 `plik:linia`, tu jednolinijkowce). Wagi: 🟠 będzie boleć · 🟢 higiena.
 
 > Wszystkie cztery pozycje 🔴 („boli teraz") → zrobione w v1.4. `GET /api/proposals` bez `LIMIT` (#5)
-> i audyt per projekt (#7) → [`roadmap.md`](roadmap.md), v1.6 („Nocny job na skali"). Vitest w
+> i audyt per projekt (#7) → zrobione w v1.6 („Nocny job na skali"). Vitest w
 > dashboardzie, test throttlingu logowania i test `surface.middleware` → v1.7 („Luki w testach").
 
 - **⌘K: debounce + indeks `memories(updated_at)`** ⬜ 🟠 — request na każdy klawisz, `ILIKE '%q%'` i
