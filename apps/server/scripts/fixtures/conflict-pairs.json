@@ -1,0 +1,365 @@
+{
+  "_comment": "Syntetyczne pary faktów (w kształcie pamięci deweloperskiej, PL + EN) do pomiaru NIGHTLY_CONFLICT_DISTANCE (apps/server/scripts/measure-conflict-distance.mjs). Treści WYMYŚLONE na potrzeby pomiaru — nie pochodzą z żadnej realnej pamięci projektu. label: contradiction = ten sam podmiot i atrybut, sprzeczne wartości; compatible = ten sam temat, wartości nie wykluczają się; paraphrase = ta sama treść innymi słowami. lang: pl | en | pl-en (para międzyjęzykowa). Pary 'unrelated' skrypt wyprowadza sam (a z pary i × b z pary j, różne tematy).",
+  "pairs": [
+    {
+      "id": "c01", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Deploy produkcyjny idzie przez GitHub Actions", "body": "Po merge do main workflow deploy.yml buduje obraz i wdraża go na serwer. Nie uruchamiamy już nic ręcznie na maszynie.", "tags": ["deploy", "ci"] },
+      "b": { "header": "Deploy produkcyjny idzie przez webhook Coolify", "body": "Po merge do main Coolify sam pobiera repo i buduje obraz. GitHub Actions nie uczestniczy we wdrożeniu.", "tags": ["deploy", "coolify"] }
+    },
+    {
+      "id": "c02", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Baza danych to Postgres 16", "body": "Obraz w docker-compose to pgvector/pgvector:pg16, katalog danych montujemy w /var/lib/postgresql/data.", "tags": ["postgres", "infra"] },
+      "b": { "header": "Baza danych to Postgres 18", "body": "Obraz w docker-compose to pgvector/pgvector:pg18, a wolumen montujemy w /var/lib/postgresql.", "tags": ["postgres", "infra"] }
+    },
+    {
+      "id": "c03", "label": "contradiction", "lang": "pl",
+      "a": { "header": "API nasłuchuje na porcie 3000", "body": "Serwer NestJS startuje na porcie 3000, reverse proxy kieruje cały ruch /api na ten port.", "tags": ["api", "porty"] },
+      "b": { "header": "API nasłuchuje na porcie 8080", "body": "Serwer NestJS startuje na porcie 8080, proxy przekazuje /api na ten port.", "tags": ["api", "porty"] }
+    },
+    {
+      "id": "c04", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Menedżer pakietów w monorepo to pnpm", "body": "Instalujemy zależności wyłącznie przez pnpm install. Lockfile to pnpm-lock.yaml i nie używamy npm.", "tags": ["tooling", "pnpm"] },
+      "b": { "header": "Menedżer pakietów w monorepo to npm", "body": "Zależności instalujemy przez npm ci, lockfile to package-lock.json. Nie korzystamy z pnpm.", "tags": ["tooling", "npm"] }
+    },
+    {
+      "id": "c05", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Testy jednostkowe uruchamiamy w vitest", "body": "Cały monorepo korzysta z vitest, konfiguracja w vitest.config.ts. Jest nie jest zainstalowany.", "tags": ["testy", "vitest"] },
+      "b": { "header": "Testy jednostkowe uruchamiamy w jest", "body": "Używamy jest z ts-jest, konfiguracja w jest.config.js. Vitest wyleciał z projektu.", "tags": ["testy", "jest"] }
+    },
+    {
+      "id": "c06", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Zmiany trafiają na main wyłącznie przez pull request", "body": "Push bezpośrednio na main jest zablokowany regułą branch protection, każda zmiana wymaga PR i zielonego CI.", "tags": ["git", "workflow"] },
+      "b": { "header": "Małe poprawki commitujemy prosto na main", "body": "Przy drobnych poprawkach nie otwieramy PR, pushujemy bezpośrednio na main, bo mamy trunk-based development.", "tags": ["git", "workflow"] }
+    },
+    {
+      "id": "c07", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Logowanie w serwerze przez pino", "body": "Logger to pino z nestjs-pino, logi strukturalne w JSON. Winston usunięty z zależności.", "tags": ["logi", "pino"] },
+      "b": { "header": "Logowanie w serwerze przez winston", "body": "Logger to winston z transportem do pliku, format tekstowy. Pino nie jest używane.", "tags": ["logi", "winston"] }
+    },
+    {
+      "id": "c08", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Dashboard uwierzytelnia się sesją w ciasteczku httpOnly", "body": "Po zalogowaniu serwer ustawia ciasteczko sesji httpOnly, SameSite=Lax. Token nie jest dostępny dla JavaScriptu.", "tags": ["auth", "dashboard"] },
+      "b": { "header": "Dashboard uwierzytelnia się tokenem JWT w localStorage", "body": "Po zalogowaniu front zapisuje JWT w localStorage i dokleja go do każdego żądania w nagłówku Authorization.", "tags": ["auth", "dashboard"] }
+    },
+    {
+      "id": "c09", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Migracje schematu generuje drizzle-kit", "body": "Zmianę schematu robimy w TypeScript, potem drizzle-kit generate tworzy plik SQL. Nie piszemy migracji ręcznie.", "tags": ["db", "migracje"] },
+      "b": { "header": "Migracje schematu piszemy ręcznie w SQL", "body": "Każda migracja to ręcznie napisany plik .sql w katalogu migrations. Generatory schematu są zakazane.", "tags": ["db", "migracje"] }
+    },
+    {
+      "id": "c10", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Środowisko uruchomieniowe to Node 20", "body": "Dockerfile bazuje na node:20-alpine, w package.json engines wymaga Node >=20 <21.", "tags": ["node", "runtime"] },
+      "b": { "header": "Środowisko uruchomieniowe to Node 24", "body": "Dockerfile bazuje na node:24-alpine, engines wymaga Node >=24.", "tags": ["node", "runtime"] }
+    },
+    {
+      "id": "c11", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Embeddingi liczymy lokalnie bge-m3 przez TEI", "body": "Preset multilingual: kontener TEI z modelem BAAI/bge-m3, wektory 1024 wymiary. Zewnętrzne API embeddingów nie jest używane.", "tags": ["embeddingi", "tei"] },
+      "b": { "header": "Embeddingi liczymy przez zewnętrzne API OpenAI", "body": "Preset api: żądania do API OpenAI, model text-embedding-3-small. Lokalny TEI nie jest uruchamiany.", "tags": ["embeddingi", "openai"] }
+    },
+    {
+      "id": "c12", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Komunikaty commitów piszemy po angielsku", "body": "Konwencja: Conventional Commits, opis w trybie rozkazującym po angielsku, np. fix: handle empty body.", "tags": ["git", "konwencje"] },
+      "b": { "header": "Komunikaty commitów piszemy po polsku", "body": "Konwencja: opis commita po polsku w trybie dokonanym, np. poprawiono obsługę pustego body.", "tags": ["git", "konwencje"] }
+    },
+    {
+      "id": "c13", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Redis jest używany do sesji i cache", "body": "Sesje dashboardu i cache wyników wyszukiwania trzymamy w Redisie, kontener redis jest w docker-compose.", "tags": ["redis", "infra"] },
+      "b": { "header": "Nie używamy Redisa w ogóle", "body": "Sesje są w Postgresie, cache nie istnieje. Nie ma żadnego kontenera Redis i nie planujemy go dodawać.", "tags": ["redis", "infra"] }
+    },
+    {
+      "id": "c14", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Identyfikatory pamięci to nanoid z prefiksem mem_", "body": "Id generujemy jako prefiks plus losowy nanoid, np. mem_9d4t186i1us0. Nie używamy UUID.", "tags": ["id", "schemat"] },
+      "b": { "header": "Identyfikatory pamięci to UUID v4", "body": "Klucze główne to UUID v4 generowane w bazie przez gen_random_uuid(). Prefiksowane id zostały porzucone.", "tags": ["id", "schemat"] }
+    },
+    {
+      "id": "c15", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Usunięcie pamięci tylko archiwizuje wpis", "body": "Approve proposala delete ustawia status archived, wiersz i historia zostają w bazie. Nic nie jest kasowane na stałe.", "tags": ["pamiec", "delete"] },
+      "b": { "header": "Usunięcie pamięci kasuje wiersz z bazy", "body": "Approve proposala delete wykonuje DELETE FROM memories, razem z embeddingami i rewizjami. Odzyskanie nie jest możliwe.", "tags": ["pamiec", "delete"] }
+    },
+    {
+      "id": "c16", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Limit żądań MCP to 60 na minutę na token", "body": "Rate limiter na /mcp przepuszcza 60 żądań na minutę dla jednego tokena, powyżej zwraca 429.", "tags": ["mcp", "rate-limit"] },
+      "b": { "header": "Limit żądań MCP to 600 na minutę na token", "body": "Rate limiter na /mcp przepuszcza 600 żądań na minutę dla jednego tokena, powyżej zwraca 429.", "tags": ["mcp", "rate-limit"] }
+    },
+    {
+      "id": "c17", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Timeout wywołania modelu LLM to 30 sekund", "body": "Pojedyncze żądanie do providera LLM jest przerywane po 30 sekundach, bez ponowienia przy timeoucie.", "tags": ["llm", "timeout"] },
+      "b": { "header": "Timeout wywołania modelu LLM to 120 sekund", "body": "Pojedyncze żądanie do providera LLM czeka do 120 sekund, bo lokalne modele odpowiadają wolno.", "tags": ["llm", "timeout"] }
+    },
+    {
+      "id": "c18", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Backup bazy robimy codziennie o 03:00", "body": "Skrypt infra/backup.sh odpala się z crona każdej nocy o 03:00, trzymamy 14 ostatnich kopii.", "tags": ["backup", "infra"] },
+      "b": { "header": "Backup bazy robimy raz w tygodniu w niedzielę", "body": "Skrypt infra/backup.sh odpala się z crona w niedzielę o 04:00, trzymamy 4 ostatnie kopie.", "tags": ["backup", "infra"] }
+    },
+    {
+      "id": "c19", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Dane z API w dashboardzie pobiera TanStack Query", "body": "Cały stan serwerowy w SPA obsługuje TanStack Query, bez globalnego store'a. Redux nie jest używany.", "tags": ["frontend", "stan"] },
+      "b": { "header": "Stan aplikacji w dashboardzie trzyma Redux Toolkit", "body": "Dane z API i stan UI są w Redux Toolkit z RTK Query. TanStack Query został usunięty.", "tags": ["frontend", "stan"] }
+    },
+    {
+      "id": "c20", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Style w dashboardzie piszemy w Tailwind", "body": "Wszystkie style to klasy Tailwind z tokenami designu, bez osobnych plików CSS.", "tags": ["frontend", "css"] },
+      "b": { "header": "Style w dashboardzie piszemy w CSS Modules", "body": "Każdy komponent ma własny plik .module.css. Tailwind nie jest zainstalowany.", "tags": ["frontend", "css"] }
+    },
+    {
+      "id": "c21", "label": "contradiction", "lang": "pl",
+      "a": { "header": "ESLint używa flat config", "body": "Konfiguracja w eslint.config.mjs w korzeniu monorepo, pliki .eslintrc nie istnieją.", "tags": ["lint", "tooling"] },
+      "b": { "header": "ESLint używa konfiguracji .eslintrc.json", "body": "Każdy pakiet ma własny .eslintrc.json. Format flat config jest wyłączony.", "tags": ["lint", "tooling"] }
+    },
+    {
+      "id": "c22", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Zmienna SECRETS_ENCRYPTION_KEY jest wymagana przy starcie", "body": "Bez SECRETS_ENCRYPTION_KEY serwer odmawia startu i kończy się z błędem walidacji env.", "tags": ["env", "sekrety"] },
+      "b": { "header": "Zmienna SECRETS_ENCRYPTION_KEY jest opcjonalna", "body": "Serwer startuje bez SECRETS_ENCRYPTION_KEY, wtedy po prostu nie da się zapisać klucza API modelu.", "tags": ["env", "sekrety"] }
+    },
+    {
+      "id": "c23", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Reverse proxy to Caddy z automatycznym TLS", "body": "Przed aplikacją stoi Caddy, certyfikaty Let's Encrypt wystawia automatycznie. Nginx nie jest używany.", "tags": ["proxy", "tls"] },
+      "b": { "header": "Reverse proxy to nginx z ręcznym certyfikatem", "body": "Przed aplikacją stoi nginx, certyfikat wgrywamy ręcznie raz w roku. Caddy nie jest używany.", "tags": ["proxy", "tls"] }
+    },
+    {
+      "id": "c24", "label": "contradiction", "lang": "pl",
+      "a": { "header": "Komentarze w kodzie piszemy po polsku", "body": "Konwencja repo: komentarze i dokumentacja w kodzie po polsku, identyfikatory po angielsku.", "tags": ["kod", "konwencje"] },
+      "b": { "header": "Komentarze w kodzie piszemy po angielsku", "body": "Konwencja repo: komentarze, nazwy i dokumentacja w kodzie wyłącznie po angielsku.", "tags": ["kod", "konwencje"] }
+    },
+    {
+      "id": "c25", "label": "contradiction", "lang": "en",
+      "a": { "header": "The default branch is main", "body": "All pull requests target main. There is no long-lived develop branch and releases are tagged from main.", "tags": ["git", "workflow"] },
+      "b": { "header": "The default branch is develop", "body": "All pull requests target develop, and main only receives release merges. Never open a PR against main.", "tags": ["git", "workflow"] }
+    },
+    {
+      "id": "c26", "label": "contradiction", "lang": "en",
+      "a": { "header": "Docker images are built on Alpine", "body": "The server Dockerfile starts from node:24-alpine to keep the image small. Debian-based images are not used.", "tags": ["docker", "infra"] },
+      "b": { "header": "Docker images are built on Debian slim", "body": "The server Dockerfile starts from node:24-bookworm-slim because Alpine's musl breaks native modules. Alpine is not used.", "tags": ["docker", "infra"] }
+    },
+    {
+      "id": "c27", "label": "contradiction", "lang": "en",
+      "a": { "header": "A fact body is limited to 8192 characters", "body": "BODY_MAX_FACT defaults to 8192 characters, anything longer is rejected by save_memory.", "tags": ["limits", "validation"] },
+      "b": { "header": "A fact body is limited to 4096 characters", "body": "BODY_MAX_FACT defaults to 4096 characters, anything longer is rejected by save_memory.", "tags": ["limits", "validation"] }
+    },
+    {
+      "id": "c28", "label": "contradiction", "lang": "en",
+      "a": { "header": "Search events are kept for 90 days", "body": "The nightly job prunes search_events rows older than 90 days. This is the SEARCH_EVENTS_RETENTION_DAYS default.", "tags": ["retention", "metrics"] },
+      "b": { "header": "Search events are kept for 30 days", "body": "The nightly job prunes search_events rows older than 30 days. This is the SEARCH_EVENTS_RETENTION_DAYS default.", "tags": ["retention", "metrics"] }
+    },
+    {
+      "id": "c29", "label": "contradiction", "lang": "en",
+      "a": { "header": "A missing resource returns 404", "body": "GET /api/memories/:id responds with 404 and a JSON error envelope when the memory does not exist.", "tags": ["api", "errors"] },
+      "b": { "header": "A missing resource returns 410", "body": "GET /api/memories/:id responds with 410 Gone and a JSON error envelope when the memory does not exist.", "tags": ["api", "errors"] }
+    },
+    {
+      "id": "c30", "label": "contradiction", "lang": "en",
+      "a": { "header": "API tokens are stored as SHA-256 hashes", "body": "Only the hash of a bearer token is persisted. The plaintext token is shown once at creation and cannot be recovered.", "tags": ["auth", "tokens"] },
+      "b": { "header": "API tokens are stored in plaintext", "body": "Bearer tokens are persisted as plain strings in the tokens table so that the dashboard can show them again on demand.", "tags": ["auth", "tokens"] }
+    },
+    {
+      "id": "c31", "label": "contradiction", "lang": "en",
+      "a": { "header": "Request validation uses Zod schemas", "body": "Controllers validate bodies and queries through ZodValidationPipe with Zod schemas. class-validator is not installed.", "tags": ["validation", "api"] },
+      "b": { "header": "Request validation uses class-validator DTOs", "body": "Controllers validate input through DTO classes decorated with class-validator and a global ValidationPipe. Zod is not used for requests.", "tags": ["validation", "api"] }
+    },
+    {
+      "id": "c32", "label": "contradiction", "lang": "en",
+      "a": { "header": "CI runs on GitHub-hosted runners", "body": "The workflows use runs-on: ubuntu-latest. We have no self-hosted runner.", "tags": ["ci", "github"] },
+      "b": { "header": "CI runs on a self-hosted runner", "body": "Workflows use runs-on: self-hosted because integration tests need our local Docker daemon. GitHub-hosted runners are not used.", "tags": ["ci", "github"] }
+    },
+    {
+      "id": "c33", "label": "contradiction", "lang": "en",
+      "a": { "header": "Feature flags live in environment variables", "body": "Every flag is read from process.env at startup, so changing one needs a restart. There is no flags table.", "tags": ["flags", "config"] },
+      "b": { "header": "Feature flags live in a database table", "body": "Flags are rows in the feature_flags table, read at runtime and toggled from the dashboard without a restart.", "tags": ["flags", "config"] }
+    },
+    {
+      "id": "c34", "label": "contradiction", "lang": "en",
+      "a": { "header": "Integration tests start Postgres with testcontainers", "body": "Each integration spec boots its own pgvector container through testcontainers. Docker must be running locally.", "tags": ["testing", "postgres"] },
+      "b": { "header": "Integration tests use a shared Postgres on localhost", "body": "Integration specs connect to the Postgres on localhost:5432 started by docker compose. Testcontainers is not used.", "tags": ["testing", "postgres"] }
+    },
+    {
+      "id": "x01", "label": "contradiction", "lang": "pl-en",
+      "a": { "header": "Deploys go through GitHub Actions", "body": "Merging to main triggers the deploy workflow that builds the image and rolls out the server. Nobody deploys by hand.", "tags": ["deploy", "ci"] },
+      "b": { "header": "Deploy robimy ręcznie przez docker compose na serwerze", "body": "Po zalogowaniu na serwer przez SSH uruchamiamy docker compose pull i up -d. Żaden workflow nie wdraża za nas.", "tags": ["deploy", "docker"] }
+    },
+    {
+      "id": "x02", "label": "contradiction", "lang": "pl-en",
+      "a": { "header": "The API listens on port 3000", "body": "The NestJS server binds to port 3000 and the reverse proxy forwards /api to it.", "tags": ["api", "ports"] },
+      "b": { "header": "API nasłuchuje na porcie 4000", "body": "Serwer NestJS startuje na porcie 4000, proxy przekazuje /api na ten port.", "tags": ["api", "porty"] }
+    },
+    {
+      "id": "x03", "label": "contradiction", "lang": "pl-en",
+      "a": { "header": "Package manager is pnpm", "body": "Dependencies are installed with pnpm install only. The lockfile is pnpm-lock.yaml and npm is never used.", "tags": ["tooling", "pnpm"] },
+      "b": { "header": "Menedżer pakietów to yarn", "body": "Zależności instalujemy przez yarn install, lockfile to yarn.lock. Nie używamy ani npm, ani pnpm.", "tags": ["tooling", "yarn"] }
+    },
+    {
+      "id": "x04", "label": "contradiction", "lang": "pl-en",
+      "a": { "header": "Soft delete: removing a memory only archives it", "body": "Approving a delete proposal sets status to archived. The row and its history stay in the database.", "tags": ["memory", "delete"] },
+      "b": { "header": "Usunięcie pamięci kasuje wpis na stałe", "body": "Approve proposala delete usuwa wiersz z bazy razem z embeddingami. Nie ma archiwum.", "tags": ["pamiec", "delete"] }
+    },
+    {
+      "id": "x05", "label": "contradiction", "lang": "pl-en",
+      "a": { "header": "Database backups run every night at 03:00", "body": "A cron job runs infra/backup.sh nightly at 03:00 and keeps the last 14 dumps.", "tags": ["backup", "infra"] },
+      "b": { "header": "Backup bazy robimy co tydzień", "body": "Skrypt backup.sh odpala się raz w tygodniu, w niedzielę, i trzyma 4 kopie. Nocnych backupów nie ma.", "tags": ["backup", "infra"] }
+    },
+    {
+      "id": "x06", "label": "contradiction", "lang": "pl-en",
+      "a": { "header": "Unit tests run on vitest", "body": "The whole monorepo uses vitest with vitest.config.ts. Jest is not installed.", "tags": ["testing", "vitest"] },
+      "b": { "header": "Testy jednostkowe uruchamiamy w jest", "body": "Używamy jest z ts-jest i jest.config.js. Vitest nie jest częścią projektu.", "tags": ["testy", "jest"] }
+    },
+    {
+      "id": "x07", "label": "contradiction", "lang": "pl-en",
+      "a": { "header": "Rate limit on /mcp is 60 requests per minute", "body": "A single token may send 60 requests per minute to /mcp, extra requests get HTTP 429.", "tags": ["mcp", "rate-limit"] },
+      "b": { "header": "Limit żądań na /mcp to 300 na minutę", "body": "Pojedynczy token może wysłać 300 żądań na minutę do /mcp, nadmiarowe dostają HTTP 429.", "tags": ["mcp", "rate-limit"] }
+    },
+    {
+      "id": "x08", "label": "contradiction", "lang": "pl-en",
+      "a": { "header": "We use Postgres 18 with pgvector", "body": "The compose file pins pgvector/pgvector:pg18 and the data volume is mounted at /var/lib/postgresql.", "tags": ["postgres", "infra"] },
+      "b": { "header": "Używamy Postgresa 15", "body": "W docker-compose jest obraz pgvector/pgvector:pg15, Postgres 16 i nowsze są niewspierane.", "tags": ["postgres", "infra"] }
+    },
+    {
+      "id": "p01", "label": "compatible", "lang": "pl",
+      "a": { "header": "Deploy produkcyjny idzie przez GitHub Actions", "body": "Po merge do main workflow deploy.yml buduje obraz i wdraża go na serwer.", "tags": ["deploy", "ci"] },
+      "b": { "header": "Rollback deployu robimy przez ponowne uruchomienie workflow", "body": "Żeby cofnąć wdrożenie, odpalamy deploy.yml ręcznie z workflow_dispatch podając tag poprzedniego obrazu.", "tags": ["deploy", "rollback"] }
+    },
+    {
+      "id": "p02", "label": "compatible", "lang": "pl",
+      "a": { "header": "Baza danych to Postgres 18 z pgvector", "body": "Obraz w docker-compose to pgvector/pgvector:pg18.", "tags": ["postgres", "infra"] },
+      "b": { "header": "Indeks wektorowy to HNSW z cosine ops", "body": "Na kolumnie embeddings.vector jest indeks HNSW vector_cosine_ops, zapytania sortują po operatorze <=>.", "tags": ["postgres", "wektory"] }
+    },
+    {
+      "id": "p03", "label": "compatible", "lang": "pl",
+      "a": { "header": "W developmencie API nasłuchuje na porcie 3000", "body": "Lokalnie pnpm start:dev wystawia API na porcie 3000.", "tags": ["api", "dev"] },
+      "b": { "header": "W produkcji kontener API nasłuchuje na porcie 8080", "body": "W obrazie produkcyjnym ustawiamy PORT=8080, a proxy łączy się z tym portem w sieci dockera.", "tags": ["api", "produkcja"] }
+    },
+    {
+      "id": "p04", "label": "compatible", "lang": "pl",
+      "a": { "header": "Testy jednostkowe uruchamiamy w vitest", "body": "Monorepo używa vitest, konfiguracja w vitest.config.ts.", "tags": ["testy", "vitest"] },
+      "b": { "header": "Testy integracyjne wymagają działającego Dockera", "body": "Specy integracyjne startują kontener Postgresa przez testcontainers, więc Docker musi działać lokalnie.", "tags": ["testy", "docker"] }
+    },
+    {
+      "id": "p05", "label": "compatible", "lang": "pl",
+      "a": { "header": "Logowanie w serwerze przez pino", "body": "Logger to pino z nestjs-pino, logi strukturalne w JSON.", "tags": ["logi", "pino"] },
+      "b": { "header": "Logi nigdy nie zawierają treści pamięci", "body": "W logach i komunikatach błędów zapisujemy tylko id i kody, treść wpisów pamięci jest zabroniona.", "tags": ["logi", "bezpieczenstwo"] }
+    },
+    {
+      "id": "p06", "label": "compatible", "lang": "pl",
+      "a": { "header": "Dashboard uwierzytelnia się sesją w ciasteczku httpOnly", "body": "Po zalogowaniu serwer ustawia ciasteczko sesji httpOnly, SameSite=Lax.", "tags": ["auth", "dashboard"] },
+      "b": { "header": "Żądania mutujące z dashboardu wymagają nagłówka CSRF", "body": "POST, PATCH i DELETE z SPA muszą nieść nagłówek x-csrf-token zgodny z ciasteczkiem, inaczej guard zwraca 403.", "tags": ["auth", "csrf"] }
+    },
+    {
+      "id": "p07", "label": "compatible", "lang": "pl",
+      "a": { "header": "Migracje schematu generuje drizzle-kit", "body": "Zmiana schematu w TypeScript, potem drizzle-kit generate tworzy plik SQL.", "tags": ["db", "migracje"] },
+      "b": { "header": "Migracje uruchamiają się automatycznie przy starcie serwera", "body": "Entrypoint kontenera wywołuje db:migrate przed startem aplikacji, więc nie trzeba ich odpalać ręcznie.", "tags": ["db", "migracje"] }
+    },
+    {
+      "id": "p08", "label": "compatible", "lang": "pl",
+      "a": { "header": "Limit żądań MCP to 60 na minutę na token", "body": "Rate limiter na /mcp przepuszcza 60 żądań na minutę dla jednego tokena.", "tags": ["mcp", "rate-limit"] },
+      "b": { "header": "Przekroczenie limitu zwraca 429 z nagłówkiem Retry-After", "body": "Odpowiedź 429 niesie Retry-After w sekundach, klient MCP powinien odczekać ten czas przed ponowieniem.", "tags": ["mcp", "rate-limit"] }
+    },
+    {
+      "id": "p09", "label": "compatible", "lang": "pl",
+      "a": { "header": "Backup bazy robimy codziennie o 03:00", "body": "Skrypt infra/backup.sh odpala się z crona każdej nocy o 03:00.", "tags": ["backup", "infra"] },
+      "b": { "header": "Kopie zapasowe są szyfrowane przed wysłaniem poza serwer", "body": "Dump bazy przechodzi przez age z kluczem publicznym operatora, dopiero potem trafia do zewnętrznego magazynu.", "tags": ["backup", "bezpieczenstwo"] }
+    },
+    {
+      "id": "p10", "label": "compatible", "lang": "pl",
+      "a": { "header": "Timeout wywołania modelu LLM to 30 sekund", "body": "Pojedyncze żądanie do providera LLM jest przerywane po 30 sekundach.", "tags": ["llm", "timeout"] },
+      "b": { "header": "Po trzech kolejnych błędach LLM krok nocny się wyłącza", "body": "Bezpiecznik zlicza kolejne błędy wywołań, po trzech reszta przebiegu pomija model.", "tags": ["llm", "bezpiecznik"] }
+    },
+    {
+      "id": "p11", "label": "compatible", "lang": "en",
+      "a": { "header": "API tokens are stored as SHA-256 hashes", "body": "Only the hash of a bearer token is persisted. The plaintext is shown once at creation.", "tags": ["auth", "tokens"] },
+      "b": { "header": "Token revocation takes effect immediately", "body": "Revoking a token in the dashboard sets revoked_at, and the next request with that token is rejected with 401. There is no grace period for revoked tokens.", "tags": ["auth", "tokens"] }
+    },
+    {
+      "id": "p12", "label": "compatible", "lang": "en",
+      "a": { "header": "Request validation uses Zod schemas", "body": "Controllers validate bodies and queries through ZodValidationPipe.", "tags": ["validation", "api"] },
+      "b": { "header": "Validation errors are returned as a 400 error envelope", "body": "A failed schema returns HTTP 400 with code validation_error and a list of field paths, never the submitted values.", "tags": ["validation", "errors"] }
+    },
+    {
+      "id": "p13", "label": "compatible", "lang": "en",
+      "a": { "header": "Docker images are built on Alpine", "body": "The server Dockerfile starts from node:24-alpine to keep the image small.", "tags": ["docker", "infra"] },
+      "b": { "header": "The server image is built in two stages", "body": "A build stage compiles TypeScript and a runtime stage copies only dist and production dependencies.", "tags": ["docker", "build"] }
+    },
+    {
+      "id": "p14", "label": "compatible", "lang": "en",
+      "a": { "header": "The default branch is main", "body": "All pull requests target main and releases are tagged from main.", "tags": ["git", "workflow"] },
+      "b": { "header": "Branch names follow type/short-description", "body": "Use feat/, fix/ or chore/ prefixes, for example feat/nightly-conflicts-report.", "tags": ["git", "workflow"] }
+    },
+    {
+      "id": "p15", "label": "compatible", "lang": "en",
+      "a": { "header": "Search events are kept for 90 days", "body": "The nightly job prunes search_events rows older than 90 days.", "tags": ["retention", "metrics"] },
+      "b": { "header": "Audit log rows are never pruned", "body": "The audit_log table is append-only and has no retention job, because it is the source of truth for review decisions.", "tags": ["retention", "audit"] }
+    },
+    {
+      "id": "p16", "label": "compatible", "lang": "en",
+      "a": { "header": "CI runs on GitHub-hosted runners", "body": "The workflows use runs-on: ubuntu-latest.", "tags": ["ci", "github"] },
+      "b": { "header": "CI caches the pnpm store between runs", "body": "The workflow restores the pnpm store through actions/cache keyed on pnpm-lock.yaml, which cuts install time to under a minute.", "tags": ["ci", "pnpm"] }
+    },
+    {
+      "id": "p17", "label": "compatible", "lang": "en",
+      "a": { "header": "A fact body is limited to 8192 characters", "body": "BODY_MAX_FACT defaults to 8192 characters.", "tags": ["limits", "validation"] },
+      "b": { "header": "A document body is limited to 262144 characters", "body": "BODY_MAX_DOCUMENT defaults to 262144 characters, and documents are split into chunks before embedding.", "tags": ["limits", "validation"] }
+    },
+    {
+      "id": "p18", "label": "compatible", "lang": "pl",
+      "a": { "header": "Reverse proxy to Caddy z automatycznym TLS", "body": "Przed aplikacją stoi Caddy, certyfikaty Let's Encrypt wystawia automatycznie.", "tags": ["proxy", "tls"] },
+      "b": { "header": "Caddy dodaje nagłówki bezpieczeństwa i kompresję", "body": "W Caddyfile włączone jest encode zstd gzip oraz nagłówki HSTS i X-Content-Type-Options.", "tags": ["proxy", "naglowki"] }
+    },
+    {
+      "id": "q01", "label": "paraphrase", "lang": "pl",
+      "a": { "header": "Deploy produkcyjny idzie przez GitHub Actions", "body": "Po merge do main workflow deploy.yml buduje obraz i wdraża go na serwer.", "tags": ["deploy", "ci"] },
+      "b": { "header": "Wdrożenie na produkcję robi GitHub Actions", "body": "Gdy zmiana wejdzie do main, workflow deploy.yml sam buduje obraz i publikuje go na serwerze.", "tags": ["deploy", "ci"] }
+    },
+    {
+      "id": "q02", "label": "paraphrase", "lang": "pl",
+      "a": { "header": "Baza danych to Postgres 18", "body": "Obraz w docker-compose to pgvector/pgvector:pg18.", "tags": ["postgres", "infra"] },
+      "b": { "header": "Używamy Postgresa w wersji 18", "body": "W docker-compose jest obraz pgvector/pgvector:pg18.", "tags": ["postgres", "infra"] }
+    },
+    {
+      "id": "q03", "label": "paraphrase", "lang": "pl",
+      "a": { "header": "Menedżer pakietów w monorepo to pnpm", "body": "Zależności instalujemy wyłącznie przez pnpm install, lockfile to pnpm-lock.yaml.", "tags": ["tooling", "pnpm"] },
+      "b": { "header": "W monorepo korzystamy tylko z pnpm", "body": "Instalacja zależności zawsze przez pnpm install; plik blokujący wersje to pnpm-lock.yaml.", "tags": ["tooling", "pnpm"] }
+    },
+    {
+      "id": "q04", "label": "paraphrase", "lang": "pl",
+      "a": { "header": "Usunięcie pamięci tylko archiwizuje wpis", "body": "Approve proposala delete ustawia status archived, wiersz i historia zostają w bazie.", "tags": ["pamiec", "delete"] },
+      "b": { "header": "Skasowanie pamięci przenosi ją do archiwum", "body": "Zatwierdzenie propozycji delete zmienia status na archived; sam wiersz i jego rewizje nie znikają z bazy.", "tags": ["pamiec", "delete"] }
+    },
+    {
+      "id": "q05", "label": "paraphrase", "lang": "pl",
+      "a": { "header": "Limit żądań MCP to 60 na minutę na token", "body": "Rate limiter na /mcp przepuszcza 60 żądań na minutę dla jednego tokena, powyżej zwraca 429.", "tags": ["mcp", "rate-limit"] },
+      "b": { "header": "Jeden token MCP może wysłać 60 żądań na minutę", "body": "Powyżej 60 żądań na minutę limiter na /mcp odpowiada kodem 429.", "tags": ["mcp", "rate-limit"] }
+    },
+    {
+      "id": "q06", "label": "paraphrase", "lang": "pl",
+      "a": { "header": "Backup bazy robimy codziennie o 03:00", "body": "Skrypt infra/backup.sh odpala się z crona każdej nocy o 03:00, trzymamy 14 kopii.", "tags": ["backup", "infra"] },
+      "b": { "header": "Kopia zapasowa bazy powstaje co noc o trzeciej", "body": "Cron uruchamia infra/backup.sh o 03:00 i zachowuje 14 ostatnich kopii.", "tags": ["backup", "infra"] }
+    },
+    {
+      "id": "q07", "label": "paraphrase", "lang": "en",
+      "a": { "header": "The default branch is main", "body": "All pull requests target main and releases are tagged from main.", "tags": ["git", "workflow"] },
+      "b": { "header": "Pull requests go to main", "body": "Main is the default branch, and release tags are created on it.", "tags": ["git", "workflow"] }
+    },
+    {
+      "id": "q08", "label": "paraphrase", "lang": "en",
+      "a": { "header": "API tokens are stored as SHA-256 hashes", "body": "Only the hash of a bearer token is persisted. The plaintext token is shown once at creation.", "tags": ["auth", "tokens"] },
+      "b": { "header": "Only a SHA-256 hash of each API token is kept", "body": "The raw bearer token is displayed a single time when it is created and is never stored.", "tags": ["auth", "tokens"] }
+    },
+    {
+      "id": "q09", "label": "paraphrase", "lang": "en",
+      "a": { "header": "Request validation uses Zod schemas", "body": "Controllers validate bodies and queries through ZodValidationPipe with Zod schemas.", "tags": ["validation", "api"] },
+      "b": { "header": "Controllers validate input with Zod", "body": "Bodies and query strings go through ZodValidationPipe, which is backed by Zod schemas.", "tags": ["validation", "api"] }
+    },
+    {
+      "id": "q10", "label": "paraphrase", "lang": "en",
+      "a": { "header": "Search events are kept for 90 days", "body": "The nightly job prunes search_events rows older than 90 days.", "tags": ["retention", "metrics"] },
+      "b": { "header": "search_events older than 90 days are removed nightly", "body": "A nightly cleanup deletes search_events rows past the 90 day retention.", "tags": ["retention", "metrics"] }
+    },
+    {
+      "id": "q11", "label": "paraphrase", "lang": "pl-en",
+      "a": { "header": "Deploys go through GitHub Actions", "body": "Merging to main triggers the deploy workflow that builds the image and rolls out the server.", "tags": ["deploy", "ci"] },
+      "b": { "header": "Deploy produkcyjny idzie przez GitHub Actions", "body": "Po merge do main workflow deploy.yml buduje obraz i wdraża go na serwer.", "tags": ["deploy", "ci"] }
+    },
+    {
+      "id": "q12", "label": "paraphrase", "lang": "pl-en",
+      "a": { "header": "The database is Postgres 18", "body": "The compose file uses the pgvector/pgvector:pg18 image.", "tags": ["postgres", "infra"] },
+      "b": { "header": "Baza danych to Postgres 18", "body": "Obraz w docker-compose to pgvector/pgvector:pg18.", "tags": ["postgres", "infra"] }
+    }
+  ]
+}

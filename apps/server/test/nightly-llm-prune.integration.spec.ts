@@ -61,6 +61,7 @@ const LLM_ZEROS = {
   llmSkippedSecret: 0,
   llmSkippedKeyUnreadable: 0,
 };
+const LLM_CONFLICT_ZEROS = { llmConflictCandidates: 0, llmConflictConsistent: 0, llmConflictProposed: 0 };
 const LLM_PRUNE_ZEROS = { llmPruneCandidates: 0, llmPruneKept: 0, llmPruneDeleteProposed: 0, llmPruneUpdateProposed: 0 };
 
 class StubEmbeddingProvider implements EmbeddingProvider {
@@ -282,6 +283,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
       searchEventsPruned: 0,
       ...LLM_ZEROS,
       ...LLM_PRUNE_ZEROS,
+      ...LLM_CONFLICT_ZEROS,
     });
     expect(fake.calls).toBe(0);
     const pending = await pendingNightly();
@@ -299,7 +301,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
 
     expect(result.status).toBe('success');
     expect(result.llm?.state).toBe('key_unreadable');
-    expect(result.counters).toMatchObject({ ...LLM_ZEROS, ...LLM_PRUNE_ZEROS });
+    expect(result.counters).toMatchObject({ ...LLM_ZEROS, ...LLM_PRUNE_ZEROS, ...LLM_CONFLICT_ZEROS });
     expect(fake.calls).toBe(0);
   });
 

@@ -12,7 +12,12 @@ import {
   type NightlyLlmReport,
   type SkippedSecretEntry,
 } from '../llm/llm.types';
-import { EMPTY_LLM_PRUNE_COUNTERS, type LlmPruneCounters } from '../nightly/nightly.types';
+import {
+  EMPTY_LLM_CONFLICT_COUNTERS,
+  EMPTY_LLM_PRUNE_COUNTERS,
+  type LlmConflictCounters,
+  type LlmPruneCounters,
+} from '../nightly/nightly.types';
 import { CsrfGuard } from './auth/csrf.guard';
 import { SessionGuard } from './auth/session.guard';
 import { DASHBOARD_ACTOR } from './dashboard.constants';
@@ -22,7 +27,7 @@ import { DashboardErrorFilter } from './dashboard-error.filter';
 export interface LlmLastRun {
   at: string;
   status: 'success';
-  counters: LlmCounters & LlmPruneCounters;
+  counters: LlmCounters & LlmPruneCounters & LlmConflictCounters;
   /** `null` dla przebiegów sprzed v1.6 (bez bloku `llm` w metadanych). */
   llm: NightlyLlmReport | null;
 }
@@ -40,8 +45,12 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /** Starsze wiersze `nightly_run` nie mają pól LLM — brakujące liczniki to 0, brakujący blok to `null`. */
-function pickCounters(raw: unknown): LlmCounters & LlmPruneCounters {
-  const out: LlmCounters & LlmPruneCounters = { ...EMPTY_LLM_COUNTERS, ...EMPTY_LLM_PRUNE_COUNTERS };
+function pickCounters(raw: unknown): LlmCounters & LlmPruneCounters & LlmConflictCounters {
+  const out: LlmCounters & LlmPruneCounters & LlmConflictCounters = {
+    ...EMPTY_LLM_COUNTERS,
+    ...EMPTY_LLM_PRUNE_COUNTERS,
+    ...EMPTY_LLM_CONFLICT_COUNTERS,
+  };
   if (!isRecord(raw)) return out;
   for (const key of Object.keys(out) as (keyof typeof out)[]) {
     const v = raw[key];

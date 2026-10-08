@@ -16,7 +16,7 @@ const DEFAULT_ACTOR = 'nightly';
 @Command({
   name: 'run-nightly',
   description:
-    'Uruchamia nocny job (dedup/merge + prune proposer + opcjonalny detektor LLM prune) — jednorazowy, ręczny przebieg.',
+    'Uruchamia nocny job (dedup/merge + prune proposer + opcjonalne detektory LLM: prune i sprzeczności) — jednorazowy, ręczny przebieg.',
 })
 export class RunNightlyCommand extends CommandRunner {
   constructor(private readonly nightlyService: NightlyService) {
@@ -39,7 +39,9 @@ export class RunNightlyCommand extends CommandRunner {
         `llmSkipped=cap:${c.llmSkippedCap},breaker:${c.llmSkippedBreaker},` +
         `secret:${c.llmSkippedSecret},key:${c.llmSkippedKeyUnreadable} ` +
         `llmPrune=cand:${c.llmPruneCandidates},kept:${c.llmPruneKept},` +
-        `delete:${c.llmPruneDeleteProposed},update:${c.llmPruneUpdateProposed}`;
+        `delete:${c.llmPruneDeleteProposed},update:${c.llmPruneUpdateProposed} ` +
+        `llmConflicts=cand:${c.llmConflictCandidates},consistent:${c.llmConflictConsistent},` +
+        `delete:${c.llmConflictProposed}`;
       if (result.status === 'success') {
         console.log(summary);
       } else {

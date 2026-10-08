@@ -1,21 +1,26 @@
-import { Archive, Bot, CheckCircle, FileDiff, GitMerge, Minus, Plus, Trash2, type LucideIcon } from 'lucide-react';
+import { Archive, Bot, CheckCircle, FileDiff, GitMerge, Minus, Plus, Scale, ShieldCheck, Trash2, type LucideIcon } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
 import { formatAbsoluteTime } from '../lib/format';
+import { conflictTargetAge } from '../lib/proposals';
 import { computeInlineWordDiff, WORD_DIFF_MAX_CHARS, type InlineDiffResult, type InlineDiffSegment } from '../lib/text-diff';
 import { cn } from '../lib/utils';
 import type { MemoryKind } from '../types/domain';
 
-type BlockVariant = 'add' | 'del' | 'result';
+type BlockVariant = 'add' | 'del' | 'result' | 'keep';
 
 const BLOCK_BORDER: Record<BlockVariant, string> = {
   add: 'border-l-[3px] border-l-success',
   del: 'border-l-[3px] border-l-danger opacity-85',
   result: 'border-l-[3px] border-l-success',
+  // `keep` (B3, kontrpartner sprzeczności): wpis ZOSTAJE bez zmian — neutralne tokeny (D6, bez nowych kolorów),
+  // żeby nie konkurował z `del` ani nie udawał dodania.
+  keep: 'border-l-[3px] border-l-border-strong',
 };
 const BLOCK_HEAD: Record<BlockVariant, string> = {
   add: 'bg-success-subtle text-success-foreground',
   del: 'bg-danger-subtle text-danger-foreground',
   result: 'bg-success-subtle text-success-foreground',
+  keep: 'bg-muted text-muted-foreground',
 };
 
 function DiffBlock({
@@ -24,12 +29,15 @@ function DiffBlock({
   label,
   body,
   tomb,
+  heading,
 }: {
   variant: BlockVariant;
   icon: LucideIcon;
   label: string;
   body: string;
   tomb?: boolean;
+  /** Nagłówek pamięci nad treścią (B3 — oba wpisy pary sprzeczności są rozpoznawalne po nagłówku). */
+  heading?: string;
 }) {
   return (
     <div
@@ -45,6 +53,16 @@ function DiffBlock({
           variant === 'del' && 'text-muted-foreground line-through decoration-danger',
         )}
       >
+        {heading && (
+          <p
+            className={cn(
+              'mb-1.5 text-[14.5px] font-medium leading-snug',
+              variant === 'del' && 'text-muted-foreground line-through decoration-danger',
+            )}
+          >
+            {heading}
+          </p>
+        )}
         {body}
       </div>
     </div>
@@ -55,13 +73,14 @@ function DiffLabel({ children }: { children: ReactNode }) {
   return <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-faint">{children}</p>;
 }
 
-/** Etykiety kategorii werdyktu modelu (`ProposalRationale.category`); nieznana kategoria (np. dołożona przez
- * B3) pokazuje się surowo — SPA nie psuje się na nowej wartości. */
+/** Etykiety kategorii werdyktu modelu (`ProposalRationale.category`); nieznana kategoria (np. dołożona w przyszłości)
+ * pokazuje się surowo — SPA nie psuje się na nowej wartości. */
 const RATIONALE_CATEGORY_LABEL: Record<string, string> = {
   ephemeral: 'efemeryczny',
   empty: 'pusty',
   verbose: 'rozwlekły',
   untidy: 'nieuporządkowany',
+  contradiction: 'sprzeczność',
 };
 
 /** Notka z werdyktem detektora LLM (G4): kategoria + uzasadnienie modelu, ton `info` jak `DedupHint`.
@@ -157,17 +176,32 @@ export interface MergeDiffData {
   result: { header: string; body: string };
 }
 
+/** Druga strona pary w proposalu z detektora sprzeczności (roadmap v1.6 B3) — wpis, który ZOSTAJE. */
+export interface DeleteCounterpart {
+  memoryId: string;
+  header: string;
+  body: string;
+  createdAt?: string;
+  /** Nie udało się wczytać pamięci kontrpartnera (usunięta/purge/błąd) — blok z komunikatem zamiast treści. */
+  missing?: boolean;
+}
+
 export interface DeleteDiffData {
   memoryId: string;
   header: string;
   body: string;
   reason?: string;
   rationale?: DiffRationale;
+  /** Obecny → proposal sprzeczności: tombstone targetu + separator + blok `keep` kontrpartnera. */
+  counterpart?: DeleteCounterpart;
+  /** `created_at` targetu — z `counterpart.createdAt` wyznacza etykiety „starszy/nowszy". */
+  targetCreatedAt?: string;
 }
 
 /** §8.2 — komponent zależny od `type` proposala (FR-D1), tabela §8.2 design-systemu:
  * create → jeden blok "nowa treść"; update → before/after; merge → N archiwum → C; delete →
- * tombstone przygaszony z powodem. */
+ * tombstone przygaszony z powodem; delete z kontrpartnerem (sprzeczność, B3) → tombstone + separator +
+ * blok `keep` z wpisem, który zostaje. */
 export type DiffViewProps =
   | { type: 'create'; data: CreateDiffData }
   | { type: 'update'; data: UpdateDiffData }
@@ -385,6 +419,54 @@ function UpdateDiff({ data }: { data: UpdateDiffData }) {
   );
 }
 
+/** Case `delete` z kontrpartnerem (detektor sprzeczności, roadmap v1.6 B3): (1) werdykt modelu, (2) tombstone
+ * wpisu do archiwizacji, (3) separator „sprzeczne z", (4) blok `keep` wpisu, który zostaje. Etykiety
+ * „starszy/nowszy" wynikają z `createdAt` obu stron (po zamianie kierunku target bywa nowszy) — gdy brakuje
+ * dat (kontrpartner niedostępny), etykieta wieku jest pomijana. */
+function ConflictDeleteDiff({ data, counterpart }: { data: DeleteDiffData; counterpart: DeleteCounterpart }) {
+  const targetAge = conflictTargetAge(
+    { id: data.memoryId, createdAt: data.targetCreatedAt },
+    { id: counterpart.memoryId, createdAt: counterpart.createdAt },
+  );
+  const AGE_LABEL = { older: 'starszy', newer: 'nowszy' } as const;
+  const targetAgeLabel = targetAge ? ` · ${AGE_LABEL[targetAge]}` : '';
+  const counterpartAgeLabel = targetAge ? ` · ${AGE_LABEL[targetAge === 'older' ? 'newer' : 'older']}` : '';
+  return (
+    <div>
+      <DiffLabel>Diff — sprzeczność: do archiwizacji (delete)</DiffLabel>
+      {data.rationale && <RationaleNote rationale={data.rationale} />}
+      <DiffBlock
+        variant="del"
+        icon={Trash2}
+        label={`${data.memoryId}${targetAgeLabel} · → archiwum`}
+        heading={data.header}
+        body={data.body}
+        tomb
+      />
+      <div className="my-0.5 mb-3 flex items-center justify-center gap-2 font-mono text-[11px] uppercase tracking-[0.05em] text-faint">
+        <Scale className="size-4" />
+        sprzeczne z
+      </div>
+      {counterpart.missing ? (
+        <DiffBlock
+          variant="keep"
+          icon={ShieldCheck}
+          label={`${counterpart.memoryId}${counterpartAgeLabel} · zostaje bez zmian`}
+          body="Pamięć niedostępna — nie udało się wczytać treści drugiego wpisu pary (mogła zostać usunięta). Zatwierdzenie i tak zarchiwizuje wyłącznie wpis powyżej."
+        />
+      ) : (
+        <DiffBlock
+          variant="keep"
+          icon={ShieldCheck}
+          label={`${counterpart.memoryId}${counterpartAgeLabel} · zostaje bez zmian`}
+          heading={counterpart.header}
+          body={counterpart.body}
+        />
+      )}
+    </div>
+  );
+}
+
 export function DiffView(props: DiffViewProps) {
   switch (props.type) {
     case 'create':
@@ -421,6 +503,7 @@ export function DiffView(props: DiffViewProps) {
       );
 
     case 'delete':
+      if (props.data.counterpart) return <ConflictDeleteDiff data={props.data} counterpart={props.data.counterpart} />;
       return (
         <div>
           <DiffLabel>Diff — do archiwizacji (delete)</DiffLabel>

@@ -169,6 +169,16 @@ describe('reconcile (Faza 6 — tabela decyzji self-cleaning re-scan)', () => {
       expect(result.toWithdraw).toEqual(['prop_plain']);
     });
 
+    it('proposal konfliktu (dwa affectedIds, exempt) bez dopasowania zostaje pending; bez exempt (strona nie-approved) jest wycofywany', () => {
+      const exempt = existing({ id: 'prop_conflict', type: 'delete', affectedIds: ['mem_a', 'mem_b'], exemptFromOrphanWithdraw: true });
+      const lostExemption = existing({ id: 'prop_orphan', type: 'delete', affectedIds: ['mem_a', 'mem_c'], exemptFromOrphanWithdraw: false });
+
+      const result = reconcile([], [exempt, lostExemption]);
+
+      expect(result.toWithdraw).toEqual(['prop_orphan']);
+      expect(result.toCreate).toEqual([]);
+    });
+
     it('exempt + dopasowany + stale -> replacement jak zawsze', () => {
       const cond = condition({ type: 'delete', affectedIds: ['mem_x'] });
       const llmExisting = existing({
