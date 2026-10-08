@@ -28,6 +28,9 @@ const SUCCESS_RESULT: NightlyRunResult = {
     llmPruneKept: 4,
     llmPruneDeleteProposed: 1,
     llmPruneUpdateProposed: 1,
+    llmConflictCandidates: 5,
+    llmConflictConsistent: 3,
+    llmConflictProposed: 2,
   },
   llm: { state: 'ready', skippedSecret: [{ memoryId: 'mem_abc', secretType: 'aws_access_key' }] },
 };
@@ -94,6 +97,9 @@ describe('NightlyController.run — ręczny trigger z dashboardu (roadmap v1.1)'
         llmPruneKept: 0,
         llmPruneDeleteProposed: 0,
         llmPruneUpdateProposed: 0,
+        llmConflictCandidates: 0,
+        llmConflictConsistent: 0,
+        llmConflictProposed: 0,
       },
       llm: null,
     };

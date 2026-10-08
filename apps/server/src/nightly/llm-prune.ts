@@ -134,7 +134,7 @@ const contentShape = z.object({
 
 /** Zwija białe znaki, przycina i skraca do `LLM_RATIONALE_REASON_MAX_LEN` (przycięcie, nie odrzucenie —
  * uzasadnienie to rozumowanie maszyny, nie treść pamięci). `null` = puste uzasadnienie. */
-function normalizeReason(raw: string | null | undefined): string | null {
+export function normalizeReason(raw: string | null | undefined): string | null {
   const collapsed = (raw ?? '').replace(/\s+/g, ' ').trim();
   if (collapsed.length === 0) return null;
   if (collapsed.length <= LLM_RATIONALE_REASON_MAX_LEN) return collapsed;

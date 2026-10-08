@@ -9,7 +9,9 @@ import type {
   BulkDecisionResult,
   BulkRejectOptions,
   ListProposalsPageFilter,
+  EditOptions,
   ProposalListPage,
+  SwapDirectionResult,
 } from '../src/proposals/proposals.types';
 
 const RESULT: BulkDecisionResult = { succeeded: ['prop_1', 'prop_2'], failed: [] };
@@ -23,11 +25,14 @@ function fakeProposalsService(opts: {
   bulkApprove?: (ids: unknown, options: BulkApproveOptions) => Promise<BulkDecisionResult>;
   bulkReject?: (ids: unknown, options: BulkRejectOptions) => Promise<BulkDecisionResult>;
   listPendingPage?: (filter: ListProposalsPageFilter) => Promise<ProposalListPage>;
+  swapConflictDirection?: (id: string, newTargetId: string, options: EditOptions) => Promise<SwapDirectionResult>;
 }): ProposalsService {
   return {
     listPendingPage: opts.listPendingPage ?? (async () => ({ items: [], nextCursor: null, total: 0 })),
     bulkApprove: opts.bulkApprove ?? (async () => RESULT),
     bulkReject: opts.bulkReject ?? (async () => RESULT),
+    swapConflictDirection:
+      opts.swapConflictDirection ?? (async (_id, memoryId) => ({ memoryId, counterpartId: 'mem_other' })),
   } as unknown as ProposalsService;
 }
 
@@ -93,6 +98,31 @@ describe('ProposalsController — bulk approve/reject (roadmap v1.3, "Bulk appro
 
     expect(Reflect.getMetadata(PATH_METADATA, ProposalsController.prototype.bulkReject)).toBe('bulk-reject');
     expect(Reflect.getMetadata(METHOD_METADATA, ProposalsController.prototype.bulkReject)).toBe(1); // POST
+  });
+});
+
+describe('ProposalsController — zamiana kierunku propozycji konfliktu (roadmap v1.6, B3, G3)', () => {
+  it('POST :id/swap-direction przekazuje id, body.memoryId i {actor: DASHBOARD_ACTOR}; zwraca wynik bez transformacji', async () => {
+    let captured: { id: string; target: string; options: EditOptions } | undefined;
+    const out: SwapDirectionResult = { memoryId: 'mem_new', counterpartId: 'mem_old' };
+    const controller = new ProposalsController(
+      fakeProposalsService({
+        swapConflictDirection: async (id, target, options) => {
+          captured = { id, target, options };
+          return out;
+        },
+      }),
+    );
+
+    const result = await controller.swapDirection('prop_1', { memoryId: 'mem_new' });
+
+    expect(captured).toEqual({ id: 'prop_1', target: 'mem_new', options: { actor: DASHBOARD_ACTOR } });
+    expect(result).toBe(out);
+  });
+
+  it('trasa swap-direction to POST na :id/swap-direction', () => {
+    expect(Reflect.getMetadata(PATH_METADATA, ProposalsController.prototype.swapDirection)).toBe(':id/swap-direction');
+    expect(Reflect.getMetadata(METHOD_METADATA, ProposalsController.prototype.swapDirection)).toBe(1); // POST
   });
 });
 

@@ -1792,11 +1792,20 @@ describe('ProposalsService (integration, testcontainers) — kolejka akceptacji 
         kind: 'document',
         tags: ['x', 'y'],
         memoryId: 'mem_pr1',
+        counterpartId: null,
         name: null,
         slug: null,
       });
       expect(delItem.edited).toBe(false);
-      expect(delItem.summary).toEqual({ header: null, kind: null, tags: [], memoryId: 'mem_pr2', name: null, slug: null });
+      expect(delItem.summary).toEqual({
+        header: null,
+        kind: null,
+        tags: [],
+        memoryId: 'mem_pr2',
+        counterpartId: null,
+        name: null,
+        slug: null,
+      });
     });
 
     it('stale liczone jak w widoku pełnym (bump wersji affected memory)', async () => {

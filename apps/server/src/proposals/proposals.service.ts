@@ -32,7 +32,7 @@ import { normalizeHeader, normalizeTags, validateBody } from '../memory/validati
 import { insertProject } from '../projects/project-rows';
 import { AutoApprovalRefusedError, countAutoApprovalsInWindow } from './auto-mode';
 import { ProposalError } from './proposals.errors';
-import { isMemoryProposalType } from './proposals.types';
+import { isConflictPayload, isMemoryProposalType } from './proposals.types';
 import type {
   ApproveOptions,
   ApproveResult,
@@ -57,6 +57,7 @@ import type {
   ProposalView,
   RelationPayloadEntry,
   RejectOptions,
+  SwapDirectionResult,
   UpdatePayload,
 } from './proposals.types';
 
@@ -263,6 +264,7 @@ export class ProposalsService {
           kind: sql<MemoryKind | null>`${eff} ->> 'kind'`,
           tags: sql<string[] | null>`${eff} -> 'tags'`,
           memoryId: sql<string | null>`${eff} ->> 'memoryId'`,
+          counterpartId: sql<string | null>`${eff} ->> 'counterpartId'`,
           name: sql<string | null>`${eff} ->> 'name'`,
           slug: sql<string | null>`${eff} ->> 'slug'`,
           edited: sql<boolean>`${proposals.editedPayload} is not null`,
@@ -307,6 +309,7 @@ export class ProposalsService {
           kind: row.kind,
           tags: row.tags ?? [],
           memoryId: row.memoryId,
+          counterpartId: row.counterpartId,
           name: row.name,
           slug: row.slug,
         },
@@ -602,6 +605,19 @@ export class ProposalsService {
         }
         case 'delete': {
           const deletePayload = payload as DeletePayload;
+          // Defence in depth: archiwizowany target MUSI być w zablokowanym i sprawdzonym na `stale` zbiorze
+          // `affectedIds` (inaczej wpadłby tu jako mylące `stale`/archiwizacja bez locka). Dla propozycji
+          // konfliktu także kontrpartner jawnie w `affectedIds` i różny od targetu (B3).
+          if (!affectedIds.includes(deletePayload.memoryId)) {
+            throw new ProposalError('validation_error', 'Cel archiwizacji nie należy do affectedIds propozycji');
+          }
+          if (
+            isConflictPayload(deletePayload) &&
+            (!affectedIds.includes(deletePayload.counterpartId as string) ||
+              deletePayload.counterpartId === deletePayload.memoryId)
+          ) {
+            throw new ProposalError('validation_error', 'Niespójna para propozycji sprzeczności');
+          }
           const target = byId.get(deletePayload.memoryId);
           if (!target) {
             throw new ProposalError('stale', `Pamięć nie istnieje: ${deletePayload.memoryId}`, [
@@ -715,6 +731,71 @@ export class ProposalsService {
         },
         tx,
       );
+    });
+  }
+
+  /**
+   * Zamiana kierunku propozycji z detektora sprzeczności (B3, G3). To NIE jest edycja treści (`edit()` odrzuca
+   * `delete`): jedyną zmienną jest wybór targetu archiwizacji z dwuelementowego, ustalonego przez detektor
+   * zbioru `affectedIds`. Zapis w `edited_payload` (recenzent wygrywa przez `pickEffectivePayload`), więc approve,
+   * bulk approve, lista i `getProposal` widzą zamianę bez zmian w approve. Jawny target (nie toggle) =
+   * idempotentne. `stale` obu stron sprawdza dopiero approve pod row-lockami — tu go nie powielamy.
+   * Audyt reuse'uje `proposal_edited` (bez migracji enuma), rozróżnienie w `metadata.action`.
+   */
+  async swapConflictDirection(
+    id: string,
+    newTargetId: string,
+    opts: EditOptions,
+  ): Promise<SwapDirectionResult> {
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx.select().from(proposals).where(eq(proposals.id, id)).for('update');
+      if (!row) throw new ProposalError('not_found', `Proposal nie istnieje: ${id}`);
+      if (row.status !== 'pending') {
+        throw new ProposalError(
+          'already_decided',
+          `Proposal ${id} ma już status ${row.status}`,
+          undefined,
+          row.status,
+        );
+      }
+      // Znacznik konfliktu czytamy z ORYGINALNEGO payloadu (edycje go nie ruszają).
+      if (row.type !== 'delete' || !isConflictPayload(row.payload)) {
+        throw new ProposalError(
+          'validation_error',
+          'Zamiana kierunku dotyczy wyłącznie propozycji z detektora sprzeczności',
+        );
+      }
+      if (row.affectedIds.length !== 2 || !row.affectedIds.includes(newTargetId)) {
+        throw new ProposalError('validation_error', 'Nowy cel musi być jedną ze stron pary sprzeczności');
+      }
+
+      const current = pickEffectivePayload(row) as DeletePayload;
+      if (current.memoryId === newTargetId) {
+        // Już ustawione — idempotentnie, bez zapisu i bez wpisu w audycie.
+        return { memoryId: current.memoryId, counterpartId: current.counterpartId as string };
+      }
+      const counterpartId = row.affectedIds.find((x) => x !== newTargetId) as string;
+      const next: DeletePayload = { ...current, memoryId: newTargetId, counterpartId };
+      // Powrót do kierunku z detektora czyści „edytowano" (edited_payload = null).
+      const original = row.payload as DeletePayload;
+      const editedPayload = next.memoryId === original.memoryId ? null : next;
+
+      await tx.update(proposals).set({ editedPayload, updatedAt: new Date() }).where(eq(proposals.id, id));
+      await this.audit.log(
+        {
+          eventType: 'proposal_edited',
+          actor: opts.actor,
+          affectedIds: row.affectedIds,
+          metadata: {
+            proposalId: id,
+            action: 'swap_direction',
+            fromMemoryId: current.memoryId,
+            toMemoryId: newTargetId,
+          },
+        },
+        tx,
+      );
+      return { memoryId: next.memoryId, counterpartId };
     });
   }
 

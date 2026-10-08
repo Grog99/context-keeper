@@ -1,3 +1,4 @@
+import type { ProposalView } from '../types/api';
 import type { AutoHoldReason, ProposalType } from '../types/domain';
 
 /**
@@ -25,3 +26,34 @@ export const AUTO_HOLD_REASON_LABEL: Record<AutoHoldReason, string> = {
   daily_limit: 'wyczerpany dzienny limit auto-akceptacji projektu',
   auto_failed: 'auto-akceptacja nie powiodła się (błąd po stronie serwera) — zdecyduj ręcznie',
 };
+
+/**
+ * Wiek wpisu-targetu względem kontrpartnera w proposalu sprzeczności (roadmap v1.6, B3) — to samo
+ * porządkowanie co detektor po stronie serwera (`created_at`, remis → mniejsze `id` jest „starsze"),
+ * liczone na `MemoryDetail.createdAt` obu stron. `null`, gdy brakuje daty którejś strony (kontrpartner
+ * niedostępny) — UI nie zgaduje wtedy kierunku wiekowego.
+ */
+export function conflictTargetAge(
+  target: { id: string; createdAt: string | undefined },
+  counterpart: { id: string; createdAt: string | undefined },
+): 'older' | 'newer' | null {
+  if (!target.createdAt || !counterpart.createdAt) return null;
+  const t = Date.parse(target.createdAt);
+  const c = Date.parse(counterpart.createdAt);
+  if (Number.isNaN(t) || Number.isNaN(c)) return null;
+  if (t !== c) return t < c ? 'older' : 'newer';
+  return target.id < counterpart.id ? 'older' : 'newer';
+}
+
+/** Etykieta przycisku zamiany kierunku: nazywa wpis, który zostanie zarchiwizowany PO kliknięciu. */
+export function swapDirectionLabel(targetAge: 'older' | 'newer' | null): string {
+  if (targetAge === 'older') return 'Archiwizuj nowszy zamiast';
+  if (targetAge === 'newer') return 'Archiwizuj starszy zamiast';
+  return 'Zamień kierunek';
+}
+
+/** Proposal `delete` z detektora sprzeczności (B3) — niesie `counterpartId` w efektywnym payloadzie. Edycja
+ * treści i zamiennik są dla niego wyłączone (serwer: `edit()` odrzuca `delete`; kierunek zmienia się osobną akcją). */
+export function isConflictProposal(proposal: Pick<ProposalView, 'type' | 'payload' | 'editedPayload'>): boolean {
+  return proposal.type === 'delete' && Boolean((proposal.editedPayload ?? proposal.payload).counterpartId);
+}

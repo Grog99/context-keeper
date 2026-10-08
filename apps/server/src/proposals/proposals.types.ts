@@ -34,13 +34,16 @@ export interface CreatePayload {
   relations?: RelationPayloadEntry[];
 }
 
-/** Detektory nocnego joba oparte na modelu (roadmap v1.6; B2 prune, B3 dołoży 'llm-conflicts'). */
-export const LLM_DETECTORS = ['llm-prune'] as const;
+/** Detektory nocnego joba oparte na modelu (roadmap v1.6; B2 prune, B3 conflicts). */
+export const LLM_DETECTORS = ['llm-prune', 'llm-conflicts'] as const;
 export type LlmDetector = (typeof LLM_DETECTORS)[number];
 
-/** Kategorie werdyktu (G1/G5) — maszynowo czytelne; B3 dołoży 'contradiction'. */
+/** Kategorie werdyktu (G1/G5) — maszynowo czytelne. Prune (B2) i sprzeczność (B3) mają rozłączne zbiory. */
 export const LLM_PRUNE_CATEGORIES = ['ephemeral', 'empty', 'verbose', 'untidy'] as const;
-export type ProposalRationaleCategory = (typeof LLM_PRUNE_CATEGORIES)[number];
+export const LLM_CONFLICT_CATEGORIES = ['contradiction'] as const;
+export type ProposalRationaleCategory =
+  | (typeof LLM_PRUNE_CATEGORIES)[number]
+  | (typeof LLM_CONFLICT_CATEGORIES)[number];
 
 /** Werdykt detektora LLM zapisany w payloadzie (G4): kategoria + uzasadnienie dla recenzenta. Zapis
  * rozumowania maszyny, NIE treść pamięci — approve go ignoruje, edit-before-approve go zachowuje (`...base`).
@@ -60,6 +63,13 @@ export function isLlmDetectedPayload(payload: unknown): boolean {
   if (!isPlainRecord(payload) || !isPlainRecord(payload.rationale)) return false;
   const detector = payload.rationale.detector;
   return typeof detector === 'string' && (LLM_DETECTORS as readonly string[]).includes(detector);
+}
+
+/** Czy payload to propozycja z detektora sprzeczności (B3): `rationale.detector === 'llm-conflicts'` ORAZ
+ * jawny `counterpartId`. Defensywnie — payload to nietypowany jsonb. */
+export function isConflictPayload(payload: unknown): boolean {
+  if (!isPlainRecord(payload) || !isPlainRecord(payload.rationale)) return false;
+  return payload.rationale.detector === 'llm-conflicts' && typeof payload.counterpartId === 'string';
 }
 
 /** Payload `type=update` — patch (pola pominięte = "bez zmian", scalane z aktualnym wierszem
@@ -87,10 +97,16 @@ export interface MergePayload {
   kind: MemoryKind;
 }
 
-/** Payload `type=delete` — referencja, `affectedIds=[memoryId]` niesie to, co ma być archiwizowane.
- * `rationale` (opcjonalne) dokłada tylko detektor LLM; recency prune go nie ma i działa jak dotąd. */
+/** Payload `type=delete` — referencja. `affectedIds` = to, co approve BLOKUJE i sprawdza na `stale`;
+ * archiwizowany jest WYŁĄCZNIE `memoryId`. Recency prune i LLM prune używają `[memoryId]`; detektor
+ * sprzeczności (B3, `rationale.detector === 'llm-conflicts'`) używa posortowanego `[memoryId, counterpartId]`
+ * — kontrpartner jest blokowany i sprawdzany, ale nie zmieniany.
+ * `rationale` (opcjonalne) dokłada tylko detektor LLM; recency prune go nie ma i działa jak dotąd.
+ * `counterpartId` (B3): druga strona pary sprzeczności; ZAWSZE ≠ `memoryId` i ∈ `affectedIds`. Zamiana kierunku
+ * (G3) wymienia `memoryId` z `counterpartId` (zapis w `edited_payload`), `rationale` zostaje bez zmian. */
 export interface DeletePayload {
   memoryId: string;
+  counterpartId?: string;
   rationale?: ProposalRationale;
 }
 
@@ -168,6 +184,12 @@ export interface EditOptions {
   actor: string;
 }
 
+/** Wynik zamiany kierunku proposala konfliktu (G3): nowy target (archiwizowany) i kontrpartner (zostaje). */
+export interface SwapDirectionResult {
+  memoryId: string;
+  counterpartId: string;
+}
+
 export interface EditResult {
   /** Ostrzeżenia non-blocking (np. skaner sekretów przy human-edit, FR-S1) — treść i tak zapisana. */
   warnings: string[];
@@ -201,6 +223,8 @@ export interface ProposalListSummary {
   kind: MemoryKind | null;
   tags: string[];
   memoryId: string | null;
+  /** B3: druga strona pary sprzeczności (z efektywnego payloadu `delete`); `null` poza detektorem sprzeczności. */
+  counterpartId: string | null;
   name: string | null;
   slug: string | null;
 }

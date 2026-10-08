@@ -496,6 +496,9 @@ function LastRun({ lastRun }: { lastRun: LlmSettingsResponse['lastRun'] }) {
                   ['Pominięte — klucz', lastRun.counters.llmSkippedKeyUnreadable],
                   ['Propozycje — do usunięcia', lastRun.counters.llmPruneDeleteProposed],
                   ['Propozycje — do skrócenia', lastRun.counters.llmPruneUpdateProposed],
+                  ['Pary ocenione (sprzeczności)', lastRun.counters.llmConflictCandidates],
+                  ['Pary niesprzeczne', lastRun.counters.llmConflictConsistent],
+                  ['Propozycje — sprzeczności', lastRun.counters.llmConflictProposed],
                 ] as const
               ).map(([label, value]) => (
                 <tr key={label} className="border-b border-border last:border-b-0">

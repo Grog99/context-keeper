@@ -139,6 +139,21 @@ export const envSchema = z
     // Próg "near-identical" dla ANN dedup (dystans kosinusowy `<=>`, 0=identyczne, 2=przeciwne) —
     // celowo wąski ("scan broadly, merge narrowly", FR-N3): tylko niemal identyczne treści.
     NIGHTLY_DEDUP_DISTANCE: z.coerce.number().positive().default(0.05),
+    // Górna granica PASMA SPRZECZNOŚCI (roadmap v1.6, B3): pary z `NIGHTLY_DEDUP_DISTANCE < dist <= X` (ten sam
+    // skan ANN co dedup) trafiają jako kandydaci do detektora sprzeczności (LLM, jedno wywołanie na parę).
+    // Pasmo to dźwignia kosztu/recallu, NIE precyzji — każdą parę i tak ocenia model — więc celowo szersze niż
+    // NEAR_DUPLICATE_DISTANCE (sprzeczność różni się wartością, nie tylko sformułowaniem). Wartość jest SPECYFICZNA
+    // DLA MODELU embeddingów; zmierzona skryptem `apps/server/scripts/measure-conflict-distance.mjs` na syntetycznych
+    // parach PL+EN (reguła: najmniejszy t pokrywający >= 90% sprzeczności w tym samym języku, <= ~5% niepowiązanych):
+    // - domyślne 0.23 zmierzone dla bge-m3 (domyślny preset `multilingual`, 2026-10-08): 91% sprzeczności same-lang
+    //   (31/34), 0% niepowiązanych (najbliższa niepowiązana 0.369), 1/18 par compatible (zmarnowane wywołanie);
+    // - preset `api` z text-embedding-3-small (instancja dogfood) MUSI jawnie ustawić NIGHTLY_CONFLICT_DISTANCE=0.21
+    //   w env (Coolify): 91% (31/34), 0% niepowiązanych (najbliższa 0.450), 0/18 compatible (pierwsza para
+    //   compatible dopiero od 0.248, więc wartości do ~0.24 są bezpieczne kosztowo; 0.21 to najmniejszy t z reguły);
+    // - para EN<->PL jest łapana słabo (bge-m3 4/8, text-embedding-3-small 1/8) — ograniczenie modelu, jak w A1;
+    // - wartość <= NIGHTLY_DEDUP_DISTANCE = puste pasmo = detektor sprzeczności de facto wyłączony (bez błędu bootu,
+    //   job loguje ostrzeżenie); przy wyłączonym kroku LLM pasmo i tak jest puste.
+    NIGHTLY_CONFLICT_DISTANCE: z.coerce.number().positive().max(2).default(0.23),
     // Liczba sąsiadów pobieranych per fakt w zapytaniu ANN (LIMIT), zanim odfiltrujemy do NIGHTLY_DEDUP_DISTANCE.
     NIGHTLY_ANN_NEIGHBORS: z.coerce.number().int().positive().default(5),
     // Rozmiar strony paginacji przy skanowaniu approved facts (jak --batch w `reembed`).

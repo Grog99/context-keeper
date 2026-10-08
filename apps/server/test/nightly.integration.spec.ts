@@ -94,6 +94,13 @@ const LLM_PRUNE_ZEROS = {
   llmPruneUpdateProposed: 0,
 };
 
+/** Liczniki detektora sprzeczności (v1.6 B3) przy wyłączonym kroku — osobno od `LLM_PRUNE_ZEROS`. */
+const LLM_CONFLICT_ZEROS = {
+  llmConflictCandidates: 0,
+  llmConflictConsistent: 0,
+  llmConflictProposed: 0,
+};
+
 /** Dwa różne klucze szyfrujące (32 B base64) — zmieniony SECRETS_ENCRYPTION_KEY (G7). */
 const KEY_A = Buffer.alloc(32, 1).toString('base64');
 const KEY_B = Buffer.alloc(32, 2).toString('base64');
@@ -255,6 +262,7 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
         searchEventsPruned: 0,
         ...LLM_ZEROS,
         ...LLM_PRUNE_ZEROS,
+        ...LLM_CONFLICT_ZEROS,
       });
 
       const proposalRow = await findNightlyProposal('merge', [factA.id, factB.id]);
@@ -292,6 +300,7 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
         searchEventsPruned: 0,
         ...LLM_ZEROS,
         ...LLM_PRUNE_ZEROS,
+        ...LLM_CONFLICT_ZEROS,
       });
     });
 
@@ -450,6 +459,7 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
           searchEventsPruned: 0,
           ...LLM_ZEROS,
           ...LLM_PRUNE_ZEROS,
+          ...LLM_CONFLICT_ZEROS,
         });
 
         const auditRow = await audit.latestByEventType('nightly_run');

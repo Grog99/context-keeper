@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Lock, Pencil, Replace, X } from 'lucide-react';
+import { ArrowLeftRight, Check, ChevronDown, Lock, Pencil, Replace, X } from 'lucide-react';
 import { useState } from 'react';
 import type { MemoryScope } from '../types/domain';
 import { Badge } from './ui/badge';
@@ -113,10 +113,16 @@ export interface ProposalActionsProps {
   canEdit?: boolean;
   /** `false` ukrywa split-button "Zatwierdź jako zamiennik" (supersession dotyczy tylko `create`). */
   canSupersede?: boolean;
+  /** Proposal sprzeczności (roadmap v1.6, B3): zamiana kierunku — po kliknięciu approve archiwizuje drugi wpis
+   * pary. Brak propsa → przycisk się nie renderuje. Celowo BEZ skrótu klawiszowego (decyzja o wyborze
+   * wersji ma być świadoma, nie odruchowa). */
+  onSwapDirection?: () => void;
+  /** Etykieta przycisku zamiany — nazywa wpis archiwizowany PO kliknięciu („Archiwizuj nowszy zamiast"). */
+  swapLabel?: string;
 }
 
 /** §8.2 — sticky bar u dołu detalu: Zatwierdź(A)/Odrzuć(R)/Edytuj(E)/split-button "…jako
- * zamiennik"(S). Przy `stale` → primary disabled + inline alert z powodem. */
+ * zamiennik"(S) / "Archiwizuj … zamiast" (tylko proposal sprzeczności, bez skrótu). Przy `stale` → primary disabled + inline alert z powodem. */
 export function ProposalActions({
   onApprove,
   onReject,
@@ -130,6 +136,8 @@ export function ProposalActions({
   position,
   canEdit = true,
   canSupersede = true,
+  onSwapDirection,
+  swapLabel = 'Zamień kierunek',
 }: ProposalActionsProps) {
   return (
     <div className="flex flex-none flex-col border-t border-border bg-surface">
@@ -156,6 +164,11 @@ export function ProposalActions({
           <Button variant="secondary" disabled={busy} onClick={onEdit}>
             <Pencil className="size-[15px]" /> Edytuj
             <kbd className="ml-0.5 rounded border border-current px-1 text-[10px] opacity-70">E</kbd>
+          </Button>
+        )}
+        {onSwapDirection && (
+          <Button variant="secondary" disabled={busy} onClick={onSwapDirection}>
+            <ArrowLeftRight className="size-[15px]" /> {swapLabel}
           </Button>
         )}
         {canSupersede && (

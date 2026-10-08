@@ -38,7 +38,7 @@ import { api } from '../lib/api';
 import { useActiveContext, contextQueryParams } from '../lib/context';
 import { describeApiError, describeBulkFailures } from '../lib/errors';
 import { formatAbsoluteTime, formatRelativeTime, pluralProposals } from '../lib/format';
-import { PROPOSAL_CAPABILITIES } from '../lib/proposals';
+import { conflictTargetAge, isConflictProposal, PROPOSAL_CAPABILITIES, swapDirectionLabel } from '../lib/proposals';
 import { queryKeys } from '../lib/query';
 import { toQueryString } from '../lib/query-string';
 import { cn } from '../lib/utils';
@@ -52,6 +52,7 @@ import type {
   ProposalListItem,
   ProposalListPage,
   ProposalView,
+  SwapDirectionResult,
 } from '../types/api';
 import type { ProposalOrigin, ProposalType, RelationType } from '../types/domain';
 
@@ -70,6 +71,10 @@ function rowTitle(p: ProposalListItem): string {
   const { summary } = p;
   if (p.type === 'create_project') return projectProposalTitle(summary);
   if (summary.header) return summary.header;
+  // B3: proposal z detektora sprzeczności — odróżnialny od zwykłej archiwizacji (kandydat z recency/LLM prune).
+  if (p.type === 'delete' && summary.counterpartId) {
+    return `Sprzeczność: archiwizacja ${summary.memoryId ?? '?'} (sprzeczne z ${summary.counterpartId})`;
+  }
   if (p.type === 'delete') return `Archiwizacja pamięci ${summary.memoryId ?? ''}`.trim();
   if (p.type === 'update') return `Aktualizacja pamięci ${summary.memoryId ?? ''}`.trim();
   return `(propozycja ${p.id})`;
@@ -90,10 +95,17 @@ function projectNameFor(projectId: string | null, projects: ProjectListItem[] | 
  * — TYM SAMYM `GET /memories/:id` co `beforeQuery`/`mergeQueries` (współdzielony cache przez
  * `queryKeys.memory`), celowo bez nowego endpointu. `retry: false` + fail-open na brak danych: target
  * mógł zniknąć (archiwizacja/purge) między `save()` a przeglądem — `ProposalRelations` wtedy po
- * prostu pokazuje sam `targetId` (ten sam fail-open co `materializeRelations` po stronie serwera). */
+ * prostu pokazuje sam `targetId` (ten sam fail-open co `materializeRelations` po stronie serwera).
+ *
+ * B3 (sprzeczność): dociąga też kontrpartnera `delete` (`effective.counterpartId`) tym samym `GET /memories/:id`
+ * (zwraca także zarchiwizowane). `retry: false` + `failed` — gdy wpis zniknął (purge), detal pokazuje blok
+ * „pamięć niedostępna" zamiast wiecznego szkieletu. */
 function useProposalDetailData(proposal: ProposalView | undefined) {
   const effective = proposal ? (proposal.editedPayload ?? proposal.payload) : undefined;
   const beforeId = proposal && (proposal.type === 'update' || proposal.type === 'delete') ? effective?.memoryId : undefined;
+  // B3: kontrpartner proposala sprzeczności — jawny w payloadzie (nie "ten drugi z affectedIds"), bo po zamianie
+  // kierunku target i kontrpartner wymieniają się miejscami.
+  const counterpartId = proposal?.type === 'delete' ? effective?.counterpartId : undefined;
   const mergeIds = proposal?.type === 'merge' ? proposal.affectedIds : [];
   const relationTargetIds = Array.from(new Set((effective?.relations ?? []).map((r) => r.targetId)));
 
@@ -117,6 +129,13 @@ function useProposalDetailData(proposal: ProposalView | undefined) {
       retry: false,
     })),
   });
+
+  const counterpartQuery = useQuery({
+    queryKey: queryKeys.memory(counterpartId ?? ''),
+    queryFn: () => api.get<MemoryDetail>(`/memories/${counterpartId}`),
+    enabled: Boolean(counterpartId),
+    retry: false,
+  });
   const relationHeaders = new Map<string, string>();
   relationTargetIds.forEach((id, i) => {
     const header = relationTargetQueries[i]?.data?.header;
@@ -129,7 +148,19 @@ function useProposalDetailData(proposal: ProposalView | undefined) {
     mergeMemories: mergeQueries.map((q) => q.data).filter((d): d is MemoryDetail => Boolean(d)),
     mergeLoading: mergeIds.length > 0 && mergeQueries.some((q) => q.isLoading),
     relationHeaders,
+    counterpart: {
+      memory: counterpartId ? counterpartQuery.data : undefined,
+      loading: Boolean(counterpartId) && counterpartQuery.isLoading,
+      failed: Boolean(counterpartId) && counterpartQuery.isError,
+    } satisfies CounterpartState,
   };
+}
+
+/** Stan dociągania kontrpartnera proposala sprzeczności (B3). */
+interface CounterpartState {
+  memory: MemoryDetail | undefined;
+  loading: boolean;
+  failed: boolean;
 }
 
 export function QueueScreen() {
@@ -227,7 +258,7 @@ export function QueueScreen() {
     }
   }, [prevNeighborId, nextNeighborId, queryClient]);
 
-  const { beforeMemory, beforeLoading, mergeMemories, mergeLoading, relationHeaders } = useProposalDetailData(detail);
+  const { beforeMemory, beforeLoading, mergeMemories, mergeLoading, relationHeaders, counterpart } = useProposalDetailData(detail);
 
   // Bulk selection — przecięcie z `proposalsList` w renderze (patrz komentarz przy stanie wyżej).
   // Inwariant bezpieczeństwa: bulk działa WYŁĄCZNIE na tym, co licznik pokazuje — zniknięcie propozycji
@@ -345,6 +376,19 @@ export function QueueScreen() {
     onError: (err) => toast.error(describeApiError(err)),
   });
 
+  // Zamiana kierunku proposala sprzeczności (roadmap v1.6 B3, G3). Wysyłamy JAWNY nowy target (drugą stronę
+  // pary), nie „przełącz" — serwer jest idempotentny, więc podwójne kliknięcie nie cofa zamiany. Zapis w
+  // `edited_payload` → approve, bulk approve i lista (`summary.memoryId`) widzą zmianę bez dodatkowej logiki.
+  const swapMutation = useMutation({
+    mutationFn: (vars: { id: string; memoryId: string }) =>
+      api.post<SwapDirectionResult>(`/proposals/${vars.id}/swap-direction`, { memoryId: vars.memoryId }),
+    onSuccess: (result) => {
+      toast.success(`Zamieniono kierunek — zatwierdzenie zarchiwizuje ${result.memoryId}`);
+      invalidateAfterMutation();
+    },
+    onError: (err) => toast.error(describeApiError(err)),
+  });
+
   // Bulk approve/reject (roadmap v1.3) — `mutationFn` woła serwerowy orkiestrator (`ProposalsService.
   // bulkApprove`/`bulkReject` przez kontroler), NIE pętlę po stronie SPA (§1.1 planu: agregacja
   // wyniku i klasyfikacja błędów żyje tam, gdzie jest testowalna — w serwisie, nie w dashboardzie,
@@ -404,9 +448,16 @@ export function QueueScreen() {
     rejectMutation.mutate({ id: detail.id, reason: rejectReason.trim() || undefined });
   }
 
+  function handleSwapDirection(): void {
+    if (!detail || !isConflictProposal(detail)) return;
+    const counterpartId = (detail.editedPayload ?? detail.payload).counterpartId;
+    if (counterpartId) swapMutation.mutate({ id: detail.id, memoryId: counterpartId });
+  }
+
   function handleEdit(): void {
     if (!detail) return;
     if (!PROPOSAL_CAPABILITIES[detail.type].edit) return; // np. create_project — skrót E nic nie robi
+    if (isConflictProposal(detail)) return; // B3: sprzeczność — treść nie jest edytowalna, kierunek zmienia przycisk
     setEditingForId(detail.id);
     setTab('diff');
   }
@@ -588,6 +639,7 @@ export function QueueScreen() {
             mergeMemories={mergeMemories}
             mergeLoading={mergeLoading}
             relationHeaders={relationHeaders}
+            counterpart={counterpart}
             editing={editing}
             onCancelEdit={() => setEditingForId(null)}
             onSaveEdit={(vars) => editMutation.mutate({ id: detail.id, ...vars })}
@@ -598,9 +650,10 @@ export function QueueScreen() {
             onApprove={handleApprove}
             onReject={handleReject}
             onEdit={handleEdit}
+            onSwapDirection={handleSwapDirection}
             onApproveAsReplacement={handleApproveAsReplacement}
             searchSupersedeCandidates={detail.type === 'create' ? searchSupersedeCandidates : undefined}
-            busy={approveMutation.isPending || rejectMutation.isPending}
+            busy={approveMutation.isPending || rejectMutation.isPending || swapMutation.isPending}
             position={`${selectedIndex + 1} / ${totalCount}`}
           />
         )}
@@ -733,6 +786,7 @@ interface ProposalDetailProps {
   mergeMemories: MemoryDetail[];
   mergeLoading: boolean;
   relationHeaders: Map<string, string>;
+  counterpart: CounterpartState;
   editing: boolean;
   onCancelEdit: () => void;
   onSaveEdit: (vars: { header: string; body: string; tags: string[] }) => void;
@@ -743,6 +797,7 @@ interface ProposalDetailProps {
   onApprove: () => void;
   onReject: () => void;
   onEdit: () => void;
+  onSwapDirection: () => void;
   onApproveAsReplacement: (id: string) => void;
   searchSupersedeCandidates?: (query: string) => Promise<SupersedeCandidate[]>;
   busy: boolean;
@@ -757,6 +812,7 @@ function ProposalDetail({
   mergeMemories,
   mergeLoading,
   relationHeaders,
+  counterpart,
   editing,
   onCancelEdit,
   onSaveEdit,
@@ -767,6 +823,7 @@ function ProposalDetail({
   onApprove,
   onReject,
   onEdit,
+  onSwapDirection,
   onApproveAsReplacement,
   searchSupersedeCandidates,
   busy,
@@ -774,11 +831,23 @@ function ProposalDetail({
 }: ProposalDetailProps) {
   const effective = proposal.editedPayload ?? proposal.payload;
   const capabilities = PROPOSAL_CAPABILITIES[proposal.type];
+  // B3: proposal z detektora sprzeczności — edycja treści i zamiennik wyłączone, jest za to zamiana kierunku.
+  const isConflict = isConflictProposal(proposal);
+  const swapLabel = swapDirectionLabel(
+    isConflict
+      ? conflictTargetAge(
+          { id: effective.memoryId ?? '', createdAt: beforeMemory?.createdAt },
+          { id: effective.counterpartId ?? '', createdAt: counterpart.memory?.createdAt },
+        )
+      : null,
+  );
   const title =
     proposal.type === 'create_project'
       ? projectProposalTitle(effective)
       : proposal.type === 'delete'
-        ? (beforeMemory?.header ?? effective.memoryId ?? proposal.id)
+        ? isConflict
+          ? `Sprzeczność: ${beforeMemory?.header ?? effective.memoryId ?? proposal.id}`
+          : (beforeMemory?.header ?? effective.memoryId ?? proposal.id)
         : (effective.header ?? beforeMemory?.header ?? `(propozycja ${proposal.id})`);
   const tags = effective.tags ?? beforeMemory?.tags ?? [];
   // Patch `update` bez zmiany kind i `delete` nie niosą `kind` — wtedy kind pamięci, której dotyczą.
@@ -793,7 +862,7 @@ function ProposalDetail({
       <div className="flex-1 overflow-y-auto px-6 py-5">
         <div className="mb-1 flex items-start gap-3">
           <h2 className="flex-1 text-lg font-medium leading-snug tracking-tight text-foreground">{title}</h2>
-          {proposal.editedPayload && <Badge variant="info">edytowano</Badge>}
+          {proposal.editedPayload && <Badge variant="info">{isConflict ? 'kierunek zamieniony' : 'edytowano'}</Badge>}
           <StatusChip status={proposal.stale ? 'stale' : 'pending'} />
         </div>
         <div className="mb-4 flex flex-wrap items-center gap-x-3.5 gap-y-2 border-b border-border pb-4 text-xs">
@@ -847,7 +916,14 @@ function ProposalDetail({
                 saving={savingEdit}
               />
             ) : (
-              <ProposalDiff proposal={proposal} beforeMemory={beforeMemory} beforeLoading={beforeLoading} mergeMemories={mergeMemories} mergeLoading={mergeLoading} />
+              <ProposalDiff
+                proposal={proposal}
+                beforeMemory={beforeMemory}
+                beforeLoading={beforeLoading}
+                mergeMemories={mergeMemories}
+                mergeLoading={mergeLoading}
+                counterpart={counterpart}
+              />
             )}
           </TabsContent>
           <TabsContent value="meta" className="pt-4">
@@ -887,8 +963,10 @@ function ProposalDetail({
           staleReason={proposal.stale ? `Zmienione od utworzenia propozycji: ${proposal.staleIds.join(', ')}.` : undefined}
           busy={busy}
           position={position}
-          canEdit={capabilities.edit}
-          canSupersede={capabilities.supersede}
+          canEdit={capabilities.edit && !isConflict}
+          canSupersede={capabilities.supersede && !isConflict}
+          onSwapDirection={isConflict ? onSwapDirection : undefined}
+          swapLabel={swapLabel}
         />
       </div>
     </>
@@ -901,12 +979,14 @@ function ProposalDiff({
   beforeLoading,
   mergeMemories,
   mergeLoading,
+  counterpart,
 }: {
   proposal: ProposalView;
   beforeMemory: MemoryDetail | undefined;
   beforeLoading: boolean;
   mergeMemories: MemoryDetail[];
   mergeLoading: boolean;
+  counterpart: CounterpartState;
 }) {
   const effective = proposal.editedPayload ?? proposal.payload;
 
@@ -960,6 +1040,9 @@ function ProposalDiff({
   }
 
   if (beforeLoading || !beforeMemory) return <Skeleton className="h-40 w-full" />;
+  // B3: proposal sprzeczności — szkielet do czasu obu pamięci; błąd wczytania kontrpartnera → blok „niedostępna".
+  const counterpartId = effective.counterpartId;
+  if (counterpartId && counterpart.loading) return <Skeleton className="h-40 w-full" />;
   return (
     <DiffView
       type="delete"
@@ -969,6 +1052,16 @@ function ProposalDiff({
         body: beforeMemory.body,
         rationale: effective.rationale
           ? { category: effective.rationale.category, reason: effective.rationale.reason }
+          : undefined,
+        targetCreatedAt: counterpartId ? beforeMemory.createdAt : undefined,
+        counterpart: counterpartId
+          ? {
+              memoryId: counterpartId,
+              header: counterpart.memory?.header ?? '',
+              body: counterpart.memory?.body ?? '',
+              createdAt: counterpart.memory?.createdAt,
+              missing: !counterpart.memory || counterpart.failed,
+            }
           : undefined,
       }}
     />

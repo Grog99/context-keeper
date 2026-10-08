@@ -17,6 +17,7 @@ import {
   proposalsListQuery,
   purgeBody,
   rejectBody,
+  swapDirectionBody,
   tokenLabelBody,
   updateProjectBody,
   usageQuery,
@@ -261,6 +262,20 @@ describe('dashboard.schemas — strict: nieznany klucz -> 400', () => {
         extra: 1,
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('swapDirectionBody (roadmap v1.6, B3) — POST /api/proposals/:id/swap-direction', () => {
+  it('przyjmuje { memoryId } z opaque id', () => {
+    expect(swapDirectionBody.safeParse({ memoryId: 'mem_abc123' }).success).toBe(true);
+  });
+
+  it('jest strict: nieznany klucz, brak memoryId, pusty / zły id, brak body -> 400', () => {
+    expect(swapDirectionBody.safeParse({ memoryId: 'mem_a', extra: 1 }).success).toBe(false);
+    expect(swapDirectionBody.safeParse({}).success).toBe(false);
+    expect(swapDirectionBody.safeParse({ memoryId: '' }).success).toBe(false);
+    expect(swapDirectionBody.safeParse({ memoryId: 'z spacją' }).success).toBe(false);
+    expect(swapDirectionBody.safeParse(undefined).success).toBe(false);
   });
 });
 

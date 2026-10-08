@@ -5,6 +5,7 @@ import type {
   EditResult,
   ProposalListPage,
   ProposalView,
+  SwapDirectionResult,
 } from '../proposals/proposals.types';
 import { ProposalsService } from '../proposals/proposals.service';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
@@ -21,12 +22,14 @@ import {
   opaqueId,
   proposalsListQuery,
   rejectBody,
+  swapDirectionBody,
   type ApproveBody,
   type BulkApproveBody,
   type BulkRejectBody,
   type EditProposalBody,
   type ProposalsListQuery,
   type RejectBody,
+  type SwapDirectionBody,
 } from './dashboard.schemas';
 
 /**
@@ -109,6 +112,17 @@ export class ProposalsController {
   ): Promise<{ ok: true }> {
     await this.proposals.reject(id, { actor: DASHBOARD_ACTOR, reason: body.reason });
     return { ok: true };
+  }
+
+  /** B3 (G3): recenzent zamienia kierunek proposala z detektora sprzeczności — target archiwizacji zmienia się
+   * wyłącznie na drugą stronę z `affectedIds`. Zapis w `edited_payload` + audyt; approve idzie zwykłą ścieżką. */
+  @Post(':id/swap-direction')
+  async swapDirection(
+    @Param('id', new ZodValidationPipe(opaqueId)) id: string,
+    @Body(new ZodValidationPipe(swapDirectionBody)) body: SwapDirectionBody,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never> = {},
+  ): Promise<SwapDirectionResult> {
+    return this.proposals.swapConflictDirection(id, body.memoryId, { actor: DASHBOARD_ACTOR });
   }
 
   @Patch(':id')

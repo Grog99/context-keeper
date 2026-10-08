@@ -94,6 +94,22 @@ export const EMPTY_LLM_PRUNE_COUNTERS: LlmPruneCounters = {
   llmPruneUpdateProposed: 0,
 };
 
+/** Liczniki detektora sprzeczności (B3) — płaskie pola `NightlyCounters`, osobno od `LlmPruneCounters`. */
+export interface LlmConflictCounters {
+  /** Pary wysłane do budżetu po wszystkich wyłączeniach (okno, merge, recency, pending, LLM prune) — „ocenione". */
+  llmConflictCandidates: number;
+  /** Udane werdykty `contradiction:false` — „niesprzeczne". */
+  llmConflictConsistent: number;
+  /** Utworzone propozycje `delete` z detektora sprzeczności (po reconcile i capie) — „zaproponowane". */
+  llmConflictProposed: number;
+}
+
+export const EMPTY_LLM_CONFLICT_COUNTERS: LlmConflictCounters = {
+  llmConflictCandidates: 0,
+  llmConflictConsistent: 0,
+  llmConflictProposed: 0,
+};
+
 /**
  * Liczniki jednego przebiegu — trafiają do audytu `nightly_run` (metadata) i podsumowania CLI.
  * Pięć pierwszych pól to dosłowny kontrakt z planu §2 ("NightlyCounters"); `skippedPoliteness` i
@@ -101,7 +117,7 @@ export const EMPTY_LLM_PRUNE_COUNTERS: LlmPruneCounters = {
  * truncation" z §5 pkt 5-6 planu (politeness gate i flood backstop muszą być POLICZALNE, nie tylko
  * zalogowane jednym zdaniem).
  */
-export interface NightlyCounters extends LlmCounters, LlmPruneCounters {
+export interface NightlyCounters extends LlmCounters, LlmPruneCounters, LlmConflictCounters {
   created: number;
   withdrawn: number;
   /** Wykryty warunek dopasował istniejący pending nightly proposal, wciąż aktualny — brak akcji. */
@@ -124,6 +140,8 @@ export interface NightlyCounters extends LlmCounters, LlmPruneCounters {
   // kroku (domyślnie) wszystkie wynoszą 0.
   // + pola `LlmPruneCounters` (B2: `llmPruneCandidates`, `llmPruneKept`, `llmPruneDeleteProposed`,
   // `llmPruneUpdateProposed`): liczniki detektora LLM prune, rozłączne z recency `pruneProposed`.
+  // + pola `LlmConflictCounters` (B3: `llmConflictCandidates`, `llmConflictConsistent`, `llmConflictProposed`):
+  // liczniki detektora sprzeczności, rozłączne z licznikami LLM prune.
 }
 
 export interface NightlyRunResult {
