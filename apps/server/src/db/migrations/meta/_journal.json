@@ -141,6 +141,13 @@
       "when": 1791408691812,
       "tag": "0019_auto_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791460161659,
+      "tag": "0020_auto_mode_oversight",
+      "breakpoints": true
     }
   ]
 }

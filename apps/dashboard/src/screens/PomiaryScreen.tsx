@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Activity } from 'lucide-react';
 import { useState } from 'react';
+import { AutoModeMetricsTable } from '../components/AutoModeMetricsTable';
 import { EmptyState } from '../components/EmptyState';
 import { MetricStat } from '../components/MetricStat';
 import { ScreenContainer } from '../components/ScreenContainer';
@@ -65,14 +66,20 @@ export function PomiaryScreen() {
     },
   });
 
-  const hasData = !!data && (data.searchSeries.length > 0 || data.proposalSeries.buckets.length > 0);
+  // Sama aktywność auto mode (bez wyszukań i decyzji człowieka) to też dane — inaczej sekcja auto mode chowałaby się
+  // za pustym stanem.
+  const hasData =
+    !!data &&
+    (data.searchSeries.length > 0 ||
+      data.proposalSeries.buckets.length > 0 ||
+      data.autoMode.projects.length > 0);
 
   return (
     <ScreenContainer width="chart">
       <h1 className="mb-1 text-xl font-semibold tracking-tight">Pomiary</h1>
       <p className="mb-5 max-w-2xl text-[13.5px] text-muted-foreground">
         Użycie pamięci przez agentów: liczba wyszukiwań per projekt w czasie, odsetek zapytań bez wyników oraz
-        decyzje recenzenta w kolejce (akceptacja / odrzucenie / edycja).
+        decyzje recenzenta w kolejce (akceptacja / odrzucenie / edycja) oraz los wpisów z auto mode.
       </p>
 
       <div className="mb-4 flex flex-wrap gap-2">
@@ -119,7 +126,7 @@ export function PomiaryScreen() {
         <EmptyState
           icon={Activity}
           title="Brak danych w tym zakresie"
-          description="Zmień zakres dat, bucket albo projekt — agenci jeszcze nie wywoływali search_memory w tym oknie."
+          description="Zmień zakres dat, bucket albo projekt — agenci jeszcze nie wywoływali search_memory w tym oknie, a auto mode niczego nie zatwierdził ani nie zawrócił."
         />
       ) : (
         <div className="flex flex-col gap-6">
@@ -190,6 +197,24 @@ export function PomiaryScreen() {
             <div className="rounded-lg border border-border bg-surface p-3">
               <ProposalOutcomeChart buckets={data.proposalSeries.buckets} bucket={data.range.bucket} />
             </div>
+          </section>
+
+          <section>
+            <h2 className="mb-1 text-sm font-semibold text-foreground">Auto mode</h2>
+            <p className="mb-2.5 max-w-3xl text-xs text-muted-foreground">
+              Los auto-akceptacji z wybranego zakresu (wg czasu auto-akceptacji), liczony do dziś: o kubełku decyduje
+              pierwsza akcja spoza auto mode na tej pamięci — późniejsza auto-korekta go nie zmienia. Świeże wpisy nie
+              zdążyły trafić do nocnego joba ani recenzenta, więc krótszy zakres wygląda na bardziej „nietknięty".
+              Zawrócone = zapisy skierowane przez bezpiecznik do kolejki; propozycja z kilkoma powodami liczy się przy
+              każdym.
+            </p>
+            {data.autoMode.projects.length === 0 ? (
+              <p className="rounded-lg border border-border bg-surface px-3.5 py-3 text-xs text-muted-foreground">
+                Brak auto-akceptacji i zawróceń w tym zakresie.
+              </p>
+            ) : (
+              <AutoModeMetricsTable projects={data.autoMode.projects} />
+            )}
           </section>
         </div>
       )}

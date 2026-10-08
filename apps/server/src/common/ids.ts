@@ -29,4 +29,5 @@ export const ID_PREFIX = {
   relation: 'rel',
   token: 'tok',
   llmSettings: 'llms',
+  autoUndo: 'undo',
 } as const;

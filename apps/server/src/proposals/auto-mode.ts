@@ -44,3 +44,8 @@ export class AutoApprovalRefusedError extends Error {
     this.name = 'AutoApprovalRefusedError';
   }
 }
+
+/** Znacznik źródła (`metadata.via`) na audycie `archive` zapisanym przez masowe cofanie auto mode (A3, G6) —
+ * odróżnia „cofnięte" od ręcznej archiwizacji (`metadata = null`) w Audycie i w pomiarach (A4). Celowo
+ * `metadata`, nie nowa wartość `audit_event_type` (migracja enuma → 55P04). */
+export const AUTO_MODE_UNDO_VIA = 'auto_mode_undo' as const;

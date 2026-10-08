@@ -38,14 +38,18 @@ import { queryKeys } from '../lib/query';
 import { toQueryString } from '../lib/query-string';
 import { cn } from '../lib/utils';
 import type {
+  AccountTokenApi,
+  AutoUndoPreview,
   MemoryDetail,
   MemoryListItem,
   ProjectListItem,
+  ProjectTokenApi,
   RelationListItemApi,
   RevisionRowApi,
   WithWarnings,
 } from '../types/api';
 import type { MemoryKind, MemoryStatus, RelationType } from '../types/domain';
+import { AutoModeUndoDialog } from './AutoModeUndoDialog';
 import { PurgeMemoryDialog } from './PurgeMemoryDialog';
 
 type KindFilter = 'all' | MemoryKind;
@@ -53,13 +57,52 @@ type StatusFilter = 'all' | MemoryStatus;
 /** A2 (G6): `auto` = tylko pamięci, których bieżąca treść weszła przez auto mode. */
 type ApprovalFilter = 'all' | 'auto';
 
-/** Znacznik „auto" (A2, G6) — `info`, ten sam język co lista projektów; tooltip niesie czas auto-akceptacji. */
-function AutoBadge({ at }: { at: string }) {
+/** Znacznik „auto" (A2, G6) — `info`, ten sam język co lista projektów; tooltip niesie czas auto-akceptacji.
+ * `correction` (A3, G1): bieżąca treść to auto-korekta pamięci utworzonej/zatwierdzonej przez człowieka —
+ * cofanie auto mode jej nie archiwizuje, więc znacznik to mówi. */
+function AutoBadge({ at, correction = false }: { at: string; correction?: boolean }) {
   return (
-    <Badge variant="info" title={`Treść zaakceptowana automatycznie (auto mode) — ${formatAbsoluteTime(at)}`}>
-      <Bot className="size-3" aria-hidden /> auto
+    <Badge
+      variant="info"
+      title={
+        correction
+          ? `Bieżąca treść to auto-korekta pamięci utworzonej lub zatwierdzonej przez człowieka — cofanie jej nie archiwizuje. Auto-akceptacja: ${formatAbsoluteTime(at)}`
+          : `Treść zaakceptowana automatycznie (auto mode) — ${formatAbsoluteTime(at)}`
+      }
+    >
+      <Bot className="size-3" aria-hidden /> {correction ? 'auto · korekta' : 'auto'}
     </Badge>
   );
+}
+
+/** Przyrostek statusu tokena w selekcie filtra (A3) — token w karencji/unieważniony nadal mógł wnieść wpisy. */
+function tokenStatusSuffix(t: ProjectTokenApi): string {
+  switch (t.effectiveStatus) {
+    case 'grace':
+      return ' (karencja)';
+    case 'revoked':
+      return ' (unieważniony)';
+    case 'expired':
+      return ' (wygasły)';
+    default:
+      return '';
+  }
+}
+
+/** Wartość `<input type="datetime-local">` (lokalna strefa) → ISO dla API; pusta/nieparsowalna = brak zawężenia. */
+function localInputToIso(value: string): string | undefined {
+  if (!value) return undefined;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
+/** Zawężenia filtra „auto" w kontekście JEDNEGO projektu (A3) — trzymane razem z `projectId`, żeby zmiana projektu
+ * zerowała token (id tokena z innego projektu nic by nie znaczyło) bez efektów synchronizujących. */
+interface AutoRangeState {
+  projectId: string;
+  from: string;
+  to: string;
+  tokenId: string;
 }
 
 function toRevisionItems(rows: RevisionRowApi[]): RevisionItem[] {
@@ -105,6 +148,8 @@ export function MemoryBrowserScreen() {
   // TYLKO jej przycisku "Usuń", nie całej zakładki, przy wielu relacjach naraz).
   const [removingRelationId, setRemovingRelationId] = useState<string | null>(null);
   const [tabState, setTabState] = useState<{ id: string; tab: string } | null>(null);
+  const [autoRangeState, setAutoRangeState] = useState<AutoRangeState | null>(null);
+  const [undoOpen, setUndoOpen] = useState(false);
   const tab = tabState && tabState.id === selectedId ? tabState.tab : 'body';
 
   useEffect(() => {
@@ -121,22 +166,86 @@ export function MemoryBrowserScreen() {
     .map((t) => t.trim())
     .filter(Boolean);
 
+  const { data: projects } = useQuery({
+    queryKey: queryKeys.projects(),
+    queryFn: () => api.get<ProjectListItem[]>('/projects'),
+  });
+
+  // Cofanie auto mode (A3) działa tylko w kontekście JEDNEGO projektu (G3a) — przedział i token filtra "auto"
+  // też istnieją wyłącznie tam.
+  const undoProjectId = active.kind === 'project' ? active.projectId : null;
+  const autoScoped = approval === 'auto' && undoProjectId !== null;
+  const autoRange: AutoRangeState =
+    autoRangeState && autoRangeState.projectId === undoProjectId
+      ? autoRangeState
+      : { projectId: undoProjectId ?? '', from: '', to: '', tokenId: '' };
+  function patchAutoRange(patch: Partial<Omit<AutoRangeState, 'projectId'>>): void {
+    setAutoRangeState({ ...autoRange, ...patch });
+  }
+  const autoFromIso = autoScoped ? localInputToIso(autoRange.from) : undefined;
+  const autoToIso = autoScoped ? localInputToIso(autoRange.to) : undefined;
+  const autoTokenId = autoScoped && autoRange.tokenId ? autoRange.tokenId : undefined;
+  const rangeInvalid = autoFromIso !== undefined && autoToIso !== undefined && autoFromIso > autoToIso;
+
   const filterParams: Record<string, string | string[]> = { ...contextQueryParams(active) };
   if (kind !== 'all') filterParams.kind = kind;
   if (status !== 'all') filterParams.status = status;
   if (approval === 'auto') filterParams.autoApproved = 'true';
+  if (autoFromIso) filterParams.autoFrom = autoFromIso;
+  if (autoToIso) filterParams.autoTo = autoToIso;
+  if (autoTokenId) filterParams.autoTokenId = autoTokenId;
   if (tags.length > 0) filterParams.tags = tags;
   if (q) filterParams.q = q;
 
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.memories(filterParams),
     queryFn: () => api.get<MemoryListItem[]>(`/memories${toQueryString(filterParams)}`),
+    // Odwrócony przedział to 400 z serwera — nie pytamy, pole jest oznaczone jako błędne.
+    enabled: !rangeInvalid,
   });
 
-  const { data: projects } = useQuery({
-    queryKey: queryKeys.projects(),
-    queryFn: () => api.get<ProjectListItem[]>('/projects'),
+  // Tokeny do selektu filtra: projektu + konta (token konta też zapisuje do projektu, A3 G1b). Tylko gdy filtr widoczny.
+  const { data: projectTokens } = useQuery({
+    queryKey: queryKeys.projectTokens(undoProjectId ?? ''),
+    queryFn: () => api.get<ProjectTokenApi[]>(`/projects/${undoProjectId}/tokens`),
+    enabled: autoScoped,
   });
+  const { data: accountTokens } = useQuery({
+    queryKey: queryKeys.accountTokens(),
+    queryFn: () => api.get<AccountTokenApi[]>('/account-tokens'),
+    enabled: autoScoped,
+  });
+  const tokenChoices = [
+    ...(projectTokens ?? []).map((t) => ({ id: t.id, label: `${t.label}${tokenStatusSuffix(t)}` })),
+    ...(accountTokens ?? []).map((t) => ({ id: t.id, label: `konto: ${t.label}${tokenStatusSuffix(t)}` })),
+  ];
+
+  // Liczba na przycisku "Archiwizuj pasujące (N)" — z serwera (prawdziwe N, nie długość listy z limitem 200).
+  const undoPreviewParams: Record<string, string> = { projectId: undoProjectId ?? '' };
+  if (autoFromIso) undoPreviewParams.from = autoFromIso;
+  if (autoToIso) undoPreviewParams.to = autoToIso;
+  if (autoTokenId) undoPreviewParams.tokenId = autoTokenId;
+  const { data: undoPreview, isLoading: undoPreviewLoading } = useQuery({
+    queryKey: queryKeys.autoUndoPreview(undoPreviewParams),
+    queryFn: () => api.get<AutoUndoPreview>(`/memories/auto-undo/preview${toQueryString(undoPreviewParams)}`),
+    enabled: autoScoped && !rangeInvalid,
+  });
+  const undoProject = projects?.find((p) => p.id === undoProjectId);
+  // Cofanie liczy po projekcie/przedziale/tokenie — inne filtry listy sprawiłyby, że lista nie pokazuje tego, co
+  // zostanie zarchiwizowane (G2a), więc wymagamy ich wyczyszczenia.
+  const otherFiltersActive = kind !== 'all' || (status !== 'all' && status !== 'approved') || tags.length > 0 || q !== '';
+  const undoCount = undoPreview?.archivable ?? 0;
+  const undoDisabledReason = !autoScoped
+    ? 'Cofanie działa w kontekście jednego projektu — wybierz projekt w przełączniku kontekstu.'
+    : rangeInvalid
+      ? 'Początek przedziału jest późniejszy niż jego koniec.'
+      : otherFiltersActive
+        ? 'Wyczyść pozostałe filtry (kind, status, tagi, szukaj) — cofanie działa po projekcie, przedziale i tokenie.'
+        : undoPreviewLoading || !undoProject
+          ? 'Liczenie pasujących wpisów…'
+          : undoCount === 0
+            ? 'Brak wpisów utworzonych przez auto mode do zarchiwizowania w tym zakresie.'
+            : undefined;
 
   const list = data ?? [];
 
@@ -306,6 +415,61 @@ export function MemoryBrowserScreen() {
             className="h-7 flex-1 min-w-[120px] text-[12px]"
           />
         </div>
+        {approval === 'auto' && (
+          // Zawężenia filtra "auto" + cofanie (A3). Przedział i token tylko w kontekście projektu; poza nim sama
+          // wyłączona akcja z wyjaśnieniem w tooltipie.
+          <div className="flex h-auto flex-none flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3.5 py-2">
+            {autoScoped && (
+              <>
+                <Input
+                  type="datetime-local"
+                  value={autoRange.from}
+                  onChange={(e) => patchAutoRange({ from: e.target.value })}
+                  className={cn('h-7 w-auto text-[12px]', rangeInvalid && 'border-danger')}
+                  aria-label="auto od"
+                  aria-invalid={rangeInvalid}
+                  title="Auto-zaakceptowane od (czas wejścia bieżącej treści przez auto mode)"
+                />
+                <Input
+                  type="datetime-local"
+                  value={autoRange.to}
+                  onChange={(e) => patchAutoRange({ to: e.target.value })}
+                  className={cn('h-7 w-auto text-[12px]', rangeInvalid && 'border-danger')}
+                  aria-label="auto do"
+                  aria-invalid={rangeInvalid}
+                  title="Auto-zaakceptowane do"
+                />
+                <Select
+                  value={autoRange.tokenId || 'all'}
+                  onValueChange={(v) => patchAutoRange({ tokenId: v === 'all' ? '' : v })}
+                >
+                  <SelectTrigger className="h-7 gap-1.5 px-2 text-[12px]" aria-label="Filtr tokena">
+                    <SelectValue placeholder="token" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">token: wszystkie</SelectItem>
+                    {tokenChoices.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </>
+            )}
+            {/* `title` na wrapperze: wyłączony przycisk ma pointer-events-none, więc sam nie pokaże tooltipa. */}
+            <span className="ml-auto" title={undoDisabledReason}>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={undoDisabledReason !== undefined}
+                onClick={() => setUndoOpen(true)}
+              >
+                {autoScoped && undoPreview ? `Archiwizuj pasujące (${undoPreview.archivable})` : 'Archiwizuj pasujące'}
+              </Button>
+            </span>
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto">
           {isLoading ? (
             <div className="flex flex-col gap-2 p-3.5">
@@ -350,7 +514,7 @@ export function MemoryBrowserScreen() {
               >
                 <div className="mb-1 flex items-start gap-3">
                   <h2 className="flex-1 text-lg font-medium leading-snug tracking-tight text-foreground">{detail.header}</h2>
-                  {detail.autoApprovedAt && <AutoBadge at={detail.autoApprovedAt} />}
+                  {detail.autoApprovedAt && <AutoBadge at={detail.autoApprovedAt} correction={detail.autoCorrection} />}
                   <StatusChip status={detail.status} />
                 </div>
                 <div className="mb-4 flex flex-wrap items-center gap-x-3.5 gap-y-2 border-b border-border pb-4 text-xs">
@@ -557,7 +721,8 @@ export function MemoryBrowserScreen() {
             <AlertDialogTitle>Archiwizować pamięć?</AlertDialogTitle>
           </AlertDialogHeader>
           <AlertDialogDescription>
-            Soft-delete — pamięć zniknie z search, ale zostaje w audycie i da się odtworzyć z rewizji.
+            Soft-delete — pamięć zniknie z wyszukiwania, straci embeddingi i relacje; treść zostaje w bazie, audycie i
+            historii rewizji. Dashboard nie ma ścieżki przywrócenia zarchiwizowanej pamięci.
           </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel>Anuluj</AlertDialogCancel>
@@ -567,6 +732,16 @@ export function MemoryBrowserScreen() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {undoProject && (
+        <AutoModeUndoDialog
+          open={undoOpen}
+          onOpenChange={setUndoOpen}
+          project={undoProject}
+          filter={{ from: autoFromIso, to: autoToIso, tokenId: autoTokenId }}
+          tokenLabel={tokenChoices.find((t) => t.id === autoTokenId)?.label}
+        />
+      )}
 
       {detail && (
         <PurgeMemoryDialog
@@ -660,7 +835,7 @@ function MemoryRow({
       </div>
       <div className="flex flex-col items-end gap-1 pt-0.5">
         <span className="whitespace-nowrap font-mono text-[11px] text-faint">acc {item.accessCount}</span>
-        {item.autoApprovedAt && <AutoBadge at={item.autoApprovedAt} />}
+        {item.autoApprovedAt && <AutoBadge at={item.autoApprovedAt} correction={item.autoCorrection} />}
         {item.status !== 'approved' && <StatusChip status={item.status} />}
       </div>
     </div>

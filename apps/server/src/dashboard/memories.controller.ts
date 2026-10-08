@@ -10,12 +10,19 @@ import {
   type RelationListItem,
   type WithWarnings,
 } from '../memory/memory-admin.service';
+import {
+  AutoModeUndoService,
+  type AutoUndoPreview,
+  type AutoUndoResult,
+} from '../memory/auto-mode-undo.service';
 import { PurgeService, type PurgePreview, type PurgeResult } from '../purge/purge.service';
 import { CsrfGuard } from './auth/csrf.guard';
 import { SessionGuard } from './auth/session.guard';
 import { DASHBOARD_ACTOR } from './dashboard.constants';
 import { DashboardErrorFilter } from './dashboard-error.filter';
 import {
+  autoUndoExecuteBody,
+  autoUndoPreviewQuery,
   createRelationBody,
   editMemoryBody,
   emptyBody,
@@ -25,6 +32,8 @@ import {
   memoryEventsQuery,
   opaqueId,
   purgeBody,
+  type AutoUndoExecuteBody,
+  type AutoUndoPreviewQuery,
   type CreateRelationBody,
   type EditMemoryBody,
   type HumanCreateBody,
@@ -50,6 +59,7 @@ export class MemoriesController {
   constructor(
     private readonly memoryAdmin: MemoryAdminService,
     private readonly purgeService: PurgeService,
+    private readonly autoUndo: AutoModeUndoService,
   ) {}
 
   @Get()
@@ -67,6 +77,24 @@ export class MemoriesController {
     @Query(new ZodValidationPipe(memoryEventsQuery)) query: MemoryEventsQuery,
   ): Promise<MemoryListItem[]> {
     return this.memoryAdmin.listEvents({ ...query });
+  }
+
+  /** Masowe cofanie auto mode (roadmap v1.6, A3) — literalne trasy `auto-undo/*` PRZED `:id` (jak `events`).
+   * Podgląd: liczby z serwera + lista id do archiwizacji; wykonanie archiwizuje dokładnie te id. Tylko sesja
+   * dashboardu (`SessionGuard`+`CsrfGuard` kontrolera) — żadne narzędzie MCP tego nie wystawia. */
+  @Get('auto-undo/preview')
+  async previewAutoUndo(
+    @Query(new ZodValidationPipe(autoUndoPreviewQuery)) query: AutoUndoPreviewQuery,
+  ): Promise<AutoUndoPreview> {
+    return this.autoUndo.preview({ ...query });
+  }
+
+  @Post('auto-undo/execute')
+  async executeAutoUndo(
+    @Body(new ZodValidationPipe(autoUndoExecuteBody)) body: AutoUndoExecuteBody,
+    @Query(new ZodValidationPipe(emptyQuery)) _query: Record<string, never> = {},
+  ): Promise<AutoUndoResult> {
+    return this.autoUndo.execute({ projectId: body.projectId, ids: body.ids });
   }
 
   @Get(':id')

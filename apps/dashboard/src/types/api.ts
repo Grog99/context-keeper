@@ -192,11 +192,32 @@ export interface MemoryListItem {
   /** A2 (G6): ISO czas auto-akceptacji BIEŻĄCEJ treści; `null` = treść nie pochodzi z auto mode
    * (albo człowiek zmienił ją później). */
   autoApprovedAt: string | null;
+  /** A3 (G1): bieżąca treść pochodzi z auto-korekty pamięci utworzonej/zatwierdzonej przez człowieka —
+   * cofanie auto mode jej NIE archiwizuje (lista pokazuje `auto · korekta`). */
+  autoCorrection: boolean;
 }
 
 export interface MemoryDetail extends MemoryListItem {
   body: string;
   approvedAt: string | null;
+}
+
+/** Podgląd masowego cofania auto mode (A3) — lustro `AutoUndoPreview`
+ * (`apps/server/src/memory/auto-mode-undo.service.ts`). `archivable` to PRAWDZIWA liczba (nie długość `ids`);
+ * wykonanie archiwizuje dokładnie `ids` (najwyżej najstarsze `ids.length` z `archivable`, gdy `capped`). */
+export interface AutoUndoPreview {
+  asOf: string;
+  archivable: number;
+  skippedCorrections: number;
+  ids: string[];
+  capped: boolean;
+}
+
+/** Wynik `POST /memories/auto-undo/execute` — lustro `AutoUndoResult`. */
+export interface AutoUndoResult {
+  undoId: string;
+  archived: number;
+  skipped: number;
 }
 
 /** Zakładka "Relacje" (roadmap v1.2, "memory-relations + 1-hop graph boost") — lustro
@@ -371,6 +392,29 @@ export interface ProposalOutcomeBucketPoint {
   approvedWithEdits: number;
 }
 
+/** Los auto-akceptacji jednego typu (A4) — lustro `AutoModeFateCountsDto`; kubełki rozłączne,
+ * `untouched` = reszta kohorty (`total − Σ`). */
+export interface AutoModeFateCounts {
+  total: number;
+  pruned: number;
+  overwritten: number;
+  archived: number;
+  undone: number;
+  untouched: number;
+}
+
+/** Wiersz tabeli auto mode na „Pomiarach" (A4) — lustro `AutoModeProjectDto`. */
+export interface AutoModeProjectMetrics {
+  projectId: string;
+  projectName: string;
+  /** Przełącznik DZIŚ — projekt z wyłączonym auto mode, ale z historią w zakresie, dalej ma wiersz. */
+  autoModeEnabled: boolean;
+  create: AutoModeFateCounts;
+  update: AutoModeFateCounts;
+  /** Zawrócone przez bezpiecznik: `total` = propozycje (raz), `reasons` per powód (suma powodów ≥ `total`). */
+  held: { total: number; reasons: Record<AutoHoldReason, number> };
+}
+
 export interface UsageMetrics {
   range: { from: string; to: string; bucket: UsageBucket };
   searchSeries: ProjectSearchSeries[];
@@ -385,6 +429,8 @@ export interface UsageMetrics {
     buckets: ProposalOutcomeBucketPoint[];
     totals: { approved: number; rejected: number; approvedWithEdits: number };
   };
+  /** Sekcja auto mode (A4) — bez serii czasowej. */
+  autoMode: { projects: AutoModeProjectMetrics[] };
 }
 
 /** Ekran "Operacje" (roadmap v1.1) — lustro `NightlyCounters`/`NightlyRunResult`

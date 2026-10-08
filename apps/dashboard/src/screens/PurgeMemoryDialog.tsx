@@ -81,8 +81,8 @@ function PurgeMemoryForm({ onOpenChange, memoryId, memoryHeader }: PurgeMemoryFo
       </AlertDialogHeader>
       <AlertDialogDescription>
         Pamięć <span className="font-mono text-foreground">{memoryHeader}</span> zostanie trwale wymazana:
-        treść i tagi znikają, embeddingi są usuwane, a powiązane propozycje i rewizje zredagowane. Soft-delete
-        (Archiwizuj) da się odwrócić — to nie.
+        treść i tagi znikają, embeddingi są usuwane, a powiązane propozycje i rewizje zredagowane. Archiwizacja
+        (soft-delete) zostawia treść w bazie — hard-purge wymazuje ją bezpowrotnie.
       </AlertDialogDescription>
 
       {isLoading ? (

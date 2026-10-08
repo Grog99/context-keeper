@@ -1,5 +1,12 @@
 import { Controller, Get, Query, UseFilters, UseGuards } from '@nestjs/common';
-import type { ProposalBucketRow, SearchBucketRow, UsageBucket } from '../usage/usage.service';
+import type { AutoHoldReason } from '../db/schema';
+import type {
+  AutoHoldRow,
+  AutoModeFateRow,
+  ProposalBucketRow,
+  SearchBucketRow,
+  UsageBucket,
+} from '../usage/usage.service';
 import { UsageService } from '../usage/usage.service';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { CsrfGuard } from './auth/csrf.guard';
@@ -44,6 +51,27 @@ export interface ProposalBucketPointDto {
   approvedWithEdits: number;
 }
 
+/** Los auto-akceptacji jednego typu (A4): `total` = kohorta, kubełki rozłączne, `untouched` = reszta (`total − Σ`). */
+export interface AutoModeFateCountsDto {
+  total: number;
+  pruned: number;
+  overwritten: number;
+  archived: number;
+  undone: number;
+  untouched: number;
+}
+
+export interface AutoModeProjectDto {
+  projectId: string;
+  projectName: string;
+  /** Przełącznik DZIŚ — projekt z wyłączonym auto mode, ale z historią w zakresie, dalej ma wiersz. */
+  autoModeEnabled: boolean;
+  create: AutoModeFateCountsDto;
+  update: AutoModeFateCountsDto;
+  /** Zawrócone przez bezpiecznik: `total` = propozycje (raz), `reasons` per powód (suma powodów ≥ `total`). */
+  held: { total: number; reasons: Record<AutoHoldReason, number> };
+}
+
 export interface UsageMetricsDto {
   range: { from: string; to: string; bucket: UsageBucket };
   searchSeries: ProjectSearchSeriesDto[];
@@ -58,6 +86,16 @@ export interface UsageMetricsDto {
     buckets: ProposalBucketPointDto[];
     totals: { approved: number; rejected: number; approvedWithEdits: number };
   };
+  /** Sekcja auto mode (A4): wiersz na projekt z auto-akceptacjami lub zawróceniami w zakresie. Bez serii czasowej. */
+  autoMode: { projects: AutoModeProjectDto[] };
+}
+
+function emptyFateCounts(): AutoModeFateCountsDto {
+  return { total: 0, pruned: 0, overwritten: 0, archived: 0, undone: 0, untouched: 0 };
+}
+
+function emptyReasons(): Record<AutoHoldReason, number> {
+  return { near_duplicate: 0, not_computed: 0, human_target: 0, daily_limit: 0, auto_failed: 0 };
 }
 
 /** Cross-project (`crossProject`) wypada z mianownika tak samo jak z licznika (`zeroResult` ich nie
@@ -73,6 +111,9 @@ function zeroResultRate(searches: number, zeroResult: number, crossProject: numb
  * (`edit` = approved-with-edits, podzbiór accepted — §5(f)). Guardy DOKŁADNIE jak `MetricsController`
  * (kontroler-scoped, `SessionGuard`+`CsrfGuard`, NIGDY globalne — `/mcp` nie może dostać nowego
  * globalnego guarda).
+ *
+ * Od v1.6 (A4) odpowiedź niesie też `autoMode` — los auto-akceptacji (kohorta wg `auto_approved_at` w zakresie,
+ * liczony do teraz) i powody zawróceń per projekt; ten sam zakres/`projectId` co reszta, `bucket` go nie dotyczy.
  *
  * Walidacja query (tech-review #3, roadmap v1.4) — `usageQuery` (`dashboard.schemas.ts`) zastępuje
  * `parseBucket`/`parseDate` inline: `bucket` z `USAGE_BUCKETS`, `from`/`to` jako `Date`. Domyślny
@@ -92,9 +133,11 @@ export class UsageMetricsController {
     const to = query.to ?? new Date();
     const from = query.from ?? new Date(to.getTime() - DEFAULT_RANGE_DAYS * DAY_MS);
 
-    const [searchRows, proposalRows] = await Promise.all([
+    const [searchRows, proposalRows, fateRows, holdRows] = await Promise.all([
       this.usage.searchSeries({ from, to, bucket, projectId: query.projectId }),
       this.usage.proposalOutcomeSeries({ from, to, bucket, projectId: query.projectId }),
+      this.usage.autoModeFates({ from, to, projectId: query.projectId }),
+      this.usage.autoHoldStats({ from, to, projectId: query.projectId }),
     ]);
 
     const searchSeries = this.shapeSearchSeries(searchRows);
@@ -104,6 +147,7 @@ export class UsageMetricsController {
       searchSeries,
       searchTotals: this.sumSearchTotals(searchSeries),
       proposalSeries: this.shapeProposalSeries(proposalRows),
+      autoMode: { projects: this.shapeAutoMode(fateRows, holdRows) },
     };
   }
 
@@ -158,6 +202,43 @@ export class UsageMetricsController {
       ...totals,
       zeroResultRate: zeroResultRate(totals.searches, totals.zeroResult, totals.crossProject),
     };
+  }
+
+  /** Skleja wiersze losu (projekt × typ) i zawróceń (projekt) w jeden wiersz na projekt; brakujące części zerowane,
+   * `untouched` = reszta kohorty po odjęciu rozłącznych kubełków. Sortowanie po nazwie projektu. */
+  private shapeAutoMode(fateRows: AutoModeFateRow[], holdRows: AutoHoldRow[]): AutoModeProjectDto[] {
+    const byProject = new Map<string, AutoModeProjectDto>();
+    const entryFor = (projectId: string, projectName: string, autoModeEnabled: boolean): AutoModeProjectDto => {
+      let entry = byProject.get(projectId);
+      if (!entry) {
+        entry = {
+          projectId,
+          projectName,
+          autoModeEnabled,
+          create: emptyFateCounts(),
+          update: emptyFateCounts(),
+          held: { total: 0, reasons: emptyReasons() },
+        };
+        byProject.set(projectId, entry);
+      }
+      return entry;
+    };
+    for (const row of fateRows) {
+      const entry = entryFor(row.projectId, row.projectName, row.autoMode);
+      entry[row.type] = {
+        total: row.total,
+        pruned: row.pruned,
+        overwritten: row.overwritten,
+        archived: row.archived,
+        undone: row.undone,
+        untouched: row.total - row.pruned - row.overwritten - row.archived - row.undone,
+      };
+    }
+    for (const row of holdRows) {
+      const entry = entryFor(row.projectId, row.projectName, row.autoMode);
+      entry.held = { total: row.held, reasons: { ...emptyReasons(), ...row.reasons } };
+    }
+    return Array.from(byProject.values()).sort((a, b) => a.projectName.localeCompare(b.projectName));
   }
 
   private shapeProposalSeries(rows: ProposalBucketRow[]): UsageMetricsDto['proposalSeries'] {
