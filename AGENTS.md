@@ -48,7 +48,8 @@ Zebrane z audytu transkryptów sesji ([`agent-patterns-report.md`](context/agent
 
 - **Weryfikacja:** po nietrywialnej zmianie odpal `pnpm verify` (lint + typecheck + test dla
   całego monorepo) zamiast ręcznie sklejać `pnpm lint` / `tsc --noEmit` / `pnpm -r test` za
-  każdym razem.
+  każdym razem. Ten sam `pnpm verify` chodzi w CI (`.github/workflows/verify.yml`) na każdym PR i
+  jest wymaganym checkiem przed merge'em do `main` — lokalny przebieg to szybsza pętla, nie zamiennik.
 - **Duże zadania:** faza typu „cała implementacja w jednym ciągłym przebiegu subagenta" (setki
   tysięcy tokenów, dziesiątki użyć narzędzi) zwiększa ryzyko dryfu kontekstu i zostawia mało
   naturalnych punktów na przegląd. Rozdzielaj plan → implementację → weryfikację na osobne

@@ -127,9 +127,10 @@ ekranem, dokumentacja aktualizowana w tym samym przepływie co zmiana, CI jako b
 - **Aktualizacja dokumentacji przez agenta** ⬜ — agent dokumentacji jako etap przepływu po
   implementacji: aktualizuje kanon (`context/`), README i `AGENTS.md` pod to, co weszło, zamiast
   zbiorczej synchronizacji po zamknięciu wersji.
-- **CI** ⬜ — GitHub Actions z `pnpm verify` na każdym PR jako wymagany check przed merge'em (dziś
-  nie ma żadnego workflow). Deploy na Coolify jest już automatyczny po wejściu zmian na `main` —
-  do ewentualnej poprawki, np. deploy dopiero po zielonym CI.
+- **CI** ✅ — `.github/workflows/verify.yml`: `pnpm verify` na każdym PR i pushu do `main`
+  (`ubuntu-latest`, testy integracyjne przez testcontainers), job `verify` jako wymagany check w
+  ochronie `main`. Deploy na Coolify zostaje automatyczny po wejściu zmian na `main` — świadomie bez
+  gatingu, bo merge i tak wymaga zielonego `verify`.
 
 ## Backlog ⬜
 
