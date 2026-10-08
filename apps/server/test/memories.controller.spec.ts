@@ -3,6 +3,7 @@ import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { describe, expect, it } from 'vitest';
 import { DASHBOARD_ACTOR } from '../src/dashboard/dashboard.constants';
 import { MemoriesController } from '../src/dashboard/memories.controller';
+import type { AutoModeUndoService, AutoUndoPreview, AutoUndoResult } from '../src/memory/auto-mode-undo.service';
 import type { CreateRelationInput, MemoryAdminService, RelationListItem } from '../src/memory/memory-admin.service';
 import type { PurgeOptions, PurgePreview, PurgeResult, PurgeService } from '../src/purge/purge.service';
 
@@ -29,6 +30,11 @@ const RESULT: PurgeResult = {
  * dołożone w roadmap v1.1) — pusty stub, żeby konstruktor kontrolera się skompilował. */
 function unusedMemoryAdmin(): MemoryAdminService {
   return {} as unknown as MemoryAdminService;
+}
+
+/** `AutoModeUndoService` nie jest wołany przez testy hard-purge/relations — pusty stub (jak `unusedMemoryAdmin`). */
+function unusedAutoUndo(): AutoModeUndoService {
+  return {} as unknown as AutoModeUndoService;
 }
 
 const RELATION_LIST: RelationListItem[] = [
@@ -75,7 +81,7 @@ function fakePurge(opts: {
 
 describe('MemoriesController — hard-purge endpoints (roadmap v1.1)', () => {
   it('GET :id/purge-preview zwraca PurgePreview zwrócony przez serwis bez transformacji', async () => {
-    const controller = new MemoriesController(unusedMemoryAdmin(), fakePurge({ preview: PREVIEW }));
+    const controller = new MemoriesController(unusedMemoryAdmin(), fakePurge({ preview: PREVIEW }), unusedAutoUndo());
 
     const result = await controller.purgePreview('mem_1');
 
@@ -90,6 +96,7 @@ describe('MemoriesController — hard-purge endpoints (roadmap v1.1)', () => {
         result: RESULT,
         captureOptions: (id, options) => (captured = { id, options }),
       }),
+      unusedAutoUndo(),
     );
 
     const result = await controller.purge('mem_1', { reason: 'AWS key w body' });
@@ -118,6 +125,7 @@ describe('MemoriesController — relations endpoints (roadmap v1.2, "memory-rela
         },
       }),
       fakePurge({}),
+      unusedAutoUndo(),
     );
 
     const result = await controller.listRelations('mem_1');
@@ -136,6 +144,7 @@ describe('MemoriesController — relations endpoints (roadmap v1.2, "memory-rela
         },
       }),
       fakePurge({}),
+      unusedAutoUndo(),
     );
 
     const result = await controller.createRelation('mem_1', { toId: 'mem_2', type: 'caused_by' });
@@ -159,6 +168,7 @@ describe('MemoriesController — relations endpoints (roadmap v1.2, "memory-rela
         },
       }),
       fakePurge({}),
+      unusedAutoUndo(),
     );
 
     const result = await controller.removeRelation('rel_1');
@@ -178,5 +188,59 @@ describe('MemoriesController — relations endpoints (roadmap v1.2, "memory-rela
       ':id/relations/:relationId',
     );
     expect(Reflect.getMetadata(METHOD_METADATA, MemoriesController.prototype.removeRelation)).toBe(3); // DELETE
+  });
+});
+
+describe('MemoriesController — cofanie auto mode (roadmap v1.6, A3)', () => {
+  const PREVIEW_RESULT: AutoUndoPreview = {
+    asOf: '2026-01-01T00:00:00.000Z',
+    archivable: 2,
+    skippedCorrections: 1,
+    ids: ['mem_1', 'mem_2'],
+    capped: false,
+  };
+  const EXECUTE_RESULT: AutoUndoResult = { undoId: 'undo_abc', archived: 2, skipped: 0 };
+
+  it('GET auto-undo/preview przekazuje sparsowany filtr do AutoModeUndoService.preview i zwraca wynik bez transformacji', async () => {
+    let captured: unknown;
+    const autoUndo = {
+      preview: async (filter: unknown) => {
+        captured = filter;
+        return PREVIEW_RESULT;
+      },
+    } as unknown as AutoModeUndoService;
+    const controller = new MemoriesController(unusedMemoryAdmin(), fakePurge({}), autoUndo);
+    const from = new Date('2026-01-01T00:00:00Z');
+
+    const result = await controller.previewAutoUndo({ projectId: 'proj_a', from, tokenId: 'tok_1' });
+
+    expect(captured).toEqual({ projectId: 'proj_a', from, tokenId: 'tok_1' });
+    expect(result).toBe(PREVIEW_RESULT);
+  });
+
+  it('POST auto-undo/execute przekazuje {projectId, ids} do AutoModeUndoService.execute', async () => {
+    let captured: unknown;
+    const autoUndo = {
+      execute: async (input: unknown) => {
+        captured = input;
+        return EXECUTE_RESULT;
+      },
+    } as unknown as AutoModeUndoService;
+    const controller = new MemoriesController(unusedMemoryAdmin(), fakePurge({}), autoUndo);
+
+    const result = await controller.executeAutoUndo({ projectId: 'proj_a', ids: ['mem_1', 'mem_2'] });
+
+    expect(captured).toEqual({ projectId: 'proj_a', ids: ['mem_1', 'mem_2'] });
+    expect(result).toBe(EXECUTE_RESULT);
+  });
+
+  it('trasy auto-undo/* są zadeklarowane PRZED GET :id (Express matchuje w kolejności rejestracji)', () => {
+    expect(Reflect.getMetadata(PATH_METADATA, MemoriesController.prototype.previewAutoUndo)).toBe('auto-undo/preview');
+    expect(Reflect.getMetadata(METHOD_METADATA, MemoriesController.prototype.previewAutoUndo)).toBe(0); // GET
+    expect(Reflect.getMetadata(PATH_METADATA, MemoriesController.prototype.executeAutoUndo)).toBe('auto-undo/execute');
+    expect(Reflect.getMetadata(METHOD_METADATA, MemoriesController.prototype.executeAutoUndo)).toBe(1); // POST
+
+    const order = Object.getOwnPropertyNames(MemoriesController.prototype);
+    expect(order.indexOf('previewAutoUndo')).toBeLessThan(order.indexOf('get'));
   });
 });

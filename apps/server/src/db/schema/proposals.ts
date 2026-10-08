@@ -12,6 +12,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { memoryScope, proposalOrigin, proposalStatus, proposalType } from './enums';
 import { projects } from './projects';
+import { projectTokens } from './project-tokens';
 
 /** Jedna pozycja podpowiedzi „podobne do istniejących" (roadmap v1.6, A1) — id zatwierdzonej pamięci
  * i jej odległość kosinusowa (`<=>`) od nowej propozycji. */
@@ -82,6 +83,12 @@ export const proposals = pgTable(
 
     scope: memoryScope('scope').notNull(),
     projectId: text('project_id').references(() => projects.id, { onDelete: 'restrict' }),
+    // Token zapisu `save_memory` (roadmap v1.6, A3): `ctx.tokenId` agenta, który utworzył propozycję
+    // create/update — nośnik filtra „po tokenie" w cofaniu auto mode (join z `memories` po
+    // `auto_approved_at`, patrz `memory/auto-mode-filters.ts`). NULL: nocny job, `create_project`, zapis
+    // bez tokena w kontekście oraz stare propozycje, których audyt `proposal_created` nie niósł tokena
+    // (backfill z audytu w 0020 uzupełnia resztę). FK `SET NULL` jak `search_events.token_id`.
+    tokenId: text('token_id').references(() => projectTokens.id, { onDelete: 'set null' }),
 
     // Forward-compat v2 (anti-fatigue / sedymentacja) — miejsce już teraz, nullable.
     confidence: doublePrecision('confidence'),
@@ -101,6 +108,10 @@ export const proposals = pgTable(
     index('proposals_project_auto_approved_idx')
       .on(t.projectId, t.autoApprovedAt)
       .where(sql`${t.autoApprovedAt} IS NOT NULL`),
+    // Statystyka powodów zawrócenia (A4): `auto_hold_reasons IS NOT NULL` w zakresie `created_at` per projekt.
+    index('proposals_project_auto_held_idx')
+      .on(t.projectId, t.createdAt)
+      .where(sql`${t.autoHoldReasons} IS NOT NULL`),
     check(
       'proposals_auto_hold_reasons_check',
       sql`${t.autoHoldReasons} IS NULL OR (cardinality(${t.autoHoldReasons}) > 0 AND ${t.autoHoldReasons} <@ ARRAY['near_duplicate','not_computed','human_target','daily_limit','auto_failed']::text[])`,

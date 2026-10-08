@@ -13,6 +13,7 @@ import {
 } from '../llm/llm.constants';
 import { isValidLlmEndpointUrl } from '../llm/llm-settings.service';
 import { HEADER_MAX_LEN } from '../memory/validation';
+import { AUTO_UNDO_MAX_IDS } from '../memory/auto-mode-undo.service';
 import { LIST_SCOPES } from '../memory/memory-admin.service';
 import { PROPOSALS_LIST_MAX_LIMIT } from '../proposals/proposals.service';
 import { USAGE_BUCKETS } from '../usage/usage.service';
@@ -90,20 +91,55 @@ export const emptyBody = optionalBody(z.strictObject({}));
 
 // ---- GET /api/memories ---------------------------------------------------
 
-export const memoriesListQuery = z.strictObject({
-  scope: z.enum(LIST_SCOPES).optional(),
-  projectId: opaqueId.optional(),
-  kind: z.enum(memoryKind.enumValues).optional(),
-  status: z.enum(memoryStatus.enumValues).optional(),
-  tags: stringOrArray.optional(),
-  q: z.string().max(HEADER_MAX_LEN).optional(),
-  // Filtr „auto-zaakceptowane" (roadmap v1.6, A2, G6) — tylko literał 'true' (brak filtra = param pominięty).
-  autoApproved: z
-    .literal('true')
-    .transform(() => true as const)
-    .optional(),
-});
+export const memoriesListQuery = z
+  .strictObject({
+    scope: z.enum(LIST_SCOPES).optional(),
+    projectId: opaqueId.optional(),
+    kind: z.enum(memoryKind.enumValues).optional(),
+    status: z.enum(memoryStatus.enumValues).optional(),
+    tags: stringOrArray.optional(),
+    q: z.string().max(HEADER_MAX_LEN).optional(),
+    // Filtr „auto-zaakceptowane" (roadmap v1.6, A2, G6) — tylko literał 'true' (brak filtra = param pominięty).
+    autoApproved: z
+      .literal('true')
+      .transform(() => true as const)
+      .optional(),
+    // Zawężenia filtra „auto" (A3): przedział po `memories.auto_approved_at` i token zapisu — tylko z `autoApproved`.
+    autoFrom: isoDateQuery.optional(),
+    autoTo: isoDateQuery.optional(),
+    autoTokenId: opaqueId.optional(),
+  })
+  .refine(
+    (q) =>
+      q.autoApproved === true ||
+      (q.autoFrom === undefined && q.autoTo === undefined && q.autoTokenId === undefined),
+    { message: 'autoFrom/autoTo/autoTokenId require autoApproved=true', path: ['autoApproved'] },
+  )
+  .refine((q) => !q.autoFrom || !q.autoTo || q.autoFrom <= q.autoTo, {
+    message: 'autoFrom must be <= autoTo',
+    path: ['autoFrom'],
+  });
 export type MemoriesListQuery = z.output<typeof memoriesListQuery>;
+
+// ---- GET /api/memories/auto-undo/preview, POST /api/memories/auto-undo/execute ------
+
+/** `projectId` WYMAGANY — cofanie działa w kontekście jednego projektu (A3, G3a), nie ma wersji „wszystkie". */
+export const autoUndoPreviewQuery = z
+  .strictObject({
+    projectId: opaqueId,
+    from: isoDateQuery.optional(),
+    to: isoDateQuery.optional(),
+    tokenId: opaqueId.optional(),
+  })
+  .refine((q) => !q.from || !q.to || q.from <= q.to, { message: 'from must be <= to', path: ['from'] });
+export type AutoUndoPreviewQuery = z.output<typeof autoUndoPreviewQuery>;
+
+/** `ids` = lista z podglądu (1..`AUTO_UNDO_MAX_IDS`); serwis dedupuje i ponownie weryfikuje każdy wiersz pod lockiem. */
+export const autoUndoExecuteBody = z.strictObject({
+  projectId: opaqueId,
+  ids: z.array(opaqueId).min(1).max(AUTO_UNDO_MAX_IDS),
+});
+export type AutoUndoExecuteBody = z.output<typeof autoUndoExecuteBody>;
 
 // ---- GET /api/memories/events --------------------------------------------
 

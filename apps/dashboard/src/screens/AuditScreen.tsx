@@ -220,6 +220,16 @@ export function AuditScreen() {
                     </td>
                     <td className="px-3.5 py-2.5">
                       <EventBadge eventType={row.eventType} />
+                      {/* Masowe cofanie auto mode (A3, G6): audyt `archive` niesie `metadata.via` + `undoId` wspólny dla
+                          całej akcji; ręczna archiwizacja nie ma metadata. */}
+                      {row.eventType === 'archive' && row.metadata?.via === 'auto_mode_undo' && (
+                        <span
+                          className="ml-1.5 rounded-sm border border-border-strong bg-neutral-subtle px-1 py-0.5 text-2xs normal-case tracking-normal text-neutral-foreground"
+                          title={typeof row.metadata.undoId === 'string' ? row.metadata.undoId : undefined}
+                        >
+                          cofanie auto mode
+                        </span>
+                      )}
                     </td>
                     <td className="px-3.5 py-2.5 font-mono text-xs text-muted-foreground">
                       {row.actor}

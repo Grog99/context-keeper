@@ -21,6 +21,7 @@ import { SettingsController } from '../src/dashboard/settings.controller';
 import { UsageMetricsController } from '../src/dashboard/usage-metrics.controller';
 import { LlmSettingsService } from '../src/llm/llm-settings.service';
 import { LlmService } from '../src/llm/llm.service';
+import { AutoModeUndoService } from '../src/memory/auto-mode-undo.service';
 import { MemoryAdminService } from '../src/memory/memory-admin.service';
 import { NightlyService } from '../src/nightly/nightly.service';
 import { OnboardingService } from '../src/onboarding/onboarding.service';
@@ -44,10 +45,13 @@ function track(name: string) {
 /** Ostatnie argumenty przekazane do fake'ów list (audyt/propozycje) — dowód, co faktycznie dotarło do serwisu. */
 let lastAuditFilter: unknown;
 let lastProposalsPageFilter: unknown;
+let lastMemoriesListFilter: unknown;
+let lastAutoUndoPreviewFilter: unknown;
+let lastAutoUndoExecuteInput: unknown;
 
 function fakeMemoryAdmin(): MemoryAdminService {
   return {
-    listMemories: async () => (track('memoryAdmin.listMemories'), []),
+    listMemories: async (filter: unknown) => (track('memoryAdmin.listMemories'), (lastMemoriesListFilter = filter), []),
     listEvents: async () => (track('memoryAdmin.listEvents'), []),
     getMemoryDetail: async () => (track('memoryAdmin.getMemoryDetail'), {}),
     listRevisions: async () => (track('memoryAdmin.listRevisions'), []),
@@ -59,6 +63,21 @@ function fakeMemoryAdmin(): MemoryAdminService {
     archiveMemory: async () => track('memoryAdmin.archiveMemory'),
     promoteToGlobal: async () => track('memoryAdmin.promoteToGlobal'),
   } as unknown as MemoryAdminService;
+}
+
+function fakeAutoUndo(): AutoModeUndoService {
+  return {
+    preview: async (filter: unknown) => (
+      track('autoUndo.preview'),
+      (lastAutoUndoPreviewFilter = filter),
+      { asOf: '2026-01-01T00:00:00.000Z', archivable: 0, skippedCorrections: 0, ids: [], capped: false }
+    ),
+    execute: async (input: unknown) => (
+      track('autoUndo.execute'),
+      (lastAutoUndoExecuteInput = input),
+      { undoId: 'undo_test', archived: 0, skipped: 0 }
+    ),
+  } as unknown as AutoModeUndoService;
 }
 
 function fakePurge(): PurgeService {
@@ -121,6 +140,8 @@ function fakeUsage(): UsageService {
   return {
     searchSeries: async () => (track('usage.searchSeries'), []),
     proposalOutcomeSeries: async () => (track('usage.proposalOutcomeSeries'), []),
+    autoModeFates: async () => (track('usage.autoModeFates'), []),
+    autoHoldStats: async () => (track('usage.autoHoldStats'), []),
     countSearchesByToken: async () => new Map(),
     countSearchesByAccountTokens: async () => new Map(),
   } as unknown as UsageService;
@@ -188,6 +209,7 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
       providers: [
         { provide: MemoryAdminService, useValue: fakeMemoryAdmin() },
         { provide: PurgeService, useValue: fakePurge() },
+        { provide: AutoModeUndoService, useValue: fakeAutoUndo() },
         { provide: AuditService, useValue: fakeAudit() },
         { provide: ProposalsService, useValue: fakeProposals() },
         { provide: ProjectsService, useValue: fakeProjects() },
@@ -394,6 +416,70 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
       expect(calls).toEqual([]);
     });
 
+    it('GET /api/memories/auto-undo/preview bez projectId (cofanie tylko w kontekście jednego projektu)', async () => {
+      const { status, json } = await req('GET', '/api/memories/auto-undo/preview');
+      expect(status).toBe(400);
+      expect(json.message).toContain('projectId');
+      expect(calls).toEqual([]);
+    });
+
+    it('GET /api/memories/auto-undo/preview?projectId=p&from=wczoraj', async () => {
+      const { status, json } = await req('GET', '/api/memories/auto-undo/preview?projectId=p&from=wczoraj');
+      expect(status).toBe(400);
+      expect(json.message).toContain('from');
+      expect(calls).toEqual([]);
+    });
+
+    it('GET /api/memories/auto-undo/preview?projectId=p&from=<późniejsze niż to>', async () => {
+      const { status } = await req(
+        'GET',
+        '/api/memories/auto-undo/preview?projectId=p&from=2026-02-01T00%3A00%3A00.000Z&to=2026-01-01T00%3A00%3A00.000Z',
+      );
+      expect(status).toBe(400);
+      expect(calls).toEqual([]);
+    });
+
+    it('GET /api/memories/auto-undo/preview?projectId=p&foo=1 (nieznany klucz query)', async () => {
+      const { status } = await req('GET', '/api/memories/auto-undo/preview?projectId=p&foo=1');
+      expect(status).toBe(400);
+      expect(calls).toEqual([]);
+    });
+
+    it('POST /api/memories/auto-undo/execute {ids: []} / 2001 id / nadmiarowy klucz / ?x=1 / bez projectId', async () => {
+      const tooMany = Array.from({ length: 2001 }, (_, i) => `mem_${i}`);
+      for (const [path, body] of [
+        ['/api/memories/auto-undo/execute', { projectId: 'p', ids: [] }],
+        ['/api/memories/auto-undo/execute', { projectId: 'p', ids: tooMany }],
+        ['/api/memories/auto-undo/execute', { projectId: 'p', ids: ['mem_1'], extra: 1 }],
+        ['/api/memories/auto-undo/execute', { ids: ['mem_1'] }],
+        ['/api/memories/auto-undo/execute', { projectId: 'p', ids: ['bad id'] }],
+        ['/api/memories/auto-undo/execute?x=1', { projectId: 'p', ids: ['mem_1'] }],
+      ] as const) {
+        const { status, json } = await req('POST', path, body);
+        expect(status, path).toBe(400);
+        expect(json).toMatchObject({ code: 'validation_error' });
+      }
+      expect(calls).toEqual([]);
+    });
+
+    it('GET /api/memories?autoFrom=<iso> bez autoApproved (zawężenia auto wymagają filtra auto)', async () => {
+      for (const qs of ['autoFrom=2026-01-01T00%3A00%3A00.000Z', 'autoTo=2026-01-01T00%3A00%3A00.000Z', 'autoTokenId=tok_1']) {
+        const { status, json } = await req('GET', `/api/memories?${qs}`);
+        expect(status, qs).toBe(400);
+        expect(json.message).toContain('autoApproved');
+      }
+      expect(calls).toEqual([]);
+    });
+
+    it('GET /api/memories?autoApproved=true&autoFrom=<późniejsze niż autoTo>', async () => {
+      const { status } = await req(
+        'GET',
+        '/api/memories?autoApproved=true&autoFrom=2026-02-01T00%3A00%3A00.000Z&autoTo=2026-01-01T00%3A00%3A00.000Z',
+      );
+      expect(status).toBe(400);
+      expect(calls).toEqual([]);
+    });
+
     it('GET /api/memories/bad%20id (id z nieprawidłowym formatem — spacja)', async () => {
       const { status, json } = await req('GET', '/api/memories/bad%20id');
       expect(status).toBe(400);
@@ -428,6 +514,7 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
         providers: [
           { provide: MemoryAdminService, useValue: memoryAdmin },
           { provide: PurgeService, useValue: fakePurge() },
+          { provide: AutoModeUndoService, useValue: fakeAutoUndo() },
         ],
       })
         .overrideGuard(SessionGuard)
@@ -455,6 +542,47 @@ describe('dashboard-validation.http — pipe\'y wpięte w potok HTTP Nesta (tech
       } finally {
         await localApp.close();
       }
+    });
+
+    it('GET /api/memories?autoApproved=true&autoFrom=<iso>&autoTo=<iso>&autoTokenId=tok_1 -> serwis dostaje Date-y i token', async () => {
+      const { status } = await req(
+        'GET',
+        '/api/memories?scope=project&projectId=proj_1&autoApproved=true&autoFrom=2026-01-01T00%3A00%3A00.000Z&autoTo=2026-01-02T00%3A00%3A00.000Z&autoTokenId=tok_1',
+      );
+      expect(status).toBe(200);
+      expect(lastMemoriesListFilter).toMatchObject({
+        scope: 'project',
+        projectId: 'proj_1',
+        autoApproved: true,
+        autoFrom: new Date('2026-01-01T00:00:00.000Z'),
+        autoTo: new Date('2026-01-02T00:00:00.000Z'),
+        autoTokenId: 'tok_1',
+      });
+    });
+
+    it('GET /api/memories/auto-undo/preview?projectId&from&tokenId -> serwis dostaje Date (a żądanie nie trafia w GET :id)', async () => {
+      const { status, json } = await req(
+        'GET',
+        '/api/memories/auto-undo/preview?projectId=proj_1&from=2026-01-01T00%3A00%3A00.000Z&tokenId=tok_1',
+      );
+      expect(status).toBe(200);
+      expect(json).toMatchObject({ archivable: 0, ids: [] });
+      expect(calls).toEqual(['autoUndo.preview']);
+      expect(lastAutoUndoPreviewFilter).toEqual({
+        projectId: 'proj_1',
+        from: new Date('2026-01-01T00:00:00.000Z'),
+        tokenId: 'tok_1',
+      });
+    });
+
+    it('POST /api/memories/auto-undo/execute {projectId, ids} -> 201, serwis dostaje id z podglądu', async () => {
+      const { status, json } = await req('POST', '/api/memories/auto-undo/execute', {
+        projectId: 'proj_1',
+        ids: ['mem_1', 'mem_2'],
+      });
+      expect(status).toBe(201);
+      expect(json).toMatchObject({ undoId: 'undo_test' });
+      expect(lastAutoUndoExecuteInput).toEqual({ projectId: 'proj_1', ids: ['mem_1', 'mem_2'] });
     });
 
     it('GET /api/memories?kind= (pusty string) -> 200, kind traktowany jako nieobecny', async () => {

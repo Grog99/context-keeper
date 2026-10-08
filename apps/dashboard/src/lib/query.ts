@@ -19,6 +19,8 @@ export const queryKeys = {
   memoryRevisions: (id: string) => ['memories', id, 'revisions'] as const,
   /** Zakładka "Relacje" (roadmap v1.2, "memory-relations + 1-hop graph boost"). */
   memoryRelations: (id: string) => ['memories', id, 'relations'] as const,
+  /** Podgląd masowego cofania auto mode (A3) — pod `memories`, więc `invalidateQueries(['memories'])` go odświeża. */
+  autoUndoPreview: (filter: Record<string, unknown>) => ['memories', 'auto-undo', filter] as const,
   memoryPurgePreview: (id: string) => ['memories', id, 'purge-preview'] as const,
   /** Ekran "Oś czasu" (roadmap v1.2, "kind=event episodic") — `GET /api/memories/events`. */
   events: (filter: Record<string, unknown>) => ['memories', 'events', filter] as const,

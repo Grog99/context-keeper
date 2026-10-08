@@ -234,6 +234,7 @@ export class MemoryService {
       contentHash,
       scope,
       projectId: ctx.projectId,
+      tokenId: ctx.tokenId ?? null, // A3: nośnik filtra „po tokenie" w cofaniu auto mode
     });
 
     await this.audit.log({
@@ -459,6 +460,7 @@ export class MemoryService {
       contentHash,
       scope,
       projectId: ctx.projectId,
+      tokenId: ctx.tokenId ?? null, // A3: nośnik filtra „po tokenie" w cofaniu auto mode
     });
 
     await this.audit.log({

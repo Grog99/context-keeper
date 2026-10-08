@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, arrayOverlaps, desc, eq, ilike, inArray, isNotNull, or, sql } from 'drizzle-orm';
+import { and, arrayOverlaps, desc, eq, getTableColumns, ilike, inArray, isNotNull, or, sql } from 'drizzle-orm';
 import { AuditService } from '../audit/audit.service';
 import { ToolError } from '../common/errors';
 import { generateId, ID_PREFIX } from '../common/ids';
@@ -12,7 +12,6 @@ import {
   memories,
   memoryRelations,
   revisions,
-  type MemoryRelationRow,
   type MemoryRow,
   type RevisionRow,
 } from '../db/schema';
@@ -26,6 +25,8 @@ import type {
   RevisionAction,
 } from '../db/schema/enums';
 import { EmbeddingService } from '../embeddings/embedding.service';
+import { autoApprovedRange, autoContentFromToken, autoCorrectionExpr } from './auto-mode-filters';
+import { archiveMemoriesInTx, auditRemovedRelations, snapshotOf } from './memory-archive';
 import { normalizeHeader, normalizeTags, validateBody, validateEventTime } from './validation';
 
 /** Jedno źródło prawdy dla `scope` filtrów przeglądarki (tech-review #3, roadmap v1.4) — `'all'`
@@ -46,6 +47,11 @@ export interface ListMemoriesFilter {
   q?: string;
   /** Filtr „auto-zaakceptowane" (roadmap v1.6, A2, G6): tylko pamięci, których bieżąca treść weszła przez auto mode. */
   autoApproved?: boolean;
+  /** Zawężenia filtra „auto" (A3) — działają WYŁĄCZNIE razem z `autoApproved`: przedział po
+   * `memories.auto_approved_at` (G2a) i token zapisu, który wniósł bieżącą treść (G1b). */
+  autoFrom?: Date;
+  autoTo?: Date;
+  autoTokenId?: string;
   limit?: number;
 }
 
@@ -76,6 +82,9 @@ export interface MemoryListItem {
   eventTime: string | null;
   /** v1.6 A2 (G6): ISO czas auto-akceptacji bieżącej treści; `null` = treść nie pochodzi z auto mode. */
   autoApprovedAt: string | null;
+  /** v1.6 A3 (G1): bieżąca treść pochodzi z auto-korekty pamięci utworzonej/zatwierdzonej przez człowieka —
+   * nie jest kandydatem do cofnięcia (lista pokazuje znacznik `auto · korekta`). */
+  autoCorrection: boolean;
 }
 
 export interface MemoryDetail extends MemoryListItem {
@@ -130,10 +139,6 @@ export interface CreateRelationInput {
   type: RelationType;
 }
 
-function snapshotOf(row: MemoryRow): Record<string, unknown> {
-  return { header: row.header, body: row.body, tags: row.tags, kind: row.kind, version: row.version, eventTime: row.eventTime };
-}
-
 function toListItem(row: {
   id: string;
   header: string;
@@ -150,6 +155,7 @@ function toListItem(row: {
   version: number;
   eventTime: Date | null;
   autoApprovedAt: Date | null;
+  autoCorrection: boolean;
 }): MemoryListItem {
   return {
     ...row,
@@ -161,7 +167,7 @@ function toListItem(row: {
   };
 }
 
-function toDetail(row: MemoryRow): MemoryDetail {
+function toDetail(row: MemoryRow & { autoCorrection: boolean }): MemoryDetail {
   return {
     ...toListItem(row),
     body: row.body,
@@ -203,7 +209,12 @@ export class MemoryAdminService {
     if (q) {
       conditions.push(ilike(memories.header, `%${q}%`));
     }
-    if (filter.autoApproved) conditions.push(isNotNull(memories.autoApprovedAt));
+    if (filter.autoApproved) {
+      conditions.push(isNotNull(memories.autoApprovedAt));
+      // Te same fragmenty co w cofaniu (`AutoModeUndoService`) — lista = to, co cofanie by rozważyło.
+      conditions.push(...autoApprovedRange(filter.autoFrom, filter.autoTo));
+      if (filter.autoTokenId) conditions.push(autoContentFromToken(filter.autoTokenId));
+    }
 
     const rows = await this.db
       .select({
@@ -222,6 +233,7 @@ export class MemoryAdminService {
         version: memories.version,
         eventTime: memories.eventTime,
         autoApprovedAt: memories.autoApprovedAt,
+        autoCorrection: autoCorrectionExpr(),
       })
       .from(memories)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -261,6 +273,7 @@ export class MemoryAdminService {
         version: memories.version,
         eventTime: memories.eventTime,
         autoApprovedAt: memories.autoApprovedAt,
+        autoCorrection: autoCorrectionExpr(),
       })
       .from(memories)
       .where(and(...conditions))
@@ -272,7 +285,11 @@ export class MemoryAdminService {
 
   /** Pełny wiersz + metadane, BEZ bumpowania `access_count`/`last_accessed_at` (§Ryzyka planu). */
   async getMemoryDetail(id: string): Promise<MemoryDetail> {
-    const [row] = await this.db.select().from(memories).where(eq(memories.id, id)).limit(1);
+    const [row] = await this.db
+      .select({ ...getTableColumns(memories), autoCorrection: autoCorrectionExpr() })
+      .from(memories)
+      .where(eq(memories.id, id))
+      .limit(1);
     if (!row) throw new ToolError('not_found', `Pamięć nie istnieje: ${id}`);
     return toDetail(row);
   }
@@ -570,25 +587,10 @@ export class MemoryAdminService {
    */
   async archiveMemory(id: string): Promise<void> {
     const current = await this.requireApproved(id, 'archiwizacji');
-    await this.db.transaction(async (tx) => {
-      await tx
-        .update(memories)
-        .set({
-          status: 'archived',
-          version: sql`${memories.version} + 1`,
-          updatedAt: new Date(),
-          autoApprovedAt: null, // G6
-        })
-        .where(eq(memories.id, id));
-      await tx.delete(embeddings).where(eq(embeddings.memoryId, id));
-      const deletedRelations = await tx
-        .delete(memoryRelations)
-        .where(or(eq(memoryRelations.fromMemoryId, id), eq(memoryRelations.toMemoryId, id)))
-        .returning();
-      await this.writeRevision(tx, id, 'archive', snapshotOf(current));
-      await this.audit.log({ eventType: 'archive', actor: DASHBOARD_ACTOR, affectedIds: [id] }, tx);
-      await this.auditRemovedRelations(tx, deletedRelations, 'archive');
-    });
+    // Jedna implementacja z masowym cofaniem auto mode (A3) — `archiveMemoriesInTx`; audyt `archive` bez metadata.
+    await this.db.transaction((tx) =>
+      archiveMemoriesInTx(tx, this.audit, [current], { actor: DASHBOARD_ACTOR }),
+    );
   }
 
   /**
@@ -624,42 +626,11 @@ export class MemoryAdminService {
         .returning();
       await this.writeRevision(tx, id, 'promote', snapshotOf(current));
       await this.audit.log({ eventType: 'promote', actor: DASHBOARD_ACTOR, affectedIds: [id] }, tx);
-      await this.auditRemovedRelations(tx, deletedRelations, 'promote');
+      await auditRemovedRelations(tx, this.audit, DASHBOARD_ACTOR, deletedRelations, 'promote');
     });
   }
 
   // ---- private helpers ------------------------------------------------
-
-  /**
-   * Audyt kaskady usunięcia krawędzi (code review finding "kaskada bez audytu", roadmap v1.2) —
-   * wspólne dla `archiveMemory` i `promoteToGlobal`: obie operacje wyjmują pamięć z grafu JEJ
-   * projektu, więc dotykające ją krawędzie giną i muszą zostawić ślad w append-only audycie, tak
-   * samo jak ręczne `removeRelation`. `via` rozróżnia kaskadę (`archive`/`promote`) od ręcznego
-   * usunięcia (`removeRelation`, `via: 'human'`) — czytelne w audit logu, skąd krawędź zniknęła.
-   */
-  private async auditRemovedRelations(
-    tx: Tx,
-    deleted: MemoryRelationRow[],
-    via: 'archive' | 'promote',
-  ): Promise<void> {
-    for (const rel of deleted) {
-      await this.audit.log(
-        {
-          eventType: 'relation_removed',
-          actor: DASHBOARD_ACTOR,
-          affectedIds: [rel.fromMemoryId, rel.toMemoryId],
-          metadata: {
-            relationId: rel.id,
-            type: rel.type,
-            fromMemoryId: rel.fromMemoryId,
-            toMemoryId: rel.toMemoryId,
-            via,
-          },
-        },
-        tx,
-      );
-    }
-  }
 
   private async requireApproved(id: string, action: string): Promise<MemoryRow> {
     const [current] = await this.db.select().from(memories).where(eq(memories.id, id)).limit(1);

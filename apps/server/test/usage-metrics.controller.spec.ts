@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { UsageMetricsController } from '../src/dashboard/usage-metrics.controller';
-import type { ProposalBucketRow, SearchBucketRow, UsageSeriesFilter } from '../src/usage/usage.service';
+import type {
+  AutoHoldRow,
+  AutoModeFateRow,
+  AutoModeMetricsFilter,
+  ProposalBucketRow,
+  SearchBucketRow,
+  UsageSeriesFilter,
+} from '../src/usage/usage.service';
 import type { UsageService } from '../src/usage/usage.service';
 
 /** Fake `UsageService` — kontroler tylko przekazuje parsed filter i kształtuje surowe wiersze,
@@ -8,14 +15,26 @@ import type { UsageService } from '../src/usage/usage.service';
 function fakeUsage(opts: {
   searchRows?: SearchBucketRow[];
   proposalRows?: ProposalBucketRow[];
+  fateRows?: AutoModeFateRow[];
+  holdRows?: AutoHoldRow[];
   captureFilter?: (filter: UsageSeriesFilter) => void;
+  captureAutoFilters?: (fates: AutoModeMetricsFilter, holds: AutoModeMetricsFilter) => void;
 }): UsageService {
+  let fatesFilter: AutoModeMetricsFilter | undefined;
   return {
     searchSeries: async (filter: UsageSeriesFilter) => {
       opts.captureFilter?.(filter);
       return opts.searchRows ?? [];
     },
     proposalOutcomeSeries: async () => opts.proposalRows ?? [],
+    autoModeFates: async (filter: AutoModeMetricsFilter) => {
+      fatesFilter = filter;
+      return opts.fateRows ?? [];
+    },
+    autoHoldStats: async (filter: AutoModeMetricsFilter) => {
+      opts.captureAutoFilters?.(fatesFilter!, filter);
+      return opts.holdRows ?? [];
+    },
   } as unknown as UsageService;
 }
 
@@ -100,5 +119,78 @@ describe('UsageMetricsController — walidacja query + kształtowanie serii (roa
     const result = await controller.get();
     expect(result.searchTotals.zeroResultRate).toBe(0);
     expect(result.searchSeries).toEqual([]);
+  });
+
+  describe('sekcja autoMode (roadmap v1.6, A4)', () => {
+    const noReasons = { near_duplicate: 0, not_computed: 0, human_target: 0, daily_limit: 0, auto_failed: 0 };
+
+    it('scala wiersze losu (create/update) i zawróceń per projekt; untouched = total − suma kubełków; sortuje po nazwie', async () => {
+      const fateRows: AutoModeFateRow[] = [
+        { projectId: 'proj_b', projectName: 'Beta', autoMode: false, type: 'create', total: 10, pruned: 1, overwritten: 2, archived: 1, undone: 3 },
+        { projectId: 'proj_a', projectName: 'Alpha', autoMode: true, type: 'create', total: 4, pruned: 0, overwritten: 0, archived: 0, undone: 0 },
+        { projectId: 'proj_a', projectName: 'Alpha', autoMode: true, type: 'update', total: 2, pruned: 0, overwritten: 1, archived: 0, undone: 0 },
+      ];
+      const holdRows: AutoHoldRow[] = [
+        { projectId: 'proj_a', projectName: 'Alpha', autoMode: true, held: 3, reasons: { ...noReasons, near_duplicate: 2, daily_limit: 2 } },
+      ];
+      const controller = new UsageMetricsController(fakeUsage({ fateRows, holdRows }));
+
+      const result = await controller.get();
+
+      expect(result.autoMode.projects.map((p) => p.projectName)).toEqual(['Alpha', 'Beta']);
+      const [alpha, beta] = result.autoMode.projects;
+      expect(alpha).toEqual({
+        projectId: 'proj_a',
+        projectName: 'Alpha',
+        autoModeEnabled: true,
+        create: { total: 4, pruned: 0, overwritten: 0, archived: 0, undone: 0, untouched: 4 },
+        update: { total: 2, pruned: 0, overwritten: 1, archived: 0, undone: 0, untouched: 1 },
+        held: { total: 3, reasons: { ...noReasons, near_duplicate: 2, daily_limit: 2 } },
+      });
+      // Beta: wyłączony dziś, bez update i bez zawróceń → zerowane.
+      expect(beta.autoModeEnabled).toBe(false);
+      expect(beta.create).toEqual({ total: 10, pruned: 1, overwritten: 2, archived: 1, undone: 3, untouched: 3 });
+      expect(beta.update).toEqual({ total: 0, pruned: 0, overwritten: 0, archived: 0, undone: 0, untouched: 0 });
+      expect(beta.held).toEqual({ total: 0, reasons: noReasons });
+    });
+
+    it('same zawrócenia (bez auto-akceptacji) też dają wiersz projektu, z zerowanym create/update', async () => {
+      const holdRows: AutoHoldRow[] = [
+        { projectId: 'proj_a', projectName: 'Alpha', autoMode: true, held: 1, reasons: { ...noReasons, human_target: 1 } },
+      ];
+      const result = await new UsageMetricsController(fakeUsage({ holdRows })).get();
+      expect(result.autoMode.projects).toHaveLength(1);
+      expect(result.autoMode.projects[0].create.total).toBe(0);
+      expect(result.autoMode.projects[0].held.total).toBe(1);
+    });
+
+    it('same auto-utworzenia (bez zawróceń) dają wiersz z held zerowanym', async () => {
+      const fateRows: AutoModeFateRow[] = [
+        { projectId: 'proj_a', projectName: 'Alpha', autoMode: true, type: 'create', total: 1, pruned: 0, overwritten: 0, archived: 0, undone: 0 },
+      ];
+      const result = await new UsageMetricsController(fakeUsage({ fateRows })).get();
+      expect(result.autoMode.projects[0].held).toEqual({ total: 0, reasons: noReasons });
+      expect(result.autoMode.projects[0].update.total).toBe(0);
+    });
+
+    it('brak danych auto mode → pusta lista projektów', async () => {
+      const result = await new UsageMetricsController(fakeUsage({})).get();
+      expect(result.autoMode).toEqual({ projects: [] });
+    });
+
+    it('from/to/projectId trafiają bez zmian do autoModeFates i autoHoldStats (bez bucket)', async () => {
+      let fates: AutoModeMetricsFilter | undefined;
+      let holds: AutoModeMetricsFilter | undefined;
+      const controller = new UsageMetricsController(
+        fakeUsage({ captureAutoFilters: (f, h) => ((fates = f), (holds = h)) }),
+      );
+      const from = new Date('2026-02-01T00:00:00Z');
+      const to = new Date('2026-02-08T00:00:00Z');
+
+      await controller.get({ from, to, projectId: 'proj_a', bucket: 'hour' });
+
+      expect(fates).toEqual({ from, to, projectId: 'proj_a' });
+      expect(holds).toEqual({ from, to, projectId: 'proj_a' });
+    });
   });
 });

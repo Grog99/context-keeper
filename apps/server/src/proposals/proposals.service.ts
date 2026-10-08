@@ -480,6 +480,8 @@ export class ProposalsService {
             scope: propRow.scope,
             projectId: propRow.projectId,
             origin: propRow.origin,
+            // INVARIANT: `memories.auto_approved_at` i `proposals.auto_approved_at` (niżej) dostają TEN SAM `now` —
+            // filtr po tokenie i join cofania (`memory/auto-mode-filters.ts`) łączą pamięć z propozycją po ich równości.
             autoApprovedAt: opts.auto ? now : null,
           });
           materializedId = created.id;
@@ -528,6 +530,7 @@ export class ProposalsService {
               version: sql`${memories.version} + 1`,
               updatedAt: now,
               // G6: auto-korekta ustawia znacznik „treść z auto mode", zatwierdzenie korekty przez człowieka go zdejmuje.
+              // INVARIANT: ten sam `now` co w `proposals.auto_approved_at` niżej (join cofania, `memory/auto-mode-filters.ts`).
               autoApprovedAt: opts.auto ? now : null,
             })
             .where(eq(memories.id, target.id));
@@ -655,6 +658,8 @@ export class ProposalsService {
       // Staging żyje 1:1 z proposalem — po materializacji (albo próbie, dla delete i tak zawsze pusty)
       // nie ma już czego promować; sprzątamy niezależnie od dyspozycji embeddingu.
       await tx.delete(stagingEmbeddings).where(eq(stagingEmbeddings.proposalId, propRow.id));
+      // INVARIANT: `proposals.auto_approved_at` = `memories.auto_approved_at` (ten sam `now`, wyżej) — nie rozdzielać
+      // na dwa `new Date()`: filtr po tokenie i cofanie (`memory/auto-mode-filters.ts`) łączą wiersze po równości.
       await tx
         .update(proposals)
         .set({ status: 'approved', updatedAt: now, ...(opts.auto ? { autoApprovedAt: now } : {}) })

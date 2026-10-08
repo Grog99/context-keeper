@@ -1,8 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, type AnyColumn, eq, gte, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, type AnyColumn, eq, gte, inArray, isNotNull, isNull, lt, sql, type SQL } from 'drizzle-orm';
 import { generateId, ID_PREFIX } from '../common/ids';
 import { DB, type Database } from '../db/db.tokens';
-import { projects, projectTokens, proposals, searchEvents } from '../db/schema';
+import { projects, projectTokens, proposals, searchEvents, type AutoHoldReason } from '../db/schema';
+import { AUTO_MODE_ACTOR_PREFIX, AUTO_MODE_UNDO_VIA } from '../proposals/auto-mode';
 
 /** Jedno źródło prawdy dla `bucket` (tech-review #3, roadmap v1.4) — `ZodValidationPipe`
  * (`dashboard.schemas.ts`) waliduje query po tej samej liście, zamiast po ręcznie przepisanej. */
@@ -61,6 +62,109 @@ export interface ProposalBucketRow {
   approved: number;
   rejected: number;
   approvedWithEdits: number;
+}
+
+/** Zakres ekranu „Pomiary" dla sekcji auto mode (A4) — `bucket` nie ma tu zastosowania (brak serii czasowej, G7). */
+export interface AutoModeMetricsFilter {
+  from: Date;
+  to: Date;
+  projectId?: string;
+}
+
+/** Los auto-akceptacji (kohorta = `proposals.auto_approved_at` w zakresie) per projekt × typ. Kubełki są rozłączne
+ * (pierwsze zdarzenie spoza auto mode wygrywa); reszta kohorty (`total − Σ`) to „nietknięte" — liczy kontroler. */
+export interface AutoModeFateRow {
+  projectId: string;
+  projectName: string;
+  /** Stan przełącznika DZIŚ — projekt z wyłączonym auto mode, ale z historią w zakresie, dalej ma wiersz (G7a). */
+  autoMode: boolean;
+  type: 'create' | 'update';
+  total: number;
+  pruned: number;
+  overwritten: number;
+  archived: number;
+  undone: number;
+}
+
+/** Zawrócone przez bezpiecznik propozycje (`auto_hold_reasons IS NOT NULL`, `created_at` w zakresie) per projekt.
+ * `held` liczy propozycję raz; `reasons` per powód (propozycja z dwoma powodami wchodzi do obu, G7a). */
+export interface AutoHoldRow {
+  projectId: string;
+  projectName: string;
+  autoMode: boolean;
+  held: number;
+  reasons: Record<AutoHoldReason, number>;
+}
+
+/**
+ * Zapytanie „los auto-akceptacji" (A4, G4-G6) jako SQL bez wykonania — wydzielone (jak `buildAuditQuery`), żeby
+ * test mógł zrobić `EXPLAIN` dokładnie tego, co jedzie do bazy.
+ *
+ * Kohorta: propozycje z `auto_approved_at` w `[from, to)` (trwałe, nietknięte przez purge — NIE `updated_at`),
+ * z id pamięci w `coalesce(edited_payload, payload)->>'memoryId'` (create: id wybite przed propozycją; update: cel).
+ * Los: PIERWSZE (`created_at, id`) zdarzenie audytu PO auto-akceptacji, na tej pamięci (`affected_ids @> [id]`,
+ * GIN `audit_affected_ids_idx`), wykonane przez aktora spoza auto mode (prefiks `auto-mode:`) — kolejna auto-korekta
+ * nie kończy losu poprzedniej (G5). Zdarzenia werdyktu (event → kubełek):
+ * - `human_edit` (edycja człowieka; pomijamy `metadata.action='created'` = ręczne utworzenie) → nadpisane,
+ * - `archive` → cofnięte (`metadata.via='auto_mode_undo'`) albo zarchiwizowane (ręczna archiwizacja),
+ * - `proposal_approved` (dołączona propozycja `dp` po `metadata.proposalId`, PK): nocna (`origin='nightly'`) albo
+ *   `merge`/`delete` → przycięte; `update` agenta zatwierdzony przez człowieka → nadpisane; `create` z
+ *   `supersedes` tej pamięci (`metadata.supersededId`) → zarchiwizowane.
+ * Promocja i `purge_tombstone` nie są werdyktem; odrzucone propozycje się nie liczą.
+ *
+ * Płotek `OFFSET 0` w podzapytaniu: bez niego planner spłaszcza je i dla `ORDER BY created_at LIMIT 1` chodzi po
+ * `audit_created_at_idx` od momentu auto-akceptacji, filtrując `affected_ids` — a pamięć „nietknięta" (większość
+ * kohorty) nie ma żadnego pasującego zdarzenia, więc skan obejmuje CAŁY audyt po jej auto-akceptacji (O(kohorta ×
+ * audyt)). Z płotkiem wyszukanie zdarzeń pamięci idzie przez GIN `audit_affected_ids_idx` (jak w `projectScopedAuditLog`).
+ */
+export function buildAutoModeFateQuery(filter: AutoModeMetricsFilter): SQL {
+  const projectCond = filter.projectId ? sql`and p.project_id = ${filter.projectId}` : sql``;
+  return sql`
+    with cohort as (
+      select p.project_id, p.type, p.auto_approved_at,
+             coalesce(p.edited_payload, p.payload) ->> 'memoryId' as memory_id
+      from proposals p
+      where p.auto_approved_at is not null
+        and p.auto_approved_at >= ${filter.from} and p.auto_approved_at < ${filter.to}
+        ${projectCond}
+    ), fated as (
+      select c.project_id, c.type, (
+        select x.bucket from (
+          select case
+              when a.event_type = 'human_edit' then 'overwritten'
+              when a.event_type = 'archive' then
+                case when a.metadata ->> 'via' = ${AUTO_MODE_UNDO_VIA} then 'undone' else 'archived' end
+              when dp.origin = 'nightly' or dp.type in ('merge', 'delete') then 'pruned'
+              when dp.type = 'update' then 'overwritten'
+              when dp.type = 'create' and a.metadata ->> 'supersededId' = c.memory_id then 'archived'
+            end as bucket, a.created_at, a.id
+          from audit_log a
+          left join proposals dp
+            on a.event_type = 'proposal_approved' and dp.id = a.metadata ->> 'proposalId'
+          where a.affected_ids @> array[c.memory_id]::text[]
+            and a.created_at > c.auto_approved_at
+            and a.event_type in ('human_edit', 'archive', 'proposal_approved')
+            and not starts_with(a.actor, ${AUTO_MODE_ACTOR_PREFIX})
+            and (a.event_type <> 'human_edit' or a.metadata ->> 'action' is distinct from 'created')
+          offset 0
+        ) x
+        where x.bucket is not null
+        order by x.created_at, x.id
+        limit 1
+      ) as bucket
+      from cohort c
+    )
+    select f.project_id as "projectId", pr.name as "projectName", pr.auto_mode as "autoMode", f.type as "type",
+      count(*)::int as "total",
+      (count(*) filter (where f.bucket = 'pruned'))::int as "pruned",
+      (count(*) filter (where f.bucket = 'overwritten'))::int as "overwritten",
+      (count(*) filter (where f.bucket = 'archived'))::int as "archived",
+      (count(*) filter (where f.bucket = 'undone'))::int as "undone"
+    from fated f
+    join projects pr on pr.id = f.project_id
+    group by f.project_id, pr.name, pr.auto_mode, f.type
+    order by pr.name, f.type
+  `;
 }
 
 /**
@@ -157,6 +261,59 @@ export class UsageService {
     // date_trunc(...) (timestamptz) jako string, nie jako JS Date. Normalizujemy tu, żeby
     // `ProposalBucketRow.ts` faktycznie dotrzymywał zadeklarowanego typu `Date` dla DTO/konsumentów.
     return rows.map((row) => ({ ...row, ts: new Date(row.ts as unknown as string | Date) }));
+  }
+
+  /**
+   * Los auto-akceptacji z zakresu per projekt × typ (`create`/`update`) — patrz `buildAutoModeFateQuery`.
+   * Projekt z wyłączonym dziś auto mode, ale z auto-akceptacjami w zakresie, dostaje wiersz (G7a).
+   */
+  async autoModeFates(filter: AutoModeMetricsFilter): Promise<AutoModeFateRow[]> {
+    const result = await this.db.execute(buildAutoModeFateQuery(filter));
+    return result.rows as unknown as AutoModeFateRow[];
+  }
+
+  /**
+   * Statystyka powodów zawrócenia (A4, G7a): propozycje z niepustym `auto_hold_reasons` utworzone w zakresie, per
+   * projekt. `held` = liczba propozycji; `reasons` = per powód (suma powodów ≥ `held`).
+   */
+  async autoHoldStats(filter: AutoModeMetricsFilter): Promise<AutoHoldRow[]> {
+    const conditions = [
+      isNotNull(proposals.autoHoldReasons),
+      gte(proposals.createdAt, filter.from),
+      lt(proposals.createdAt, filter.to),
+    ];
+    if (filter.projectId) conditions.push(eq(proposals.projectId, filter.projectId));
+
+    const rows = await this.db
+      .select({
+        projectId: projects.id,
+        projectName: projects.name,
+        autoMode: projects.autoMode,
+        held: sql<number>`count(*)::int`,
+        nearDuplicate: sql<number>`count(*) FILTER (WHERE 'near_duplicate' = ANY(${proposals.autoHoldReasons}))::int`,
+        notComputed: sql<number>`count(*) FILTER (WHERE 'not_computed' = ANY(${proposals.autoHoldReasons}))::int`,
+        humanTarget: sql<number>`count(*) FILTER (WHERE 'human_target' = ANY(${proposals.autoHoldReasons}))::int`,
+        dailyLimit: sql<number>`count(*) FILTER (WHERE 'daily_limit' = ANY(${proposals.autoHoldReasons}))::int`,
+        autoFailed: sql<number>`count(*) FILTER (WHERE 'auto_failed' = ANY(${proposals.autoHoldReasons}))::int`,
+      })
+      .from(proposals)
+      .innerJoin(projects, eq(projects.id, proposals.projectId))
+      .where(and(...conditions))
+      .groupBy(projects.id, projects.name, projects.autoMode);
+
+    return rows.map((r) => ({
+      projectId: r.projectId,
+      projectName: r.projectName,
+      autoMode: r.autoMode,
+      held: r.held,
+      reasons: {
+        near_duplicate: r.nearDuplicate,
+        not_computed: r.notComputed,
+        human_target: r.humanTarget,
+        daily_limit: r.dailyLimit,
+        auto_failed: r.autoFailed,
+      } satisfies Record<AutoHoldReason, number>,
+    }));
   }
 
   /**
