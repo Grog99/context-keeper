@@ -1,0 +1,36 @@
+# CI: lint + typecheck + testy całego monorepo (`pnpm verify`). Testy integracyjne startują Postgresa przez
+# testcontainers (`pgvector/pgvector:pg18-trixie`), więc runner musi mieć Dockera — `ubuntu-latest` go ma, a repo
+# jest publiczne, więc minuty są darmowe. Nazwa joba `verify` jest wymaganym checkiem w ochronie gałęzi `main` —
+# zmiana nazwy zablokuje merge każdego PR. Deploy na Coolify zostaje automatyczny po wejściu zmian na `main`
+# (merge i tak wymaga zielonego `verify`).
+name: verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Wersja pnpm z pola `packageManager` w package.json, Node z `.nvmrc`.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify
