@@ -13,13 +13,15 @@ import { LlmRunBudget } from '../llm/llm-budget';
 import { LlmService } from '../llm/llm.service';
 import { EMPTY_LLM_COUNTERS, type NightlyLlmReport } from '../llm/llm.types';
 import { computeStaleIds } from '../proposals/proposals.service';
-import { isLlmDetectedPayload } from '../proposals/proposals.types';
+import { isConflictPayload, isLlmDetectedPayload } from '../proposals/proposals.types';
 import { UsageService } from '../usage/usage.service';
 import { buildClusters, pickCanonicalMerge, type NeighborPair } from './dedup-cluster';
+import { runLlmConflicts, selectConflictPairs } from './llm-conflicts';
 import { runLlmPrune } from './llm-prune';
 import { llmWindowStart, selectWindowFacts } from './llm-window';
 import {
   conditionKey,
+  EMPTY_LLM_CONFLICT_COUNTERS,
   EMPTY_LLM_PRUNE_COUNTERS,
   PRUNE_SCORER,
   type DetectedCondition,
@@ -51,6 +53,7 @@ const EMPTY_COUNTERS: NightlyCounters = {
   searchEventsPruned: 0,
   ...EMPTY_LLM_COUNTERS,
   ...EMPTY_LLM_PRUNE_COUNTERS,
+  ...EMPTY_LLM_CONFLICT_COUNTERS,
 };
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -72,6 +75,22 @@ interface FactRow {
    * WCIĄŻ obecny w `facts` (nadal kandyduje do prune scoringu) — jedynie ANN/merge detection go
    * pomija (Fix 4, code review commit d057871). */
   vector: number[] | null;
+}
+
+/** Wspólny kontekst obu detektorów LLM (B2 prune, B3 conflicts), liczony RAZ na przebieg: początek okna
+ * oraz zbiory wyłączeń niezależne od wyniku prune (recency, pending). `null` = odczyt się nie udał
+ * (fail-open) — oba detektory się pomijają. */
+interface LlmScanContext {
+  windowStart: Date;
+  recencyIds: Set<string>;
+  pendingIds: Set<string>;
+}
+
+/** Wynik skanu ANN jednego faktu: `dedup` (`dist <= NIGHTLY_DEDUP_DISTANCE`, idzie do klastrów merge) oraz
+ * `band` (`dedup < dist <= górna granica pasma`, kandydaci detektora sprzeczności B3). */
+interface NeighborScan {
+  dedup: NeighborPair[];
+  band: NeighborPair[];
 }
 
 /** Ile faktów jest przetwarzanych naraz w `findNeighborPairs` (Fix 4, code review commit d057871) —
@@ -105,6 +124,14 @@ const NEIGHBOR_SCAN_CONCURRENCY = 10;
  * `payload.rationale` i są wyłączone z orphan-withdraw (ust. 13): okno to „detektor przestał patrzeć", nie
  * „warunek ustał", więc taki proposal żyje do decyzji człowieka. Znane, zaakceptowane zachowanie (B2):
  * odrzucony proposal LLM może wrócić, dopóki fakt jest w oknie (job pozostaje bezstanowy).
+ *
+ * Detektor sprzeczności (B3, `detectLlmConflicts`) jest czwartym detektorem, wołanym PO LLM prune na tym samym
+ * budżecie (wspólny cap, prune najpierw — nadwyżka liczy się w `llmSkippedCap`). Kandydaci to pary z PASMA
+ * `(NIGHTLY_DEDUP_DISTANCE, NIGHTLY_CONFLICT_DISTANCE]` tego samego skanu ANN co dedup (bez nowych zapytań),
+ * zakotwiczone na oknie `created_at` (≥ jedna strona w oknie), bez stron z klastra merge / recency prune /
+ * pending proposala / LLM prune. Jedno wywołanie = jedna para, model orzeka binarnie; wynik to zwykły warunek
+ * `delete` na STARSZYM wpisie z `counterpartId`. Orphan-withdraw: proposal konfliktu traci wyłączenie (B2 ust. 13),
+ * gdy którakolwiek strona przestała być `approved`.
  */
 @Injectable()
 export class NightlyService {
@@ -215,27 +242,58 @@ export class NightlyService {
 
     const dedupDistance = this.config.get('NIGHTLY_DEDUP_DISTANCE');
     const annNeighbors = this.config.get('NIGHTLY_ANN_NEIGHBORS');
+    // Górna granica pasma sprzeczności (B3). Przy wyłączonym kroku LLM pasmo jest PUSTE (górna = dedup) —
+    // detektor nie buduje par ani promptów (ust. 16), a skan ANN zachowuje się dokładnie jak dotąd.
+    const conflictDistance = this.config.get('NIGHTLY_CONFLICT_DISTANCE');
+    if (budget.enabled && conflictDistance <= dedupDistance) {
+      this.logger.warn(
+        `[nightly] NIGHTLY_CONFLICT_DISTANCE=${conflictDistance} <= NIGHTLY_DEDUP_DISTANCE=${dedupDistance} — pasmo sprzeczności jest puste, detektor sprzeczności nic nie oceni.`,
+      );
+    }
+    const bandUpper = budget.enabled ? Math.max(conflictDistance, dedupDistance) : dedupDistance;
 
     // Bounded concurrency zamiast ściśle sekwencyjnej pętli (Fix 4, code review commit d057871) —
     // chunk po `NEIGHBOR_SCAN_CONCURRENCY`, `Promise.all` w obrębie chunku, wyniki akumulowane przed
     // startem kolejnego chunku (bez nowej zależności typu p-limit).
     const pairs: NeighborPair[] = [];
+    const bandPairs: NeighborPair[] = [];
     for (let i = 0; i < facts.length; i += NEIGHBOR_SCAN_CONCURRENCY) {
       const chunk = facts.slice(i, i + NEIGHBOR_SCAN_CONCURRENCY);
       const results = await Promise.all(
         chunk.map((fact) =>
-          this.findNeighborPairs(fact, factById, activeModel, annNeighbors, dedupDistance),
+          this.findNeighborPairs(fact, factById, activeModel, annNeighbors, dedupDistance, bandUpper),
         ),
       );
-      for (const found of results) pairs.push(...found);
+      for (const found of results) {
+        pairs.push(...found.dedup);
+        bandPairs.push(...found.band);
+      }
     }
     const clusters = buildClusters(pairs);
     const clusteredIds = new Set(clusters.flat());
 
     const mergeConditions = clusters.map((ids) => this.buildMergeCondition(ids, factById));
     const pruneConditions = this.buildPruneConditions(facts, clusteredIds);
-    const llmPrune = await this.detectLlmPrune(budget, facts, clusteredIds, pruneConditions);
-    const allDetected = [...mergeConditions, ...pruneConditions, ...llmPrune.conditions];
+    // Kontekst LLM liczony raz dla obu detektorów (fail-open: błąd odczytu pending => oba pomijają się).
+    const llmCtx = await this.loadLlmScanContext(budget, pruneConditions);
+    const llmPrune = await this.detectLlmPrune(budget, llmCtx, facts, clusteredIds);
+    // B3 PO prune, na tym samym budżecie (G1: prune wydaje cap pierwszy). Wpis z warunkiem LLM prune z tego
+    // przebiegu nie wchodzi w parę (ust. 22 — jeden wpis, najwyżej jedna propozycja na przebieg).
+    const llmPruneIds = new Set(llmPrune.conditions.flatMap((c) => c.affectedIds));
+    const llmConflicts = await this.detectLlmConflicts(
+      budget,
+      llmCtx,
+      bandPairs,
+      factById,
+      clusteredIds,
+      llmPruneIds,
+    );
+    const allDetected = [
+      ...mergeConditions,
+      ...pruneConditions,
+      ...llmPrune.conditions,
+      ...llmConflicts.conditions,
+    ];
 
     // Politeness gate (plan §5 pkt 5): pomiń warunki, których affectedIds nakładają się na pending
     // proposal spoza nightly — redukcja "reviewer churn". Efekt uboczny (zamierzony): jeśli dla
@@ -271,6 +329,7 @@ export class NightlyService {
     let pruneProposed = 0;
     let llmPruneDeleteProposed = 0;
     let llmPruneUpdateProposed = 0;
+    let llmConflictProposed = 0;
     for (const cond of finalToCreate) {
       await this.createProposal(cond, actor);
       created++;
@@ -278,7 +337,8 @@ export class NightlyService {
       else if (cond.detector === 'llm-prune') {
         if (cond.type === 'delete') llmPruneDeleteProposed++;
         else llmPruneUpdateProposed++;
-      } else pruneProposed++;
+      } else if (cond.detector === 'llm-conflicts') llmConflictProposed++;
+      else pruneProposed++;
     }
 
     // Sparowane withdraw (Fix 2, code review commit d057871): odpowiednik "replace" liczony WYŁĄCZNIE
@@ -328,6 +388,9 @@ export class NightlyService {
         llmPruneKept: llmPrune.kept,
         llmPruneDeleteProposed,
         llmPruneUpdateProposed,
+        llmConflictCandidates: llmConflicts.candidates,
+        llmConflictConsistent: llmConflicts.consistent,
+        llmConflictProposed,
         ...budget.counters(),
       },
       llm: budget.report(),
@@ -354,30 +417,51 @@ export class NightlyService {
     }
   }
 
-  // ---- detekcja: LLM prune (B2) -------------------------------------------
-
   /**
-   * Detektor LLM prune. Przy `!budget.enabled` NIE wybiera kandydatów ani nie buduje promptów (ust. 15) —
-   * domyślny stan daje dokładnie dzisiejszy przebieg. Wyłączenia z oceny: fakty spoza okna `created_at`
-   * (G6), z klastra merge (ust. 17), kwalifikujące się do recency prune (ust. 21 — wygrywa tańszy,
-   * deterministyczny `delete`) i z pending proposalem dowolnego pochodzenia (ust. 22). Fail-open: wyjątek
-   * (np. awaria zapytania o pending) jest łapany i logowany — przebieg i proposale dedup/recency idą dalej.
+   * Kontekst wspólny dla detektorów LLM (B2 prune, B3 conflicts), liczony raz na przebieg. Przy `!budget.enabled`
+   * `null` bez żadnych zapytań (ust. 15/16 — domyślny stan = dzisiejszy przebieg). Wyjątek (np. awaria zapytania o
+   * pending) jest łapany i logowany: oba detektory się pomijają, przebieg i proposale dedup/recency idą dalej.
    */
-  private async detectLlmPrune(
+  private async loadLlmScanContext(
     budget: LlmRunBudget,
-    facts: FactRow[],
-    clusteredIds: Set<string>,
     pruneConditions: DetectedCondition[],
-  ): Promise<{ conditions: DetectedCondition[]; candidates: number; kept: number }> {
-    if (!budget.enabled) return { conditions: [], candidates: 0, kept: 0 };
-    let candidateCount = 0;
+  ): Promise<LlmScanContext | null> {
+    if (!budget.enabled) return null;
     try {
       const recencyIds = new Set(pruneConditions.flatMap((c) => c.affectedIds));
       const pendingIds = await this.loadPendingAffectedIds();
       const windowStart = llmWindowStart(new Date(), budget.scanWindowDays);
+      return { windowStart, recencyIds, pendingIds };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `[nightly] kontekst detektorów LLM nie powiódł się (fail-open, kroki LLM pominięte): ${message}`,
+      );
+      return null;
+    }
+  }
+
+  // ---- detekcja: LLM prune (B2) -------------------------------------------
+
+  /**
+   * Detektor LLM prune. Przy `!budget.enabled` (albo bez kontekstu) NIE wybiera kandydatów ani nie buduje promptów
+   * (ust. 15) — domyślny stan daje dokładnie dzisiejszy przebieg. Wyłączenia z oceny: fakty spoza okna `created_at`
+   * (G6), z klastra merge (ust. 17), kwalifikujące się do recency prune (ust. 21 — wygrywa tańszy,
+   * deterministyczny `delete`) i z pending proposalem dowolnego pochodzenia (ust. 22). Fail-open: wyjątek
+   * jest łapany i logowany — przebieg i proposale dedup/recency idą dalej.
+   */
+  private async detectLlmPrune(
+    budget: LlmRunBudget,
+    ctx: LlmScanContext | null,
+    facts: FactRow[],
+    clusteredIds: Set<string>,
+  ): Promise<{ conditions: DetectedCondition[]; candidates: number; kept: number }> {
+    if (!budget.enabled || !ctx) return { conditions: [], candidates: 0, kept: 0 };
+    let candidateCount = 0;
+    try {
       const candidates = selectWindowFacts(facts, {
-        windowStart,
-        exclude: [clusteredIds, recencyIds, pendingIds],
+        windowStart: ctx.windowStart,
+        exclude: [clusteredIds, ctx.recencyIds, ctx.pendingIds],
       });
       candidateCount = candidates.length;
       const result = await runLlmPrune({ budget, candidates, config: this.config });
@@ -388,6 +472,42 @@ export class NightlyService {
         `[nightly] detektor LLM prune nie powiódł się (fail-open, przebieg kontynuowany): ${message}`,
       );
       return { conditions: [], candidates: candidateCount, kept: 0 };
+    }
+  }
+
+  // ---- detekcja: sprzeczności (B3) ------------------------------------------
+
+  /**
+   * Detektor sprzeczności. Przy `!budget.enabled` (albo bez kontekstu) nie buduje par ani promptów (ust. 16).
+   * Pary pochodzą z pasma ANN `bandPairs` (bez nowych zapytań, ust. 11), są zakotwiczone na oknie (ust. 10) i
+   * odpadają, gdy którakolwiek strona jest w klastrze merge, kwalifikuje się do recency prune, ma pending
+   * proposal albo dostała warunek z LLM prune w tym przebiegu (ust. 22). Wywołania idą na TYM SAMYM budżecie co
+   * prune — wyczerpany cap daje `llmSkippedCap`, nie wywołania ponad cap (G1). Fail-open jak `detectLlmPrune`.
+   */
+  private async detectLlmConflicts(
+    budget: LlmRunBudget,
+    ctx: LlmScanContext | null,
+    bandPairs: NeighborPair[],
+    factById: Map<string, FactRow>,
+    clusteredIds: Set<string>,
+    llmPruneIds: Set<string>,
+  ): Promise<{ conditions: DetectedCondition[]; candidates: number; consistent: number }> {
+    if (!budget.enabled || !ctx) return { conditions: [], candidates: 0, consistent: 0 };
+    let candidateCount = 0;
+    try {
+      const pairs = selectConflictPairs(bandPairs, factById, {
+        windowStart: ctx.windowStart,
+        exclude: [clusteredIds, ctx.recencyIds, ctx.pendingIds, llmPruneIds],
+      });
+      candidateCount = pairs.length;
+      const result = await runLlmConflicts({ budget, pairs });
+      return { conditions: result.conditions, candidates: candidateCount, consistent: result.consistent };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `[nightly] detektor sprzeczności nie powiódł się (fail-open, przebieg kontynuowany): ${message}`,
+      );
+      return { conditions: [], candidates: candidateCount, consistent: 0 };
     }
   }
 
@@ -463,7 +583,8 @@ export class NightlyService {
    * hand-rollowane zapytanie identyczne w kształcie do `MemoryService.vectorArm()`, wydzielone jako
    * osobny prymityw po code review finding "reuse" (commit d057871). Własny wektor faktu jako query,
    * `ORDER BY dist LIMIT NIGHTLY_ANN_NEIGHBORS`, tylko pary `<= NIGHTLY_DEDUP_DISTANCE` (filtr
-   * progiem zostaje TUTAJ, nie w helperze — helper zwraca surowe pary). W przeciwieństwie do
+   * progiem zostaje TUTAJ, nie w helperze — helper zwraca surowe pary). Od B3 wynik ma dwie listy: `dedup`
+   * (`dist <= NIGHTLY_DEDUP_DISTANCE`) i `band` (powyżej dedup, do `bandUpper` = `NIGHTLY_CONFLICT_DISTANCE`). W przeciwieństwie do
    * `vectorArm` (który miesza `global OR project-tego-tokena` dla wyszukiwania, `scopeCondition`
    * permisywny) partycja tu jest ŚCISŁA — dokładnie ten sam `(scope, projectId)` co fakt źródłowy,
    * nigdy unia — nocny job nigdy nie scala między projektami ani przez granicę global/project (plan
@@ -495,8 +616,9 @@ export class NightlyService {
     activeModel: string,
     annNeighbors: number,
     dedupDistance: number,
-  ): Promise<NeighborPair[]> {
-    if (!fact.vector) return [];
+    bandUpper: number,
+  ): Promise<NeighborScan> {
+    if (!fact.vector) return { dedup: [], band: [] };
 
     const scopeCondition =
       fact.scope === 'global'
@@ -516,9 +638,17 @@ export class NightlyService {
       limit: annNeighbors,
     });
 
-    return rows
-      .filter((r) => factById.has(r.memoryId) && r.dist <= dedupDistance)
-      .map((r) => ({ a: fact.id, b: r.memoryId, dist: r.dist }));
+    // Snapshot najpierw, potem podział po dystansie: `dedup` (<= dedupDistance) idzie do klastrów merge,
+    // `band` ((dedupDistance, bandUpper]) do detektora sprzeczności. Przy `bandUpper === dedupDistance` pasmo jest puste.
+    const inSnapshot = rows.filter((r) => factById.has(r.memoryId));
+    return {
+      dedup: inSnapshot
+        .filter((r) => r.dist <= dedupDistance)
+        .map((r) => ({ a: fact.id, b: r.memoryId, dist: r.dist })),
+      band: inSnapshot
+        .filter((r) => r.dist > dedupDistance && r.dist <= bandUpper)
+        .map((r) => ({ a: fact.id, b: r.memoryId, dist: r.dist })),
+    };
   }
 
   private buildMergeCondition(clusterIds: string[], factById: Map<string, FactRow>): DetectedCondition {
@@ -615,11 +745,12 @@ export class NightlyService {
     const versionRows =
       allIds.length > 0
         ? await this.db
-            .select({ id: memories.id, version: memories.version })
+            .select({ id: memories.id, version: memories.version, status: memories.status })
             .from(memories)
             .where(idsAny(memories.id, allIds))
         : [];
     const versionMap = new Map(versionRows.map((r) => [r.id, r.version]));
+    const statusMap = new Map(versionRows.map((r) => [r.id, r.status]));
 
     return rows.map((r) => {
       const baseVersions = (r.baseVersions ?? {}) as Record<string, number>;
@@ -632,7 +763,12 @@ export class NightlyService {
         affectedIds: r.affectedIds,
         stale: staleIds.length > 0,
         // Czytamy kolumnę `payload` (nie `edited_payload`): edycje jej nie ruszają, a `rationale` i tak przeżywa edit.
-        exemptFromOrphanWithdraw: isLlmDetectedPayload(r.payload),
+        // B3: proposal KONFLIKTU traci wyłączenie, gdy którakolwiek strona zniknęła albo nie jest już `approved`
+        // (np. dwa konflikty na tym samym starszym wpisie — approve jednego archiwizuje cel drugiego) — wtedy nie
+        // zostanie wykryty ponownie i orphan-withdraw go wycofa. Zmiana wersji (edycja) nadal zostaje `stale`.
+        exemptFromOrphanWithdraw:
+          isLlmDetectedPayload(r.payload) &&
+          !(isConflictPayload(r.payload) && r.affectedIds.some((id) => statusMap.get(id) !== 'approved')),
       };
     });
   }

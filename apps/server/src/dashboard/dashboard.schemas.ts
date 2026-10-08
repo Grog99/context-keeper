@@ -247,6 +247,13 @@ export const editProposalBody = z.strictObject({
 });
 export type EditProposalBody = z.output<typeof editProposalBody>;
 
+// ---- POST /api/proposals/:id/swap-direction (B3, G3) -------------------------------
+
+/** `memoryId` = ŻĄDANY nowy target archiwizacji (jawny, nie toggle — idempotentne przy podwójnym kliknięciu).
+ * Czy to druga strona z `affectedIds` proposala konfliktu, sprawdza serwis pod `FOR UPDATE`. */
+export const swapDirectionBody = z.strictObject({ memoryId: opaqueId });
+export type SwapDirectionBody = z.output<typeof swapDirectionBody>;
+
 // ---- POST /api/projects ------------------------------------------------------------
 
 /** Zastępuje ręczny `body?.name?.trim()`/`if (!name)` w kontrolerze — `.trim().min(1)` daje 400

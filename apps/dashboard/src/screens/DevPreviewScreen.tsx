@@ -71,6 +71,24 @@ const UPDATE_WHITESPACE_ONLY_AFTER = {
   body: 'Klient MCP wysyła żądanie tools/call\nz parametrami name i arguments.  Serwer waliduje schemat wejściowy\nprzez Zod przed wykonaniem narzędzia.',
 };
 
+/** Fixture proposala sprzeczności (B3): target = starszy wpis, kontrpartner = nowszy; dane jak z detektora. */
+const CONFLICT_DELETE_DATA = {
+  memoryId: 'mem_4c1d9e',
+  header: 'Deploy produkcyjny idzie przez GitHub Actions (workflow deploy.yml)',
+  body: 'Produkcja jest wdrażana z workflow deploy.yml w GitHub Actions po zmergowaniu do main.',
+  targetCreatedAt: new Date(Date.now() - 10 * 86_400_000).toISOString(),
+  rationale: {
+    category: 'contradiction',
+    reason: 'Oba wpisy podają inny mechanizm wdrożenia produkcji: GitHub Actions kontra Coolify (webhook).',
+  },
+  counterpart: {
+    memoryId: 'mem_7be210',
+    header: 'Deploy produkcyjny idzie przez Coolify (webhook po pushu do main)',
+    body: 'Produkcja jest wdrażana przez Coolify — webhook uruchamia build po pushu do main; GitHub Actions robią tylko CI.',
+    createdAt: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+  },
+};
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-3">
@@ -180,6 +198,21 @@ export function DevPreviewScreen() {
             stale
             selected={selectedRow === 'c'}
             onClick={() => setSelectedRow('c')}
+          />
+        </div>
+      </Section>
+
+      <Section title="ProposalRow — sprzeczność (B3)">
+        <div className="overflow-hidden rounded-md border border-border">
+          <ProposalRow
+            type="delete"
+            status="pending"
+            title="Sprzeczność: archiwizacja mem_4c1d9e (sprzeczne z mem_7be210)"
+            origin="nightly"
+            scope="project"
+            projectName="acme"
+            tags={[]}
+            createdAt={minutesAgo(30)}
           />
         </div>
       </Section>
@@ -309,6 +342,39 @@ export function DevPreviewScreen() {
         />
       </Section>
 
+      <Section title="DiffView — delete (sprzeczność, B3: starszy do archiwizacji)">
+        <DiffView type="delete" data={CONFLICT_DELETE_DATA} />
+      </Section>
+
+      <Section title="DiffView — delete (sprzeczność, po zamianie kierunku: nowszy do archiwizacji)">
+        <DiffView
+          type="delete"
+          data={{
+            ...CONFLICT_DELETE_DATA,
+            memoryId: CONFLICT_DELETE_DATA.counterpart.memoryId,
+            header: CONFLICT_DELETE_DATA.counterpart.header,
+            body: CONFLICT_DELETE_DATA.counterpart.body,
+            targetCreatedAt: CONFLICT_DELETE_DATA.counterpart.createdAt,
+            counterpart: {
+              memoryId: CONFLICT_DELETE_DATA.memoryId,
+              header: CONFLICT_DELETE_DATA.header,
+              body: CONFLICT_DELETE_DATA.body,
+              createdAt: CONFLICT_DELETE_DATA.targetCreatedAt,
+            },
+          }}
+        />
+      </Section>
+
+      <Section title="DiffView — delete (sprzeczność, kontrpartner niedostępny)">
+        <DiffView
+          type="delete"
+          data={{
+            ...CONFLICT_DELETE_DATA,
+            counterpart: { memoryId: 'mem_7be210', header: '', body: '', missing: true },
+          }}
+        />
+      </Section>
+
       <Section title="DiffView — update (detektor LLM, tagi)">
         <DiffView
           type="update"
@@ -353,6 +419,22 @@ export function DevPreviewScreen() {
             onApproveAsReplacement={() => {}}
             stale
             position="3 / 4"
+          />
+        </div>
+      </Section>
+
+      <Section title="ProposalActions — sprzeczność (B3: bez Edytuj/zamiennika, z zamianą kierunku)">
+        <div className="overflow-hidden rounded-md border border-border">
+          <ProposalActions
+            onApprove={() => {}}
+            onReject={() => {}}
+            onEdit={() => {}}
+            onApproveAsReplacement={() => {}}
+            canEdit={false}
+            canSupersede={false}
+            onSwapDirection={() => {}}
+            swapLabel="Archiwizuj nowszy zamiast"
+            position="2 / 4"
           />
         </div>
       </Section>

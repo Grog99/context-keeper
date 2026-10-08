@@ -106,6 +106,26 @@ describe('envSchema — NEAR_DUPLICATE_DISTANCE (roadmap v1.6, A1)', () => {
   });
 });
 
+describe('envSchema — NIGHTLY_CONFLICT_DISTANCE (roadmap v1.6, B3)', () => {
+  it('default 0.23 gdy nieustawione (zmierzone dla bge-m3)', () => {
+    expect(envSchema.parse({ ...BASE }).NIGHTLY_CONFLICT_DISTANCE).toBe(0.23);
+  });
+
+  it('parsuje wartość z env (coerce), np. 0.21 dla text-embedding-3-small', () => {
+    expect(envSchema.parse({ ...BASE, NIGHTLY_CONFLICT_DISTANCE: '0.21' }).NIGHTLY_CONFLICT_DISTANCE).toBe(0.21);
+  });
+
+  it('odrzuca 0 i wartość > 2 (dystans kosinusowy mieści się w [0, 2])', () => {
+    expect(() => envSchema.parse({ ...BASE, NIGHTLY_CONFLICT_DISTANCE: '0' })).toThrow();
+    expect(() => envSchema.parse({ ...BASE, NIGHTLY_CONFLICT_DISTANCE: '2.5' })).toThrow();
+  });
+
+  it('jest niezależny od NIGHTLY_DEDUP_DISTANCE (brak cross-field: wartość <= dedup nie wywraca bootu)', () => {
+    expect(envSchema.parse({ ...BASE, NIGHTLY_DEDUP_DISTANCE: '0.001' }).NIGHTLY_CONFLICT_DISTANCE).toBe(0.23);
+    expect(() => envSchema.parse({ ...BASE, NIGHTLY_DEDUP_DISTANCE: '0.3', NIGHTLY_CONFLICT_DISTANCE: '0.1' })).not.toThrow();
+  });
+});
+
 describe('envSchema — RATE_LIMIT_CREATE_PROJECT_PER_MIN (roadmap v1.5)', () => {
   it('default 3 gdy nieustawione', () => {
     expect(envSchema.parse({ ...BASE }).RATE_LIMIT_CREATE_PROJECT_PER_MIN).toBe(3);

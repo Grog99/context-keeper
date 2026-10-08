@@ -39,9 +39,13 @@ export interface ProposalPayloadShape {
   slug?: string;
   /** Werdykt detektora LLM nocnego joba (roadmap v1.6 B2, G4) — lustro `ProposalRationale`
    * (`apps/server/src/proposals/proposals.types.ts`) na payloadach `delete` i `update`. Pola jako `string`
-   * (nie unie), by dołożenie kategorii/detektora przez B3 nie psuło typów SPA. Brak przy recency prune,
+   * (nie unie), by dołożenie kategorii/detektora nie psuło typów SPA. Brak przy recency prune,
    * update agenta i edycji człowieka. */
   rationale?: { detector: string; category: string; reason: string };
+  /** Tylko `delete` z detektora sprzeczności (roadmap v1.6 B3) — lustro `DeletePayload.counterpartId`:
+   * druga strona pary, która ZOSTAJE bez zmian (approve archiwizuje wyłącznie `memoryId`). Po zamianie
+   * kierunku (`POST /proposals/:id/swap-direction`) `memoryId` i `counterpartId` wymieniają się miejscami. */
+  counterpartId?: string;
 }
 
 /** Pozycja podpowiedzi „podobne do istniejących" (A1) — lustro `ProposalSimilarMemory`
@@ -87,6 +91,8 @@ export interface ProposalListSummary {
   kind: MemoryKind | null;
   tags: string[];
   memoryId: string | null;
+  /** B3: druga strona pary sprzeczności (tylko `delete` z detektora sprzeczności), inaczej `null`. */
+  counterpartId: string | null;
   name: string | null;
   slug: string | null;
 }
@@ -133,6 +139,14 @@ export interface ApproveResult {
 
 export interface EditProposalResult {
   warnings: string[];
+}
+
+/** Lustro `SwapDirectionResult` (`apps/server/src/proposals/proposals.types.ts`, roadmap v1.6 B3) —
+ * stan PO zamianie kierunku proposala sprzeczności: `memoryId` = wpis do archiwizacji, `counterpartId` =
+ * wpis, który zostaje. */
+export interface SwapDirectionResult {
+  memoryId: string;
+  counterpartId: string;
 }
 
 /** Lustro `BulkDecisionItemError`/`BulkDecisionResult` (`apps/server/src/proposals/proposals.types.ts`,
@@ -444,6 +458,13 @@ export interface NightlyCounters {
   llmPruneKept: number;
   llmPruneDeleteProposed: number;
   llmPruneUpdateProposed: number;
+  // Liczniki detektora sprzeczności (roadmap v1.6 B3) — lustro `LlmConflictCounters` (`nightly/nightly.types.ts`).
+  /** Pary ocenione przez model (po wszystkich wyłączeniach). */
+  llmConflictCandidates: number;
+  /** Pary uznane za niesprzeczne. */
+  llmConflictConsistent: number;
+  /** Propozycje `delete` z detektora sprzeczności (po reconcile i capie). */
+  llmConflictProposed: number;
 }
 
 /** Lustro `LlmRunState` (`apps/server/src/llm/llm.types.ts`). */
@@ -507,6 +528,9 @@ export interface LlmSettingsResponse {
       | 'llmPruneKept'
       | 'llmPruneDeleteProposed'
       | 'llmPruneUpdateProposed'
+      | 'llmConflictCandidates'
+      | 'llmConflictConsistent'
+      | 'llmConflictProposed'
     >;
     llm: NightlyLlmReport | null;
   } | null;

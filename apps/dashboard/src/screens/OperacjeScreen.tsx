@@ -31,7 +31,8 @@ export function OperacjeScreen() {
           `+${c.created} propozycji · merge ${c.mergeProposed} · prune ${c.pruneProposed} · wycofano ${c.withdrawn}` +
             (llmPruneProposed > 0
               ? ` · LLM: usuń ${c.llmPruneDeleteProposed} · skróć ${c.llmPruneUpdateProposed}`
-              : ''),
+              : '') +
+            (c.llmConflictProposed > 0 ? ` · sprzeczności: ${c.llmConflictProposed}` : ''),
         );
       }
       queryClient.invalidateQueries({ queryKey: ['proposals'] });
@@ -52,7 +53,8 @@ export function OperacjeScreen() {
         <p className="mb-3.5 text-xs leading-relaxed text-muted-foreground">
           Proposer dedup/merge + prune — skanuje zatwierdzone fakty, wykrywa duplikaty (ANN) i kandydatów do
           usunięcia (recency); gdy w Ustawieniach włączono krok LLM, model dodatkowo ocenia świeże fakty
-          (usunięcie efemerycznych i pustych, skrócenie rozwlekłych). Wynik ląduje w Kolejce jak każda inna propozycja — nic nie jest zatwierdzane
+          (usunięcie efemerycznych i pustych, skrócenie rozwlekłych) oraz szuka par o sprzecznej treści
+          (propozycja archiwizacji starszego wpisu). Wynik ląduje w Kolejce jak każda inna propozycja — nic nie jest zatwierdzane
           automatycznie. Normalnie odpalany przez zewnętrzny scheduler; ten przycisk uruchamia przebieg
           ręcznie i czeka na wynik.
         </p>
