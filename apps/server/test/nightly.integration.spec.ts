@@ -23,7 +23,6 @@ import {
   type NewMemoryRow,
   type ProposalRow,
 } from '../src/db/schema';
-import type { EmbeddingProvider } from '../src/embeddings/embedding-provider';
 import { EmbeddingService } from '../src/embeddings/embedding.service';
 import { LlmSettingsService } from '../src/llm/llm-settings.service';
 import { LlmService } from '../src/llm/llm.service';
@@ -35,26 +34,12 @@ import type { ProjectContext } from '../src/projects/projects.service';
 import type { ProjectsService } from '../src/projects/projects.service';
 import { ProposalsService } from '../src/proposals/proposals.service';
 import { UsageService } from '../src/usage/usage.service';
+import { StubEmbeddingProvider } from './helpers/fakes';
 import { buildProjectsService } from './helpers/services';
 
-/** Jak w `proposals.integration.spec.ts` — testcontainers nie odpala prawdziwego sidecara TEI.
- * Nightly nigdy nie woła `embed()` podczas detekcji (czyta wektory z `embeddings` bezpośrednio) —
- * ten stub jest tu wyłącznie dla `ProposalsService.approve()` w scenariuszu 7 (recompute embeddingu
- * scalonej pamięci C). */
-class StubEmbeddingProvider implements EmbeddingProvider {
-  readonly dim = EMBEDDING_DIM;
-  throwOnEmbed = false;
-  constructor(public model: string) {}
-
-  async embed(texts: string[]): Promise<number[][]> {
-    if (this.throwOnEmbed) throw new Error('StubEmbeddingProvider: symulowana awaria');
-    return texts.map(() => new Array(EMBEDDING_DIM).fill(0.01));
-  }
-
-  async health(): Promise<boolean> {
-    return !this.throwOnEmbed;
-  }
-}
+// Stub providera (`helpers/fakes.ts`): testcontainers nie odpala prawdziwego sidecara TEI. Nightly nigdy nie woła
+// `embed()` podczas detekcji (czyta wektory z `embeddings` bezpośrednio) — stub jest tu wyłącznie dla
+// `ProposalsService.approve()` w scenariuszu 7 (recompute embeddingu scalonej pamięci C).
 
 /** Jednostkowy wektor z kontrolowanym component0 (jak `topicVector` w `memory.integration.spec.ts`):
  * dwa fakty z TYM SAMYM component0 mają dystans kosinusowy 0 (near-identical, wewnątrz domyślnego

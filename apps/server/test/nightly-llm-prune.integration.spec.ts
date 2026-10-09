@@ -24,17 +24,16 @@ import {
   type NewMemoryRow,
   type ProposalRow,
 } from '../src/db/schema';
-import type { EmbeddingProvider } from '../src/embeddings/embedding-provider';
 import { EmbeddingService } from '../src/embeddings/embedding.service';
-import { LlmNetworkError, LlmTimeoutError, type LlmProvider } from '../src/llm/llm-provider';
+import { LlmNetworkError, LlmTimeoutError } from '../src/llm/llm-provider';
 import { LlmSettingsService } from '../src/llm/llm-settings.service';
 import { LlmService } from '../src/llm/llm.service';
 import { LLM_API_KEY_AAD, LLM_GLOBAL_SETTINGS_ID } from '../src/llm/llm.constants';
-import type { LlmChatMessage, LlmChatResult, LlmEndpoint } from '../src/llm/llm.types';
 import { NightlyService } from '../src/nightly/nightly.service';
 import { RecencyPruneScorer } from '../src/nightly/prune-scorer';
 import { ProposalsService } from '../src/proposals/proposals.service';
 import { UsageService } from '../src/usage/usage.service';
+import { FakeLlmProvider, headerOf, StubEmbeddingProvider } from './helpers/fakes';
 import { buildProjectsService } from './helpers/services';
 
 /**
@@ -64,17 +63,6 @@ const LLM_ZEROS = {
 const LLM_CONFLICT_ZEROS = { llmConflictCandidates: 0, llmConflictConsistent: 0, llmConflictProposed: 0 };
 const LLM_PRUNE_ZEROS = { llmPruneCandidates: 0, llmPruneKept: 0, llmPruneDeleteProposed: 0, llmPruneUpdateProposed: 0 };
 
-class StubEmbeddingProvider implements EmbeddingProvider {
-  readonly dim = EMBEDDING_DIM;
-  constructor(public model: string) {}
-  async embed(texts: string[]): Promise<number[][]> {
-    return texts.map(() => new Array(EMBEDDING_DIM).fill(0.01));
-  }
-  async health(): Promise<boolean> {
-    return true;
-  }
-}
-
 function unitVector(component0: number): number[] {
   const v = new Array(EMBEDDING_DIM).fill(0);
   v[0] = component0;
@@ -84,7 +72,6 @@ function unitVector(component0: number): number[] {
 const NEAR = unitVector(1);
 
 const json = (o: unknown): string => JSON.stringify(o);
-const headerOf = (user: string): string => /^header: (.*)$/m.exec(user)?.[1] ?? '';
 
 /** Domyślne odpowiedzi fake'a — klucz to znacznik w nagłówku wpisu. */
 function defaultRespond(user: string): string | Error {
@@ -106,28 +93,6 @@ function defaultRespond(user: string): string | Error {
   if (h.includes('[BADBODY]')) return json({ verdict: 'update', category: 'verbose', reason: 'Zły body.', body: '' });
   if (h.includes('[BADTAG]')) return json({ verdict: 'update', category: 'untidy', reason: 'Zły tag.', tags: ['x'.repeat(41)] });
   return json({ verdict: 'keep' });
-}
-
-class FakeLlmProvider implements LlmProvider {
-  readonly users: string[] = [];
-  onCall?: (user: string) => Promise<void>;
-  constructor(public respond: (user: string) => string | Error = defaultRespond) {}
-
-  get calls(): number {
-    return this.users.length;
-  }
-  get headers(): string[] {
-    return this.users.map(headerOf);
-  }
-
-  async chat(_endpoint: LlmEndpoint, messages: LlmChatMessage[]): Promise<LlmChatResult> {
-    const user = messages[messages.length - 1].content;
-    this.users.push(user);
-    if (this.onCall) await this.onCall(user);
-    const out = this.respond(user);
-    if (out instanceof Error) throw out;
-    return { content: out, model: 'fake', latencyMs: 1 };
-  }
 }
 
 describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — roadmap v1.6 B2', () => {
@@ -268,7 +233,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
     await seedVector(b.id, NEAR);
     const old = await seedFact({ header: 'Stary nietknięty', createdAt: daysAgo(40) });
     await seedFact({ header: '[EPHEMERAL] świeży, ale krok wyłączony' });
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(defaultRespond);
 
     const result = await build(fake).nightly.run({ actor: 'tester' });
 
@@ -295,7 +260,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
   it('AC1 (wariant): włączony, ale klucz nieczytelny -> detektor nie rusza (0 wywołań, wszystkie llmPrune* i llmSkippedKeyUnreadable = 0)', async () => {
     await seedFact({ header: '[EPHEMERAL] świeży' });
     await enableLlm({ apiKeyCiphertext: createSecretBox(KEY_A).encrypt('sk-test', LLM_API_KEY_AAD) });
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(defaultRespond);
 
     const result = await build(fake, { SECRETS_ENCRYPTION_KEY: KEY_B }).nightly.run({ actor: 'tester' });
 
@@ -311,7 +276,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
     const eph = await seedFact({ header: '[EPHEMERAL] Teraz poprawiam testy X' });
     const empty = await seedFact({ header: '[EMPTY] Kod powinien być czytelny' });
     await enableLlm();
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(defaultRespond);
 
     const result = await build(fake).nightly.run({ actor: 'tester' });
 
@@ -355,7 +320,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
       tags: ['misc', 'todo'],
     });
     await enableLlm();
-    const { nightly, proposalsService } = build(new FakeLlmProvider());
+    const { nightly, proposalsService } = build(new FakeLlmProvider(defaultRespond));
 
     const result = await nightly.run({ actor: 'tester' });
     expect(result.counters).toMatchObject({ llmPruneUpdateProposed: 1, llmPruneDeleteProposed: 0, pruneProposed: 0 });
@@ -397,7 +362,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
     await seedFact({ header: 'Normalny, wartościowy fakt' });
     await enableLlm();
 
-    const result = await build(new FakeLlmProvider()).nightly.run({ actor: 'tester' });
+    const result = await build(new FakeLlmProvider(defaultRespond)).nightly.run({ actor: 'tester' });
 
     expect(result.counters).toMatchObject({ created: 0, llmPruneCandidates: 1, llmPruneKept: 1, llmCalls: 1, llmErrors: 0 });
     expect(await pendingNightly()).toHaveLength(0);
@@ -407,7 +372,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
     await seedFact({ header: '[NOOP] Nagłówek bez zmian', tags: ['a'] });
     await enableLlm();
 
-    const result = await build(new FakeLlmProvider()).nightly.run({ actor: 'tester' });
+    const result = await build(new FakeLlmProvider(defaultRespond)).nightly.run({ actor: 'tester' });
 
     expect(result.counters).toMatchObject({ created: 0, llmPruneKept: 1, llmErrors: 0 });
     expect(await pendingNightly()).toHaveLength(0);
@@ -418,7 +383,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
   it('AC5 (strona serwera): ProposalsService.getProposal zwraca payload.rationale nietknięte', async () => {
     const fact = await seedFact({ header: '[EPHEMERAL] Teraz robię X' });
     await enableLlm();
-    const { nightly, proposalsService } = build(new FakeLlmProvider());
+    const { nightly, proposalsService } = build(new FakeLlmProvider(defaultRespond));
     await nightly.run({ actor: 'tester' });
 
     const proposal = await findPending('delete', fact.id);
@@ -438,7 +403,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
     await seedFact({ header: '[BADTAG] wpis dwa' });
     await enableLlm();
 
-    const result = await build(new FakeLlmProvider()).nightly.run({ actor: 'tester' });
+    const result = await build(new FakeLlmProvider(defaultRespond)).nightly.run({ actor: 'tester' });
 
     expect(result.status).toBe('success');
     expect(result.counters).toMatchObject({ created: 0, llmErrors: 2, llmSkippedBreaker: 0, llmCalls: 2, llmPruneKept: 0 });
@@ -463,7 +428,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
     const i = await seedFact({ header: 'I pending nightly' });
     await insertProposal({ type: 'delete', origin: 'nightly', affectedIds: [i.id] });
     await seedFact({ header: 'J zarchiwizowany', status: 'archived' });
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(defaultRespond);
 
     const result = await build(fake).nightly.run({ actor: 'tester' });
 
@@ -483,7 +448,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
       (['agent', 'human', 'nightly'] as const).map((source) => seedFact({ header: `[EPHEMERAL] od ${source}`, source })),
     );
     await enableLlm();
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(defaultRespond);
 
     const result = await build(fake).nightly.run({ actor: 'tester' });
 
@@ -497,7 +462,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
   it('AC9: okno czytane świeżo per przebieg — podniesienie do 7 dni działa na tej samej instancji bez restartu', async () => {
     await seedFact({ header: 'Fakt sprzed 3 dni', createdAt: daysAgo(3) });
     await enableLlm({ windowDays: 1 });
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(defaultRespond);
     const { nightly, settings } = build(fake);
 
     await nightly.run({ actor: 'tester' });
@@ -523,7 +488,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
     await seedVector(p1.id, NEAR);
     await seedVector(p2.id, NEAR);
     await enableLlm();
-    const { nightly } = build(new FakeLlmProvider());
+    const { nightly } = build(new FakeLlmProvider(defaultRespond));
 
     const first = await nightly.run({ actor: 'tester' });
     expect(first.counters).toMatchObject({ created: 3, llmPruneDeleteProposed: 1, pruneProposed: 1, mergeProposed: 1 });
@@ -545,7 +510,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
   it('AC10 (edit): znacznik rationale przeżywa edit-before-approve — zedytowany update nadal nie jest wycofywany', async () => {
     const y = await seedFact({ header: '[VERBOSE] rozwlekły', body: 'Stara treść.' });
     await enableLlm();
-    const { nightly, proposalsService } = build(new FakeLlmProvider());
+    const { nightly, proposalsService } = build(new FakeLlmProvider(defaultRespond));
     await nightly.run({ actor: 'tester' });
     const proposal = await findPending('update', y.id);
     expect(proposal).toBeDefined();
@@ -569,7 +534,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
     await seedFact({ header: '[VERBOSE] rozwlekły' });
     await seedFact({ header: 'Normalny fakt' });
     await enableLlm();
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(defaultRespond);
     const { nightly } = build(fake);
 
     const first = await nightly.run({ actor: 'tester' });
@@ -617,7 +582,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
     await seedVector(b.id, NEAR);
     const old = await seedFact({ header: 'Recency', createdAt: daysAgo(40) });
     await enableLlm();
-    const { nightly } = build(new FakeLlmProvider());
+    const { nightly } = build(new FakeLlmProvider(defaultRespond));
     vi.spyOn(nightly as unknown as { loadPendingAffectedIds: () => Promise<Set<string>> }, 'loadPendingAffectedIds').mockRejectedValue(new Error('x'));
 
     const result = await nightly.run({ actor: 'tester' });
@@ -632,7 +597,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
   it('ust. 19: pending proposal człowieka pojawiający się w trakcie wywołania odfiltrowuje warunek LLM (politeness)', async () => {
     const fact = await seedFact({ header: '[EPHEMERAL] efemeryczny' });
     await enableLlm();
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(defaultRespond);
     fake.onCall = async () => {
       await insertProposal({ type: 'update', origin: 'human', affectedIds: [fact.id], payload: { memoryId: fact.id, body: 'x' } });
     };
@@ -652,7 +617,7 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
     await seedFact({ header: 'Najstarszy', createdAt: new Date(now - 3 * HOUR_MS) });
     await seedFact({ header: 'Środkowy', createdAt: new Date(now - 2 * HOUR_MS) });
     await enableLlm({ cap: 2 });
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(defaultRespond);
 
     const result = await build(fake).nightly.run({ actor: 'tester' });
 

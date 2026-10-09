@@ -29,26 +29,11 @@ import { EmbeddingService } from '../src/embeddings/embedding.service';
 import { MemoryAdminService } from '../src/memory/memory-admin.service';
 import type { ProjectContext } from '../src/projects/projects.service';
 import type { ProjectsService } from '../src/projects/projects.service';
+import { StubEmbeddingProvider } from './helpers/fakes';
 import { buildProjectsService } from './helpers/services';
 
-/** Jak w `proposals.integration.spec.ts` — wektor stały, testy tutaj sprawdzają MECHANIKĘ
- * (revisions/audit/embeddings/scope), nie trafność rankingu. */
-class StubEmbeddingProvider implements EmbeddingProvider {
-  readonly dim = EMBEDDING_DIM;
-  throwOnEmbed = false;
-  constructor(public model: string) {}
-
-  async embed(texts: string[]): Promise<number[][]> {
-    if (this.throwOnEmbed) {
-      throw new Error('StubEmbeddingProvider: symulowana awaria providera');
-    }
-    return texts.map(() => new Array(EMBEDDING_DIM).fill(0.01));
-  }
-
-  async health(): Promise<boolean> {
-    return !this.throwOnEmbed;
-  }
-}
+// Stub providera (`helpers/fakes.ts`): wektor stały — testy tutaj sprawdzają MECHANIKĘ
+// (revisions/audit/embeddings/scope), nie trafność rankingu.
 
 describe('MemoryAdminService (integration, testcontainers) — przeglądarka pamięci + human-create/edit/archive/promote (Fazy 5 M1)', () => {
   let container: StartedPostgreSqlContainer;

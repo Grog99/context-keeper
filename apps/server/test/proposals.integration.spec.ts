@@ -37,27 +37,12 @@ import type { ProposalListPage } from '../src/proposals/proposals.types';
 import type { ProjectContext } from '../src/projects/projects.service';
 import type { ProjectsService } from '../src/projects/projects.service';
 import { UsageService } from '../src/usage/usage.service';
+import { StubEmbeddingProvider } from './helpers/fakes';
 import { buildProjectsService } from './helpers/services';
 
-/** Jak w `memory.integration.spec.ts` — testcontainers nie odpala prawdziwego sidecara TEI.
- * Tutaj nie interesuje nas RANKING (żadnych testów search-ranking), więc jeden stały wektor
- * na wszystkie chunki wystarcza — testy sprawdzają MECHANIKĘ promocji/recompute, nie trafność. */
-class StubEmbeddingProvider implements EmbeddingProvider {
-  readonly dim = EMBEDDING_DIM;
-  throwOnEmbed = false;
-  constructor(public model: string) {}
-
-  async embed(texts: string[]): Promise<number[][]> {
-    if (this.throwOnEmbed) {
-      throw new Error('StubEmbeddingProvider: symulowana awaria providera');
-    }
-    return texts.map(() => new Array(EMBEDDING_DIM).fill(0.01));
-  }
-
-  async health(): Promise<boolean> {
-    return !this.throwOnEmbed;
-  }
-}
+// Stub providera (`helpers/fakes.ts`): testcontainers nie odpala prawdziwego sidecara TEI. Tutaj nie interesuje
+// nas RANKING (żadnych testów search-ranking), więc jeden stały wektor na wszystkie chunki wystarcza — testy
+// sprawdzają MECHANIKĘ promocji/recompute, nie trafność.
 
 interface SeedProposalInput {
   type: ProposalRow['type'];

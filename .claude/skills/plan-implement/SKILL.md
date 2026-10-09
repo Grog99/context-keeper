@@ -2,7 +2,9 @@
 name: plan-implement
 description: >-
   Orchestrated end-to-end workflow that takes a non-trivial task from idea to committed code.
-  An Opus subagent plans, the user answers the plan's open questions, a Sonnet subagent implements,
+  An Opus subagent plans, the user answers the plan's open questions, a separate Opus subagent
+  writes the tests first (they must fail before implementation), a Sonnet subagent implements without
+  touching those tests,
   then verification runs `pnpm verify` plus an independent code review by the Codex CLI
   (`codex exec`), the fix→verify loop repeats until green,
   and it commits only after the user approves. Use this whenever the user wants a feature, refactor,
@@ -15,7 +17,9 @@ description: >-
 # Plan → Implement → Verify → Commit
 
 This skill orchestrates a task through several stages using **model-specialised subagents**: Opus plans
-(thinking-heavy, read-only), Sonnet implements (execution-heavy). Verification is deliberately **not** a
+(thinking-heavy, read-only), a separate Opus test-writer pins the planned behaviour in tests *before* any
+code exists (so the builder never writes the tests that judge its own code), Sonnet implements
+(execution-heavy). Verification is deliberately **not** a
 Claude subagent — it is `pnpm verify` plus the **Codex CLI** reviewing the diff, so the code is judged by a
 model outside the family that wrote it. You stay the **orchestrator** — your job is to spawn subagents, run
 the verification pass, carry state between stages, talk to the user, and drive the fix loop. **Do not
@@ -29,7 +33,8 @@ Communicate with the user in Polish (their preference). Subagent prompts can be 
 | Stage | Who | `subagent_type` | `model` | Can edit files? |
 |-------|-----|-----------------|---------|-----------------|
 | 1. Plan | Opus architect | `Plan` | `opus` | No (read-only) |
-| 3. Implement | Sonnet builder | `general-purpose` | `sonnet` | Yes |
+| 2b. Tests first | Opus test-writer | `general-purpose` | `opus` | Only test files (`apps/server/test/**`) — never `src/` |
+| 3. Implement | Sonnet builder | `general-purpose` | `sonnet` | Yes — except test files |
 | 4a. Checks | You (orchestrator) | — | — | No — run `pnpm verify` |
 | 4b. Review | Codex CLI | — (Bash) | Codex default | No — read-only sandbox |
 
@@ -46,7 +51,7 @@ planning. If the request is a vague one-liner, ask the user what "done" looks li
 produces a fuzzy plan and wastes the whole pipeline.
 
 Pick a short working slug for the task (e.g. `add-token-revoke`). You'll reuse it for the plan file, the
-task branch name (Stage 3), and subagent labels.
+task branch name (Stage 2), and subagent labels.
 
 ### Starting from a prepare-ticket document
 
@@ -105,12 +110,22 @@ Prompt it to return, in this order:
 2. **Concrete steps** — an ordered, file-by-file change list (paths, functions, new files) precise enough
    that a builder who has never seen this conversation could follow it.
 3. **Risks / touch-points** — migrations, shared modules, backwards-compat, security-sensitive spots.
-4. **Verification criteria** — how success will be checked (which tests, which command paths, which
+4. **Testy** — the behaviours this task must pin with tests. For each one: its marking, the layer, and the
+   target test file (new or existing, named per `context/testing.md`).
+   - `[czerwony]` — new or changed behaviour; the test must **fail** before implementation (a failure on a
+     missing import counts).
+   - `[strażnik]` — behaviour that must survive the change (e.g. in a refactor); the test already passes.
+   - Include existing tests whose expectations this task changes — they become `czerwony`, because the
+     builder may not edit tests.
+   - Or state explicitly `Brak testów, bo …` with the reason (docs, skills, pure config).
+   - Behaviours, not implementation details, and only where `context/testing.md` says tests pay off.
+5. **Verification criteria** — how success will be checked (which tests, which command paths, which
    end-to-end flow to exercise).
-5. **Open questions** — every ambiguity or decision that needs the user. If there are none, say so
+6. **Open questions** — every ambiguity or decision that needs the user. If there are none, say so
    explicitly.
 
-Tell it to read `CLAUDE.md` and relevant existing code so the plan matches repo conventions.
+Tell it to read `CLAUDE.md`, `context/testing.md` (the test convention) and relevant existing code so the
+plan matches repo conventions.
 
 When it returns, **write the plan to a working file** in your scratchpad directory (its absolute path is in
 your environment), e.g. `<scratchpad>/plan-<slug>.md`. This file is the single source of truth passed to
@@ -130,34 +145,139 @@ planner with the answers to revise (cheaper than letting a wrong plan propagate 
 clarifications, edit the plan file directly.
 
 Then show the user the **final plan** and get an explicit go-ahead before implementing. Respect the user's
-standing preference: larger changes get a short plan accepted before any files are edited. Do not proceed to
-Stage 3 without that yes.
+standing preference: larger changes get a short plan accepted before any files are edited. Do not proceed
+without that yes.
 
----
+The plan's **Testy** section is part of what the user accepts here. It decides whether Stage 2b runs: a list
+of behaviours means the test-writer runs next; `Brak testów, bo …` means it is skipped. If the user changes
+the list, fold the change into the plan file before moving on.
 
-## Stage 3 — Implement (Sonnet)
+### Create the task branch — after the go-ahead
 
-### Create a branch — before implementing
-
-Before spawning the builder, create and switch to a new branch off the current branch. Run `git status`
-first — if there's uncommitted work that isn't yours from this session, stash or ask the user rather than
-branching over it. Name the branch `<type>/<slug>` following this repo's convention (visible in recent merged
-branches: `feat/...`, `fix/...`, `docs/...`); pick `type` from the task's nature and reuse the Stage 0 slug:
+Once the user has said yes, create and switch to a new branch off the current branch — the test-writer
+(Stage 2b) already writes onto it. Run `git status` first — if there's uncommitted work that isn't yours from
+this session, stash or ask the user rather than branching over it. Name the branch `<type>/<slug>` following
+this repo's convention (visible in recent merged branches: `feat/...`, `fix/...`, `docs/...`); pick `type`
+from the task's nature and reuse the Stage 0 slug:
 
     git checkout -b <type>/<slug>
 
 Everything from here through Stage 6 (commit) happens on this branch, not on the base branch.
 
-Spawn one implementation subagent:
+---
+
+## Stage 2b — Tests first (Opus test-writer)
+
+Tests are the specification, so they are written *before* the code, by an agent that has never seen the
+implementation. The builder later makes them pass; it does not get to reshape them. The behaviours to pin are
+exactly the plan's **Testy** list — the test-writer realises it, it does not decide the scope.
+
+### Skip rule
+
+If **Testy** says `Brak testów, bo …`, skip this stage: tell the user in one line, record
+`Stage 2b skipped: <reason>` in the plan file, and move on to Stage 3. With the stage skipped there is no test
+snapshot, so none of the snapshot checks below apply later. Never run the test-writer on an empty list.
+
+### Spawn the test-writer
+
+- `subagent_type: "general-purpose"`, `model: "opus"`, label like `tests:<slug>`.
+- The prompt carries the **absolute path to the plan file**, `context/testing.md` and `CLAUDE.md`, and says:
+  - Write **exactly** the tests listed in **Testy** — do not add, drop or reinterpret any. Anything the list
+    asks for that cannot be expressed as a test goes into the report, not into a guess.
+  - Edit or create only test files under `apps/server/test/` (including `helpers/`). Never touch `src/`,
+    configs or `package.json`.
+  - `czerwony` tests assert the **new** behaviour and must fail right now. Importing an export that does not
+    exist yet is allowed (it fails at call time). A red test that needs a not-yet-existing *module* goes into
+    a **new spec file holding only red tests**: a module-load failure fails the whole file, including guards
+    and pre-existing tests.
+  - `strażnik` tests must pass against the current code.
+  - Follow `testing.md` for mocking and naming (fakes come from `helpers/fakes.ts`; do not copy them).
+  - Run the vitest command from "Red/guard check" below on the files it touched before returning.
+  - Do not `git add`, commit or push.
+  - Return a **manifest**: one line per added or changed test with the repo-relative file, the vitest
+    `fullName` (describe titles + test title, space-separated), the plan item and `czerwony`/`strażnik`; the
+    list of touched files; and the plan items it could not express, with the reason.
+
+### Boundary check (you run it)
+
+`git status --porcelain` may show only paths under `apps/server/test/`. Anything else → stop and report it to
+the user; do not silently revert.
+
+### Red/guard check (you run it)
+
+If any touched file is an integration, migration or e2e spec, confirm Docker is up first (`docker info`) — a
+test that fails because Docker is down is not red. Then, from Bash:
+
+    pnpm --filter @context-keeper/server exec vitest run test/<a>.spec.ts test/<b>.integration.spec.ts \
+      --reporter=json --outputFile="<scratchpad>/tests-red-<slug>.json"
+
+Paths are relative to `apps/server`, with forward slashes and the `test/` prefix (positional arguments are
+substring filters). Use `timeout: 600000`. A non-zero exit is expected — judge from the JSON, not the exit
+code.
+
+Judge `testResults[].assertionResults[]` (`fullName`, `status`):
+
+- every manifest `czerwony` test must be `"failed"`;
+- every manifest `strażnik` test, and every pre-existing test in a modified existing file that is not in the
+  manifest, must be `"passed"`;
+- a file with `testResults[i].status === "failed"` and an empty `assertionResults` is a load error (e.g. a
+  missing module). It counts as red for its tests only if **every** manifest test in it is `czerwony` and the
+  file is new;
+- `skipped` / `todo` / `pending`, a manifest test missing from a file that did load, or a test that is in
+  neither the manifest nor the pre-existing set → violation;
+- a failure in `beforeAll` or a hook timeout is an environment problem (e.g. Docker), not red — fix the
+  environment and rerun.
+
+### On violation
+
+A `czerwony` test that passes, or a `strażnik` that fails: stop before Stage 3. If the evidence says the
+plan's assumption about current behaviour is wrong, take it to the user. Otherwise spawn **one** fresh
+test-writer (same settings) with the specific failing items and rerun the check. If it still fails, hand it to
+the user.
+
+### Snapshot
+
+After the check passes, freeze the tests in the index (no commit — that happens in Stage 6):
+
+    git add -- <every touched test file>
+    git ls-files -s -- <the same files>
+
+Append a `## Test snapshot (Stage 2b)` section to the plan file with the file list, the `git ls-files -s`
+output and the manifest.
+
+### Snapshot check (after Stage 3 and after every Stage 5 round)
+
+- `git status --porcelain -- apps/server/test` must list exactly the snapshot files, each with an empty
+  worktree column (`A  path` / `M  path`). Any `??`, ` M`, `MM`, `AM` or ` D` is a violation.
+- `git ls-files -s -- <files>` must equal the saved output (this catches a builder that staged its own edits).
+- `git diff --stat -- <files>` as evidence.
+
+On a violation: stop and show the user the diff. Propose `git restore --worktree -- <files>` (it restores the
+files from the snapshot in the index) plus a re-spawned builder, and act on the user's decision — do not
+revert on your own.
+
+---
+
+## Stage 3 — Implement (Sonnet)
+
+The task branch already exists (created at the end of Stage 2). Spawn one implementation subagent:
 
 - `subagent_type: "general-purpose"`, `model: "sonnet"`, label like `impl:<slug>`.
 - In the prompt: give the **absolute path to the plan file** and instruct it to read that file plus
   `CLAUDE.md`, implement the plan faithfully, match surrounding code style, and **not** commit or push.
+- **Tests are frozen.** Tell it: do not create, edit, delete, rename, `git add`, `git restore` or `git stash`
+  any test file (`apps/server/test/**`, including `helpers/`) — the tests are the specification. Make them pass
+  by changing code only. If it believes a test is wrong, it leaves the test as is and lists it in the report
+  under **Disputed tests** (test, why, evidence: plan line vs. test expectation).
+  - Exception: when Stage 2b was skipped and the plan's Concrete steps explicitly list changes to test files
+    (e.g. refactoring test helpers), the builder makes exactly those changes and no others.
 - Ask it to return a concise **change report**: files touched, notable decisions, anything it deviated from
-  in the plan and why, and anything it couldn't complete.
+  in the plan and why, anything it couldn't complete, and **Disputed tests** (if any).
 
 If the task is large, it's fine to let one builder do the whole plan — keep it a single agent so the changes
 stay coherent, rather than splitting one plan across parallel editors that would conflict.
+
+After the builder returns, run the **snapshot check** (Stage 2b, if it ran) before Stage 4.
 
 ---
 
@@ -179,7 +299,8 @@ in the root `package.json` before relying on it. Where feasible, also exercise t
 not just unit tests — this matches the user's standing preference for real end-to-end verification.
 
 **If `pnpm verify` fails, skip 4b** and go straight to Stage 5 with the failing output as the defect list.
-Reviewing a red tree wastes a Codex run on problems the compiler already found.
+Reviewing a red tree wastes a Codex run on problems the compiler already found. A failing snapshot test from
+Stage 2b is a **code defect** by default (the tests are the specification), unless the builder disputed it.
 
 ### 4b — Codex review
 
@@ -191,15 +312,21 @@ stdin avoids PowerShell/Bash quoting problems:
 The instructions should open with *"You are a read-only code reviewer. Do not modify any files."* and tell
 Codex to:
 
-1. Determine the diff itself — the builder's work is **staged, unstaged and untracked**, not yet committed
-   (the commit is Stage 6). Have it start from `git status --porcelain`, `git diff`, `git diff --staged`, and
-   read untracked files directly.
+1. Determine the diff itself — the work is **staged, unstaged and untracked**, not yet committed (the commit
+   is Stage 6). Have it start from `git status --porcelain`, `git diff`, `git diff --staged`, and read
+   untracked files directly. If Stage 2b ran, **staged** changes under `apps/server/test/` are the
+   test-writer's frozen tests and **unstaged + untracked** changes are the builder's code — it must review
+   both halves, and any unstaged change to a staged test file is a blocker.
 2. Read the plan at `<scratchpad>/plan-<slug>.md` (give the absolute path) and judge the diff **against that
    plan**: was everything implemented, and correctly? Check the plan's **verification criteria** specifically.
-3. Report only concrete, reproducible defects — file, symptom, and evidence (failing input/state,
+3. If Stage 2b ran, evaluate the tests against the plan's **Testy** section (give the absolute path of
+   `context/testing.md` too): is every listed behaviour pinned, are `czerwony`/`strażnik` honoured, does each
+   test assert observable behaviour (not just an import), are there tests beyond the list, are mocks used per
+   `testing.md`? Report a test defect with the **test file path in `file`**.
+4. Report only concrete, reproducible defects — file, symptom, and evidence (failing input/state,
    expected-vs-actual, or the plan requirement violated). Vague "looks risky" notes are not defects.
-4. Note that `pnpm verify` already passed, so lint/type/test failures are not what it is hunting for.
-5. Return the verdict in the required JSON shape and nothing else.
+5. Note that `pnpm verify` already passed, so lint/type/test failures are not what it is hunting for.
+6. Return the verdict in the required JSON shape and nothing else.
 
 Then run it, reading the prompt from stdin (`-`):
 
@@ -209,7 +336,8 @@ Then run it, reading the prompt from stdin (`-`):
       - < <scratchpad>/codex-review-prompt-<slug>.md
 
 - `--output-schema` pins the answer to `{verdict, summary, defects[]}` — the same shape Stage 5 consumes, so
-  the fix loop doesn't have to parse prose. The schema lives next to this skill.
+  the fix loop doesn't have to parse prose. The schema lives next to this skill. It has no field for the kind
+  of defect, so Stage 5 routes by the `file` path (under `apps/server/test/` = test defect).
 - `-o` writes the final message to a file; read that file for the verdict rather than scraping stdout.
 - `-s read-only` still lets Codex run commands (`git`, `tsc`, …); it only blocks writes. That is exactly the
   reviewer-can't-edit property this stage needs.
@@ -236,14 +364,28 @@ path, and the builder's change report — requiring the same `PASS` / `FAIL` + n
 
 ## Stage 5 — Fix loop
 
-If the verdict is `FAIL` — from `pnpm verify`, from Codex, or both:
+If the verdict is `FAIL` — from `pnpm verify`, from Codex, or both — first **partition the defects**:
 
-1. Spawn a **fresh** implementation subagent (`general-purpose`, `sonnet`) with the plan file path, the prior
-   change report, and the defect list — the failing `pnpm verify` output and/or the `defects[]` array from
-   Codex's JSON report. Instruct it to fix exactly those defects. Pass the defects inline in the prompt; the
-   builder has no access to your context.
-2. Re-run Stage 4 verification (4a, then 4b if 4a is green).
-3. Repeat until `PASS` or until **3 fix→verify rounds** have passed.
+- **Test defects:** Codex defects whose `file` is under `apps/server/test/`, plus the builder's **Disputed
+  tests**. If a defect challenges the plan's **Testy** item itself (the plan is wrong, not the test) → take it
+  to the user.
+- **Code defects:** everything else, including a failing snapshot test from `pnpm verify`.
+
+Then:
+
+1. **Test defects →** spawn a **fresh** test-writer (`general-purpose`, `opus`, label `tests-fix:<slug>`) with
+   the plan file path, the manifest and the defects. It may edit only the test files the defects name, under
+   the same rules as Stage 2b. Afterwards refresh the snapshot (`git add` + `git ls-files -s`) and update the
+   plan file. A red re-check is no longer possible here; `pnpm verify` judges the result.
+2. **Code defects →** spawn a **fresh** implementation subagent (`general-purpose`, `sonnet`) with the plan file
+   path, the prior change report, and the defect list — the failing `pnpm verify` output and/or the
+   `defects[]` entries from Codex's JSON report. Instruct it to fix exactly those defects, with the same
+   no-test-edits prohibition as in Stage 3. Pass the defects inline in the prompt; the builder has no access
+   to your context.
+3. If both kinds are present, run the test-writer first, then the builder.
+4. Run the snapshot check (if Stage 2b ran), then re-run Stage 4 verification (4a, then 4b if 4a is green).
+5. Repeat until `PASS` or until **3 fix→verify rounds** have passed — the limit covers both kinds of defects
+   combined.
 
 If it still fails after 3 rounds, stop looping and hand the outstanding defects to the user with a short
 diagnosis — burning more rounds usually means the plan itself is wrong, which is a decision for the user, not
@@ -260,7 +402,8 @@ Once verification passes:
 1. Summarise for the user what was built and the final verification result (real command output).
 2. **Ask** whether to commit, and propose a commit message. Commit only on an explicit yes — never commit or
    push unprompted.
-3. On approval, commit to the task branch created in Stage 3. End the commit message with the required
+3. On approval, commit to the task branch created in Stage 2. If Stage 2b ran, the snapshot test files are
+   already staged — stage the rest of the changes before committing. End the commit message with the required
    trailer: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
 4. Do **not** push yet — pushing and opening the PR happen in Stage 7, as their own explicit-yes gate.
 
@@ -297,18 +440,22 @@ After the commit lands:
 - **Don't skip the human gate (Stage 2).** Silently guessing answers to open questions is how the wrong thing
   gets built well.
 - **Keep the tiers right.** Opus for planning is worth it; downgrading the planner to save tokens is a false
-  economy because a bad plan costs far more downstream. Sonnet is the right tier for the builder.
+  economy because a bad plan costs far more downstream. Opus also writes the tests: they are the
+  specification, so weaker edge-case coverage there is paid for in every later stage. Sonnet is the right tier
+  for the builder.
+- **Tests are frozen after Stage 2b — only a test-writer changes them.** Don't let the builder "fix" a red test
+  to get green; a test it finds wrong goes into **Disputed tests**, and Stage 5 routes it.
 - **The Codex review is the point of Stage 4b, not a formality.** Don't replace it with a Claude subagent
   because it's slower or because the diff "looks fine" — an outside model is the only part of this pipeline
   that doesn't share the builder's assumptions. Fall back to a Sonnet reviewer only when Codex genuinely
   can't run, and say so out loud when you do.
 - **Codex prerequisites:** `codex --version` and `codex login status` (expect `Logged in …`). Codex needs a
-  git repo, which Stage 3's branch guarantees. Running `codex` from Bash may hit a permission prompt the
+  git repo, which the task branch (created in Stage 2) guarantees. Running `codex` from Bash may hit a permission prompt the
   first time.
 - **You orchestrate, you don't build.** If you find yourself editing source files directly, you've dropped
   out of the workflow — delegate it to a Stage 3 subagent instead.
 - If a stage's subagent returns `null` (skipped or died), don't fabricate its result — tell the user and
   decide whether to re-spawn.
-- **Branch and PR are orchestrator actions, not subagent ones.** You create the branch (Stage 3) and push /
+- **Branch and PR are orchestrator actions, not subagent ones.** You create the branch (Stage 2) and push /
   open the PR (Stage 7) yourself via `git`/`gh` — don't delegate them to a subagent, and don't skip the
   Stage 7 approval gate just because Stage 6's commit was already approved.

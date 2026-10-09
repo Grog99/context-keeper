@@ -24,19 +24,17 @@ import {
   type NewMemoryRow,
   type ProposalRow,
 } from '../src/db/schema';
-import type { EmbeddingProvider } from '../src/embeddings/embedding-provider';
 import { EmbeddingService } from '../src/embeddings/embedding.service';
 import { LlmSettingsService } from '../src/llm/llm-settings.service';
-import type { LlmProvider } from '../src/llm/llm-provider';
 import { LlmService } from '../src/llm/llm.service';
 import { LLM_GLOBAL_SETTINGS_ID } from '../src/llm/llm.constants';
-import type { LlmChatMessage, LlmChatResult, LlmEndpoint } from '../src/llm/llm.types';
 import { runLlmConflicts } from '../src/nightly/llm-conflicts';
 import { NightlyService } from '../src/nightly/nightly.service';
 import { RecencyPruneScorer } from '../src/nightly/prune-scorer';
 import { ProposalsService } from '../src/proposals/proposals.service';
 import type { DeletePayload } from '../src/proposals/proposals.types';
 import { UsageService } from '../src/usage/usage.service';
+import { FakeLlmProvider, headerOf, StubEmbeddingProvider } from './helpers/fakes';
 import { buildProjectsService } from './helpers/services';
 
 // Zachowuje prawdziwą implementację; AC15 podmienia ją jednorazowo, żeby wywołać wyjątek POZA budżetem.
@@ -72,17 +70,6 @@ const LLM_ZEROS = {
 const LLM_PRUNE_ZEROS = { llmPruneCandidates: 0, llmPruneKept: 0, llmPruneDeleteProposed: 0, llmPruneUpdateProposed: 0 };
 const LLM_CONFLICT_ZEROS = { llmConflictCandidates: 0, llmConflictConsistent: 0, llmConflictProposed: 0 };
 
-class StubEmbeddingProvider implements EmbeddingProvider {
-  readonly dim = EMBEDDING_DIM;
-  constructor(public model: string) {}
-  async embed(texts: string[]): Promise<number[][]> {
-    return texts.map(() => new Array(EMBEDDING_DIM).fill(0.01));
-  }
-  async health(): Promise<boolean> {
-    return true;
-  }
-}
-
 /** Wersor osi `i`. */
 function axis(i: number): number[] {
   const v = new Array(EMBEDDING_DIM).fill(0);
@@ -100,47 +87,25 @@ function vecAt(i: number, j: number, c: number, sign = 1): number[] {
 const C_BAND = 0.85;
 
 const json = (o: unknown): string => JSON.stringify(o);
-const headerOf = (user: string): string => /^header: (.*)$/m.exec(user)?.[1] ?? '';
+
+/** Wiadomość z `<entry_a>` to sąd konfliktu; każda inna (`<entry>`) to prune. */
+const isConflictCall = (user: string): boolean => user.includes('<entry_a>');
+const isPruneCall = (user: string): boolean => !isConflictCall(user);
 
 /**
- * Fake LLM: wiadomość z `<entry_a>` to sąd konfliktu (sprzeczne, gdy któryś nagłówek ma `[CONFLICT]`), każda inna
- * (`<entry>`) to prune (`delete` dla `[EPHEMERAL]`, inaczej `keep`). Liczy osobno wywołania konfliktowe.
+ * Odpowiedzi fake'a LLM: wiadomość z `<entry_a>` to sąd konfliktu (sprzeczne, gdy któryś nagłówek ma `[CONFLICT]`),
+ * każda inna (`<entry>`) to prune (`delete` dla `[EPHEMERAL]`, inaczej `keep`). Wywołania liczymy osobno przez
+ * `fake.callsWhere(isConflictCall)` / `fake.callsWhere(isPruneCall)`.
  */
-class FakeLlmProvider implements LlmProvider {
-  readonly users: string[] = [];
-  conflictOverride?: (user: string) => string | Error;
-
-  get conflictUsers(): string[] {
-    return this.users.filter((u) => u.includes('<entry_a>'));
+function respondConflictOrPrune(user: string): string {
+  if (isConflictCall(user)) {
+    return user.includes('[CONFLICT]')
+      ? json({ contradiction: true, reason: 'Dwa różne porty dla tej samej usługi.' })
+      : json({ contradiction: false, reason: null });
   }
-  get conflictCalls(): number {
-    return this.conflictUsers.length;
-  }
-  get pruneCalls(): number {
-    return this.users.length - this.conflictCalls;
-  }
-  get calls(): number {
-    return this.users.length;
-  }
-
-  async chat(_endpoint: LlmEndpoint, messages: LlmChatMessage[]): Promise<LlmChatResult> {
-    const user = messages[messages.length - 1].content;
-    this.users.push(user);
-    let out: string | Error;
-    if (user.includes('<entry_a>')) {
-      out =
-        this.conflictOverride?.(user) ??
-        (user.includes('[CONFLICT]')
-          ? json({ contradiction: true, reason: 'Dwa różne porty dla tej samej usługi.' })
-          : json({ contradiction: false, reason: null }));
-    } else {
-      out = headerOf(user).includes('[EPHEMERAL]')
-        ? json({ verdict: 'delete', category: 'ephemeral', reason: 'Notatka o bieżącej pracy.' })
-        : json({ verdict: 'keep' });
-    }
-    if (out instanceof Error) throw out;
-    return { content: out, model: 'fake', latencyMs: 1 };
-  }
+  return headerOf(user).includes('[EPHEMERAL]')
+    ? json({ verdict: 'delete', category: 'ephemeral', reason: 'Notatka o bieżącej pracy.' })
+    : json({ verdict: 'keep' });
 }
 
 describe('Detektor sprzeczności w nocnym jobie (integration, testcontainers) — roadmap v1.6 B3', () => {
@@ -297,7 +262,7 @@ describe('Detektor sprzeczności w nocnym jobie (integration, testcontainers) �
   async function detectOneConflict(opts: Parameters<typeof seedPair>[0] = {}) {
     const pair = await seedPair(opts);
     await enableLlm();
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(respondConflictOrPrune);
     const services = build(fake);
     await services.nightly.run({ actor: 'tester' });
     return { ...pair, fake, ...services, proposal: await onlyConflict() };
@@ -345,7 +310,7 @@ describe('Detektor sprzeczności w nocnym jobie (integration, testcontainers) �
     await seedVector(a.id, axis(40));
     await seedVector(b.id, vecAt(40, 41, 0.97)); // dist 0.03
     await seedFact({ header: 'Stary nietknięty', createdAt: daysAgo(40) });
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(respondConflictOrPrune);
 
     const result = await build(fake).nightly.run({ actor: 'tester' });
 
@@ -387,7 +352,7 @@ describe('Detektor sprzeczności w nocnym jobie (integration, testcontainers) �
         reason: 'Dwa różne porty dla tej samej usługi.',
       },
     });
-    expect(fake.conflictCalls).toBe(1);
+    expect(fake.callsWhere(isConflictCall)).toBe(1);
     // Audyt `proposal_created` niesie detektor i kategorię.
     const created = await audit.latestByEventType('proposal_created', { detector: 'llm-conflicts' });
     expect(created).toBeDefined();
@@ -399,12 +364,12 @@ describe('Detektor sprzeczności w nocnym jobie (integration, testcontainers) �
   it('AC3: para uznana za niesprzeczną nie daje proposala; llmConflictConsistent = 1', async () => {
     await seedPair({ newer: { header: 'Nowy wpis bez znacznika' } });
     await enableLlm();
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(respondConflictOrPrune);
 
     const result = await build(fake).nightly.run({ actor: 'tester' });
 
     expect(await conflictProposals()).toEqual([]);
-    expect(fake.conflictCalls).toBe(1);
+    expect(fake.callsWhere(isConflictCall)).toBe(1);
     expect(result.counters).toMatchObject({
       llmConflictCandidates: 1,
       llmConflictConsistent: 1,
@@ -418,11 +383,11 @@ describe('Detektor sprzeczności w nocnym jobie (integration, testcontainers) �
     const dedupPair = await seedPair({ c: 0.97 }); // dist 0.03 -> klaster merge
     const farPair = await seedPair({ c: 0.5 }); // dist 0.5 > 0.3
     await enableLlm();
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(respondConflictOrPrune);
 
     const result = await build(fake).nightly.run({ actor: 'tester' });
 
-    expect(fake.conflictCalls).toBe(0);
+    expect(fake.callsWhere(isConflictCall)).toBe(0);
     expect(result.counters).toMatchObject({ mergeProposed: 1, llmConflictCandidates: 0, llmConflictProposed: 0 });
     const merges = await pendingNightly('merge');
     expect(merges).toHaveLength(1);
@@ -441,11 +406,11 @@ describe('Detektor sprzeczności w nocnym jobie (integration, testcontainers) �
     // obie strony stare (poza oknem 1 dnia)
     await seedPair({ newer: { createdAt: daysAgo(5) } });
     await enableLlm();
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(respondConflictOrPrune);
 
     const result = await build(fake).nightly.run({ actor: 'tester' });
 
-    expect(fake.conflictCalls).toBe(0);
+    expect(fake.callsWhere(isConflictCall)).toBe(0);
     expect(result.counters).toMatchObject({ llmConflictCandidates: 0 });
     expect(await conflictProposals()).toEqual([]);
   });
@@ -473,11 +438,11 @@ describe('Detektor sprzeczności w nocnym jobie (integration, testcontainers) �
     await seedPair({ newer: { header: '[EPHEMERAL] [CONFLICT] notatka z sesji' } });
 
     await enableLlm();
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(respondConflictOrPrune);
 
     const result = await build(fake).nightly.run({ actor: 'tester' });
 
-    expect(fake.conflictCalls).toBe(0);
+    expect(fake.callsWhere(isConflictCall)).toBe(0);
     expect(result.counters).toMatchObject({ llmConflictCandidates: 0, llmConflictProposed: 0, mergeProposed: 1, llmPruneDeleteProposed: 1 });
     expect(await conflictProposals()).toEqual([]);
   });
@@ -487,11 +452,11 @@ describe('Detektor sprzeczności w nocnym jobie (integration, testcontainers) �
   it('AC7: ta sama para wykryta z obu końców (obie strony w oknie) daje jedno wywołanie i jeden proposal', async () => {
     const { older } = await seedPair({ older: { createdAt: hoursAgo(2) } });
     await enableLlm();
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(respondConflictOrPrune);
 
     const result = await build(fake).nightly.run({ actor: 'tester' });
 
-    expect(fake.conflictCalls).toBe(1);
+    expect(fake.callsWhere(isConflictCall)).toBe(1);
     expect(result.counters).toMatchObject({ llmConflictCandidates: 1, llmConflictProposed: 1 });
     const proposal = await onlyConflict();
     expect((proposal.payload as DeletePayload).memoryId).toBe(older.id);
@@ -503,12 +468,12 @@ describe('Detektor sprzeczności w nocnym jobie (integration, testcontainers) �
     await seedPair(); // nowszy wpis jest faktem z okna
     await seedFact({ header: 'Inny fakt z okna' }); // drugi fakt z okna
     await enableLlm({ cap: 2 });
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(respondConflictOrPrune);
 
     const result = await build(fake).nightly.run({ actor: 'tester' });
 
-    expect(fake.pruneCalls).toBe(2);
-    expect(fake.conflictCalls).toBe(0);
+    expect(fake.callsWhere(isPruneCall)).toBe(2);
+    expect(fake.callsWhere(isConflictCall)).toBe(0);
     expect(result.counters).toMatchObject({
       llmCalls: 2,
       llmConflictCandidates: 1,
@@ -558,7 +523,7 @@ describe('Detektor sprzeczności w nocnym jobie (integration, testcontainers) �
   it('AC10 (obrona w głąb): approve delete z celem spoza affectedIds -> validation_error, nic nie zarchiwizowane', async () => {
     const a = await seedFact({ header: 'A' });
     const b = await seedFact({ header: 'B' });
-    const { proposalsService } = build(new FakeLlmProvider());
+    const { proposalsService } = build(new FakeLlmProvider(respondConflictOrPrune));
     const outside = await insertProposal({ type: 'delete', origin: 'nightly', affectedIds: [a.id], payload: { memoryId: b.id } });
     const conflictMismatch = await insertProposal({
       type: 'delete',
@@ -705,19 +670,19 @@ describe('Detektor sprzeczności w nocnym jobie (integration, testcontainers) �
 
   it('AC13: pending konflikt przeżywa przebieg, w którym kotwica jest poza oknem; kolejne przebiegi nie dublują i nie wołają modelu', async () => {
     const { newer, proposal, nightly, fake } = await detectOneConflict();
-    expect(fake.conflictCalls).toBe(1);
+    expect(fake.callsWhere(isConflictCall)).toBe(1);
 
     // drugi przebieg tego samego dnia: para ma pending proposal -> wyłączona (ust. 22), 0 nowych wywołań konfliktu
     const second = await nightly.run({ actor: 'tester' });
     expect(second.counters).toMatchObject({ created: 0, withdrawn: 0, llmConflictCandidates: 0 });
-    expect(fake.conflictCalls).toBe(1);
+    expect(fake.callsWhere(isConflictCall)).toBe(1);
     expect(await conflictProposals()).toHaveLength(1);
 
     // kotwica wychodzi z okna: nowszy wpis ma teraz 5 dni -> para poza oknem, a proposal NIE jest wycofany (wyłączony z orphan-withdraw)
     await db.update(memories).set({ createdAt: daysAgo(5) }).where(eq(memories.id, newer.id));
     const third = await nightly.run({ actor: 'tester' });
     expect(third.counters).toMatchObject({ created: 0, withdrawn: 0, llmConflictCandidates: 0 });
-    expect(fake.conflictCalls).toBe(1);
+    expect(fake.callsWhere(isConflictCall)).toBe(1);
     const survivors = await conflictProposals();
     expect(survivors.map((p) => p.id)).toEqual([proposal.id]);
   });
@@ -733,7 +698,7 @@ describe('Detektor sprzeczności w nocnym jobie (integration, testcontainers) �
     await seedVector(y.id, vecAt(axisIdx, axisIdx + 1, C_BAND)); // dist od X 0.15
     await seedVector(z.id, vecAt(axisIdx, axisIdx + 1, C_BAND, -1)); // dist od X 0.15, od Y 0.555 (poza pasmem)
     await enableLlm();
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(respondConflictOrPrune);
     const { nightly, proposalsService } = build(fake);
 
     await nightly.run({ actor: 'tester' });
@@ -762,7 +727,7 @@ describe('Detektor sprzeczności w nocnym jobie (integration, testcontainers) �
     await seedPair();
     await enableLlm();
     vi.mocked(runLlmConflicts).mockRejectedValueOnce(new Error('x'));
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(respondConflictOrPrune);
 
     const result = await build(fake).nightly.run({ actor: 'tester' });
 
@@ -775,7 +740,7 @@ describe('Detektor sprzeczności w nocnym jobie (integration, testcontainers) �
   it('AC15 (wariant): błąd odczytu pending (kontekst LLM) -> oba detektory LLM pominięte, przebieg success', async () => {
     await seedPair();
     await enableLlm();
-    const fake = new FakeLlmProvider();
+    const fake = new FakeLlmProvider(respondConflictOrPrune);
     const { nightly } = build(fake);
     vi.spyOn(nightly as unknown as { loadPendingAffectedIds: () => Promise<Set<string>> }, 'loadPendingAffectedIds').mockRejectedValue(
       new Error('x'),

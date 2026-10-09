@@ -16,7 +16,6 @@ import type { Database } from '../src/db/db.tokens';
 import * as schema from '../src/db/schema';
 import {
   auditLog,
-  EMBEDDING_DIM,
   embeddings,
   memories,
   memoryRelations,
@@ -25,7 +24,6 @@ import {
   type MemoryRow,
   type ProposalRow,
 } from '../src/db/schema';
-import type { EmbeddingProvider } from '../src/embeddings/embedding-provider';
 import { EmbeddingService } from '../src/embeddings/embedding.service';
 import { AutoModeUndoService } from '../src/memory/auto-mode-undo.service';
 import { MemoryAdminService } from '../src/memory/memory-admin.service';
@@ -34,34 +32,15 @@ import type { ProjectContext, ProjectsService } from '../src/projects/projects.s
 import { AUTO_MODE_UNDO_VIA } from '../src/proposals/auto-mode';
 import { ProposalsService } from '../src/proposals/proposals.service';
 import { buildAutoModeFateQuery, UsageService } from '../src/usage/usage.service';
+import { StubEmbeddingProvider } from './helpers/fakes';
 import { buildProjectsService } from './helpers/services';
 
 /**
- * Stub providera: KAŻDY nowy tekst dostaje świeżą, parami ortogonalną oś jednostkową (dystans 1 do wszystkiego),
- * więc zapisy o różnej treści nigdy nie są względem siebie prawie-duplikatami (bezpiecznik (a) auto mode).
+ * Stub providera (`StubEmbeddingProvider` z `helpers/fakes.ts`): KAŻDY nowy tekst dostaje świeżą, parami
+ * ortogonalną oś jednostkową od `FIRST_FREE_AXIS` (dystans 1 do wszystkiego), więc zapisy o różnej treści nigdy nie
+ * są względem siebie prawie-duplikatami (bezpiecznik (a) auto mode).
  */
-class StubEmbeddingProvider implements EmbeddingProvider {
-  readonly dim = EMBEDDING_DIM;
-  private readonly known = new Map<string, number[]>();
-  private nextAxis = 10;
-  constructor(public model: string) {}
-
-  async embed(texts: string[]): Promise<number[][]> {
-    return texts.map((t) => {
-      let v = this.known.get(t);
-      if (!v) {
-        v = new Array<number>(EMBEDDING_DIM).fill(0);
-        v[this.nextAxis++] = 1;
-        this.known.set(t, v);
-      }
-      return v;
-    });
-  }
-
-  async health(): Promise<boolean> {
-    return true;
-  }
-}
+const FIRST_FREE_AXIS = 10;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -90,7 +69,7 @@ describe('Nadzór po fakcie auto mode — cofanie (A3) i pomiary (A4) (integrati
     const config = new AppConfigService(
       envSchema.parse({ DATABASE_URL: 'postgres://unused', NEAR_DUPLICATE_DISTANCE: 0.1, EMBEDDING_SAVE_TIMEOUT_MS: 10_000 }),
     );
-    const provider = new StubEmbeddingProvider(`oversight-model-${counter}`);
+    const provider = new StubEmbeddingProvider(`oversight-model-${counter}`, { freshAxisFrom: FIRST_FREE_AXIS });
     const embeddingService = new EmbeddingService(provider, config);
     const proposalsService = new ProposalsService(db, config, audit, embeddingService);
     const memoryService = new MemoryService(db, config, audit, embeddingService, usage, proposalsService);

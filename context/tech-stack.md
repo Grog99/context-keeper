@@ -2,7 +2,7 @@
 
 **Wersja dokumentu:** v1.5 (wiele repo: token konta, slug projektu, onboarding przez MCP, wyszukiwanie między projektami) · **Data:** 2026-10-06
 **Źródła:** `plan-pamiec-agentow-mcp.md`, `research-prior-art-pamiec-agentow.md`, sesja ustaleń przedimplementacyjnych
-**Ostatnia synchronizacja z kodem:** 2026-10-06 (synchronizacja kanonu v1.5 — §0, §1, §4, §5, §6, §9, §10, §12, §13, §14, §15)
+**Ostatnia synchronizacja z kodem:** 2026-10-09 (§15 i wiersz „Testy” — korekta strategii testów do stanu faktycznego, reguły w [`testing.md`](testing.md)); wcześniej 2026-10-06 (synchronizacja kanonu v1.5 — §0, §1, §4, §5, §6, §9, §10, §12, §13, §14, §15)
 
 > Ten dokument opisuje **jak** budujemy. Uzasadnienia produktowe (co i dla kogo) są w [`prd.md`](prd.md).
 > Zasada przewodnia: **prosto w v1, schema/architektura gotowa na rozszerzenia.**
@@ -131,7 +131,7 @@ flowchart TB
 | **Deployment** | Pojedynczy VPS + Docker Compose | Najprościej i przewidywalnie w v1; stabilny publiczny endpoint HTTPS wymagany przez remote MCP. |
 | **Job** | cron/scheduled kontener `nightly` | Dedup/merge/prune jako proposer. |
 | **Migracje** | narzędzie migracyjne od dnia zero | Schema to kilka powiązanych tabel + rozszerzalny enum `kind`. |
-| **Testy** | unit + integration na efemerycznym Postgresie (testcontainers) + `recall@k` + cienki MCP e2e | Skupione na rdzeniu poprawności/bezpieczeństwa, nie pełne pokrycie (§15). |
+| **Testy** | unit + integration na efemerycznym Postgresie (testcontainers) + migracje + MCP e2e (oficjalny SDK) | Skupione na rdzeniu poprawności/bezpieczeństwa, nie pełne pokrycie (§15); reguły w [`testing.md`](testing.md). |
 
 ---
 
@@ -383,7 +383,7 @@ Błędy scope'u projektu sprawdzane są na początku handlera narzędzia (`requi
 
 **Tagi:** podwójna rola — filtr strukturalny w search + tekst dopisany do embeddowanego chunku.
 
-**Eval (v1-light):** mały labelowany zestaw `zapytanie → oczekiwane memory_id` + skrypt `recall@k` jako smoke-test regresji przy zmianach chunkingu/progów/modelu.
+**Eval (v1-light) — planowany, jeszcze nie istnieje (backlog: „Tuning retrievalu”):** mały labelowany zestaw `zapytanie → oczekiwane memory_id` + skrypt `recall@k` jako smoke-test regresji przy zmianach chunkingu/progów/modelu.
 
 **Bezpieczeństwo retrievalu:** świadomość ataku rank-0 injection w fuzji hybrydowej (przebadane na RRF/MAX/weighted). Bramka akceptacji jest tu przewagą — zatruta pamięć musi przejść approve, zanim wpłynie na wyniki.
 
@@ -625,7 +625,7 @@ Nie kontrolujemy system-promptu agenta → sterowanie zachowaniem idzie przez tr
 | **3. Plugin Claude Code** | bundluje config połączenia (URL + bearer) + skill proaktywności | tylko Claude Code | ⏸️ warunkowy (backlog) |
 
 - **Load-bearing kontrakt (w tym „nie zapisuj sekretów") musi jechać z serwerem (warstwa 1)** — nie z pluginem/wklejką, bo agent kogoś, kto zapomniał wkleić, i tak zaśmieci/zatruje kolejkę.
-- Opisy = jedyny mechanizm anti-flooding w trybie domyślnym (human-gated); w projekcie z auto mode (v1.6, A2) twardym ogranicznikiem jest dzienny limit auto-akceptacji (§8bis). Prompt-engineering → dostrajalne na `recall@k` + obserwacji jakości kolejki; źródłem tekstu opisów jest kod (`apps/server/src/mcp/tool-contract.ts`, v1.5); [`mcp-tool-contract.md`](mcp-tool-contract.md) trzyma zasady i uzasadnienia, bez kopii opisów.
+- Opisy = jedyny mechanizm anti-flooding w trybie domyślnym (human-gated); w projekcie z auto mode (v1.6, A2) twardym ogranicznikiem jest dzienny limit auto-akceptacji (§8bis). Prompt-engineering → dostrajalne na obserwacji jakości kolejki (a po powstaniu smoke'a `recall@k` z backlogu — także na nim); źródłem tekstu opisów jest kod (`apps/server/src/mcp/tool-contract.ts`, v1.5); [`mcp-tool-contract.md`](mcp-tool-contract.md) trzyma zasady i uzasadnienia, bez kopii opisów.
 - **Warstwa 2 serwowana z serwera (v1.5)** — snippet `AGENTS.md`/`CLAUDE.md` i `.mcp.json` renderuje moduł `apps/server/src/onboarding/` (`onboarding-templates.ts`) — jedno źródło dla narzędzi MCP `list_projects`/`create_project` i ekranu Onboarding (`GET /api/onboarding`); SPA nie trzyma kopii.
 - **Prompt MCP `onboard` (v1.5)** — dodatek do warstwy 2 wywoływany przez człowieka (np. `/context-keeper:onboard`), nie osobna warstwa. **Nic load-bearing:** wszystko, czego agent musi się trzymać, jest w opisach narzędzi i w krokach `ONBOARDING_SETUP_STEPS` zwracanych w `hint`/`next`; agent, który promptu nie wywoła, dostaje te same kroki.
 
@@ -633,7 +633,11 @@ Nie kontrolujemy system-promptu agenta → sterowanie zachowaniem idzie przez tr
 
 ## 15. Strategia testów
 
-Skupiona na **rdzeniu poprawności i bezpieczeństwa** — nie pełne pokrycie (spójne z „prosto w v1").
+Skupiona na **rdzeniu poprawności i bezpieczeństwa** — nie pełne pokrycie (spójne z „prosto w v1"). Konkretne reguły
+(co testować i czego nie, mockowanie, układ plików i nazwy, bugfix od testu, etap test-first w `plan-implement`)
+trzyma [`testing.md`](testing.md); tu tylko strategia.
+
+Warstwy takie, jakie faktycznie istnieją:
 
 - **Unit** (czysta logika): limity/walidacja, normalizacja tagów, **skaner sekretów na korpusie fixture** (pozytywy blokowane, false-positive przechodzą), dedup-klasyfikacja, mapowanie koperty błędów.
 - **Integration na efemerycznym Postgresie** (najważniejsza warstwa, testcontainers):
@@ -642,6 +646,7 @@ Skupiona na **rdzeniu poprawności i bezpieczeństwa** — nie pełne pokrycie (
   - cykl życia embeddingu staging↔embeddings,
   - nocny job — idempotentne re-propose + samosprzątanie stale + lock,
   - retrieval pipeline — collapse + RRF na seedowanych danych.
-- **`recall@k`** — smoke retrievalu na labelowanym zestawie.
-- **Cienki MCP e2e** — serwer + klient z oficjalnego SDK: search/get/save happy-path + jedna ścieżka błędu. **Zarazem smoke test łączności bearer.**
+- **Migracje:** upgrade z poprzedniej wersji schematu na niepustej bazie.
+- **MCP e2e** (serwer + klient z oficjalnego SDK): kontrakt narzędzi, zakres tokenów, auto mode; zarazem smoke łączności bearer.
+- **Smoke `recall@k` — nie istnieje.** Wymaga labelowanego zestawu `zapytanie → oczekiwane memory_id` i należy do „Tuningu retrievalu” w backlogu (patrz „Eval” w §6).
 - **Poza v1:** load/perf, pełny Cypress dashboardu, chaos. Priorytety 1–2 (transakcja + IDOR) — non-negotiable od dnia zero; reszta lekko/w miarę czasu.

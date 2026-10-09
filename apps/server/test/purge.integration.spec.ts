@@ -25,7 +25,6 @@ import {
   type NewMemoryRow,
   type ProposalRow,
 } from '../src/db/schema';
-import type { EmbeddingProvider } from '../src/embeddings/embedding-provider';
 import { EmbeddingService } from '../src/embeddings/embedding.service';
 import { MemoryAdminService } from '../src/memory/memory-admin.service';
 import { ProposalsService } from '../src/proposals/proposals.service';
@@ -33,23 +32,12 @@ import type { ProjectContext } from '../src/projects/projects.service';
 import type { ProjectsService } from '../src/projects/projects.service';
 import { PurgeError } from '../src/purge/purge.errors';
 import { PurgeService } from '../src/purge/purge.service';
+import { StubEmbeddingProvider } from './helpers/fakes';
 import { buildProjectsService } from './helpers/services';
 
-/** Jak w `proposals.integration.spec.ts` — stub providera, jeden stały wektor na wszystkie chunki
- * (mechanika, nie ranking). Potrzebny wyłącznie do skonstruowania `ProposalsService` dla testu
- * "purge chroni przed nadpisaniem tombstone'a" (stale-check po version bump). */
-class StubEmbeddingProvider implements EmbeddingProvider {
-  readonly dim = EMBEDDING_DIM;
-  constructor(public model: string) {}
-
-  async embed(texts: string[]): Promise<number[][]> {
-    return texts.map(() => new Array(EMBEDDING_DIM).fill(0.01));
-  }
-
-  async health(): Promise<boolean> {
-    return true;
-  }
-}
+// Stub providera (`helpers/fakes.ts`): jeden stały wektor na wszystkie chunki (mechanika, nie ranking). Potrzebny
+// wyłącznie do skonstruowania `ProposalsService` dla testu "purge chroni przed nadpisaniem tombstone'a"
+// (stale-check po version bump).
 
 interface SeedProposalInput {
   type: ProposalRow['type'];

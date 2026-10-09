@@ -29,6 +29,7 @@ import { MemoryService } from '../src/memory/memory.service';
 import type { ProjectContext, ProjectsService } from '../src/projects/projects.service';
 import { ProposalsService } from '../src/proposals/proposals.service';
 import { UsageService } from '../src/usage/usage.service';
+import { StubEmbeddingProvider } from './helpers/fakes';
 import { buildProjectsService } from './helpers/services';
 
 /** Wektor w płaszczyźnie osi (a, b) obróconej o kąt `t`: dystans kosinusowy do `vec(a, b, 0)` to
@@ -47,29 +48,6 @@ function angleFor(distance: number): number {
 
 /** Wektor domyślny stuba: oś 1000 — ortogonalny do wszystkiego, czego używają testy (dystans 1). */
 const FAR = vec(1000, 1001);
-
-/** Stub providera z mapą tekst → wektor (nierejestrowane teksty dostają `FAR`), awarią i opóźnieniem. */
-class StubEmbeddingProvider implements EmbeddingProvider {
-  readonly dim = EMBEDDING_DIM;
-  throwOnEmbed = false;
-  delayMs = 0;
-  private readonly known = new Map<string, number[]>();
-  constructor(public model: string) {}
-
-  register(text: string, vector: number[]): void {
-    this.known.set(text, vector);
-  }
-
-  async embed(texts: string[]): Promise<number[][]> {
-    if (this.delayMs > 0) await new Promise((r) => setTimeout(r, this.delayMs));
-    if (this.throwOnEmbed) throw new Error('StubEmbeddingProvider: symulowana awaria providera');
-    return texts.map((t) => this.known.get(t) ?? FAR);
-  }
-
-  async health(): Promise<boolean> {
-    return !this.throwOnEmbed;
-  }
-}
 
 /** Rejestruje wektory pod teksty chunków, które `MemoryService.save` faktycznie wyśle do providera
  * (prawdziwy `chunk()`), więc stub nie zgaduje formatu tekstu. */
@@ -118,7 +96,8 @@ describe('Detekcja prawie-duplikatów przy zapisie (A1, integration, testcontain
     counter += 1;
     const created = await projects.createProject(`near-dup-${counter}`);
     const ctx: ProjectContext = { projectId: created.project.id, projectName: created.project.name };
-    const provider = new StubEmbeddingProvider(`near-dup-model-${counter}`);
+    // Stub z mapą tekst → wektor (`register`); nierejestrowane teksty dostają `FAR`.
+    const provider = new StubEmbeddingProvider(`near-dup-model-${counter}`, FAR);
     return { ctx, provider, model: provider.model, ...buildServices(provider, envOverrides) };
   }
 
