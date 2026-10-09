@@ -22,37 +22,16 @@ import type { ProjectContext } from '../src/projects/projects.service';
 import type { ProjectsService } from '../src/projects/projects.service';
 import { ProposalsService } from '../src/proposals/proposals.service';
 import { UsageService } from '../src/usage/usage.service';
+import { StubEmbeddingProvider } from './helpers/fakes';
 import { buildProjectsService } from './helpers/services';
 
 /**
- * Testcontainers nie potrafi odpalić prawdziwego sidecara TEI — port `EmbeddingProvider` istnieje
- * właśnie po to, żeby podstawić deterministyczny stub bez HTTP. `register` mapuje DOKŁADNY tekst
- * (np. treść query albo obliczony przez `chunk()` tekst chunku) na wektor; nieznany tekst dostaje
- * `fallback` (nigdy identyczny z jawnie zarejestrowanymi, żeby przypadkowo nie \"wygrał\" testu).
+ * Stub providera to `StubEmbeddingProvider` z `helpers/fakes.ts` (port `EmbeddingProvider` istnieje po to, żeby
+ * podstawić deterministyczny stub bez HTTP — testcontainers nie odpala sidecara TEI). `register` mapuje DOKŁADNY
+ * tekst (treść query albo tekst chunku z `chunk()`) na wektor; w TYM specu każdy nierejestrowany tekst dostaje
+ * `topicVector(0.9)` (nigdy identyczny z jawnie zarejestrowanymi, żeby przypadkowo nie „wygrał" testu) — stąd
+ * drugi argument konstruktora w każdym miejscu użycia stuba.
  */
-class StubEmbeddingProvider implements EmbeddingProvider {
-  readonly dim = EMBEDDING_DIM;
-  throwOnEmbed = false;
-  private readonly vectors = new Map<string, number[]>();
-  private readonly fallback = topicVector(0.9);
-
-  constructor(public model: string) {}
-
-  register(text: string, vector: number[]): void {
-    this.vectors.set(text, vector);
-  }
-
-  async embed(texts: string[]): Promise<number[][]> {
-    if (this.throwOnEmbed) {
-      throw new Error('StubEmbeddingProvider: symulowana awaria providera');
-    }
-    return texts.map((t) => this.vectors.get(t) ?? this.fallback.slice());
-  }
-
-  async health(): Promise<boolean> {
-    return !this.throwOnEmbed;
-  }
-}
 
 /** Jednostkowy wektor z kontrolowanym cosine similarity do "query topic" = topicVector(1)
  * (component0 = cos_sim, bo query ma normę 1 i zero wszędzie poza indeksem 0). */
@@ -109,7 +88,7 @@ describe('MemoryService (integration, testcontainers)', () => {
     // Provider "zawsze down" dla WSZYSTKICH istniejących (sprzed Fazy 3) testów poniżej — embedQuery
     // zawsze zwraca null, embedMemoryBestEffort zawsze null -> hybrid degeneruje się dokładnie do
     // starego zachowania FTS-only, więc te testy zostają nietknięte przez dodanie ramienia wektorowego.
-    const downProvider = new StubEmbeddingProvider('down-stub');
+    const downProvider = new StubEmbeddingProvider('down-stub', topicVector(0.9));
     downProvider.throwOnEmbed = true;
     const downEmbedding = new EmbeddingService(downProvider, config);
     memory = new MemoryService(
@@ -877,7 +856,7 @@ describe('MemoryService (integration, testcontainers)', () => {
     });
 
     it('ramię wektorowe: trafienie WYŁĄCZNIE semantyczne (D) pojawia się w wynikach, mimo zera wspólnych tokenów z query', async () => {
-      const provider = new StubEmbeddingProvider('hybrid-test-model');
+      const provider = new StubEmbeddingProvider('hybrid-test-model', topicVector(0.9));
       // SEARCH_VECTOR_CANDIDATES=2: dystraktor D (dist 0.5) zostaje w oknie kandydatów ramienia
       // wektorowego, ale F (dist 1, najdalszy) zostaje z niego wypchnięty. To SAMO w sobie NIE
       // wystarcza — RRF sumuje 1/(k+rank) po listach (przemienne), więc "S tylko w wektorze @rank1"
@@ -967,7 +946,7 @@ describe('MemoryService (integration, testcontainers)', () => {
         projectId: projectH.projectId,
       });
 
-      const throwingProvider = new StubEmbeddingProvider('throwing-model');
+      const throwingProvider = new StubEmbeddingProvider('throwing-model', topicVector(0.9));
       throwingProvider.throwOnEmbed = true;
       const { memory: throwingMemory } = buildMemoryService(throwingProvider);
 
@@ -1002,7 +981,7 @@ describe('MemoryService (integration, testcontainers)', () => {
         vector: topicVector(1),
       });
 
-      const activeProvider = new StubEmbeddingProvider('model-active-new');
+      const activeProvider = new StubEmbeddingProvider('model-active-new', topicVector(0.9));
       const { memory: activeMemory } = buildMemoryService(activeProvider);
 
       // (1) Query semantycznie IDENTYCZNE do zapisanego (stale-model) wektora, ale ZERO wspólnych
@@ -1039,7 +1018,7 @@ describe('MemoryService (integration, testcontainers)', () => {
     }
 
     it('dopasowanie: jeden wiersz z result_count>0, degraded=false', async () => {
-      const provider = new StubEmbeddingProvider('usage-instrumentation-model');
+      const provider = new StubEmbeddingProvider('usage-instrumentation-model', topicVector(0.9));
       const { memory: healthyMemory } = buildMemoryService(provider);
 
       const marker = 'instrumentacjadopasowaniemarker1';
@@ -1068,7 +1047,7 @@ describe('MemoryService (integration, testcontainers)', () => {
     });
 
     it('brak dopasowań: wiersz z result_count=0, degraded=false (prawdziwy zero-result, nie degradacja)', async () => {
-      const provider = new StubEmbeddingProvider('usage-instrumentation-model-2');
+      const provider = new StubEmbeddingProvider('usage-instrumentation-model-2', topicVector(0.9));
       const { memory: healthyMemory } = buildMemoryService(provider);
 
       const results = await healthyMemory.search({ query: 'zupelnieniepowiazanafrazainstrumentacja777' }, projectI);
@@ -1080,7 +1059,7 @@ describe('MemoryService (integration, testcontainers)', () => {
     });
 
     it('embedding provider padnięty: wiersz ma degraded=true (fail-open — search NIE rzuca)', async () => {
-      const throwingProvider = new StubEmbeddingProvider('usage-instrumentation-down-model');
+      const throwingProvider = new StubEmbeddingProvider('usage-instrumentation-down-model', topicVector(0.9));
       throwingProvider.throwOnEmbed = true;
       const { memory: downMemory } = buildMemoryService(throwingProvider);
 
@@ -1252,7 +1231,7 @@ describe('MemoryService (integration, testcontainers)', () => {
       const marker = 'graphboostorderingmarker1';
       // Provider zawsze down -> ramię wektorowe puste, ranking WYŁĄCZNIE z ts_rank FTS
       // (deterministyczne, jak w istniejących testach hybrid/decay powyżej).
-      const throwingProvider = new StubEmbeddingProvider('graph-boost-ordering-throwing');
+      const throwingProvider = new StubEmbeddingProvider('graph-boost-ordering-throwing', topicVector(0.9));
       throwingProvider.throwOnEmbed = true;
 
       const { memory: seedMemory } = buildMemoryService(throwingProvider);
@@ -1303,7 +1282,7 @@ describe('MemoryService (integration, testcontainers)', () => {
 
     it('weight=0 -> score dokładnie 1/(RRF_K+rank), krawędź między oboma trafionymi memories BEZ WPŁYWU (knob wyłącza efekt)', async () => {
       const marker = 'graphboostdisabledmarker3';
-      const throwingProvider = new StubEmbeddingProvider('graph-boost-disabled-throwing');
+      const throwingProvider = new StubEmbeddingProvider('graph-boost-disabled-throwing', topicVector(0.9));
       throwingProvider.throwOnEmbed = true;
       const { memory: zeroWeightMemory, config: zeroConfig } = buildMemoryService(throwingProvider, {
         GRAPH_BOOST_WEIGHT: 0,
@@ -1336,7 +1315,7 @@ describe('MemoryService (integration, testcontainers)', () => {
 
     it('re-rank only: pamięć POZA sfuzjowanym zbiorem (nietrafiona przez query) nigdy nie zostaje wstrzyknięta mimo krawędzi do trafionej pamięci', async () => {
       const marker = 'graphboostinjectionmarker2';
-      const throwingProvider = new StubEmbeddingProvider('graph-boost-injection-throwing');
+      const throwingProvider = new StubEmbeddingProvider('graph-boost-injection-throwing', topicVector(0.9));
       throwingProvider.throwOnEmbed = true;
       // Maksymalna dopuszczalna waga (sufit `.max(1)` w `envSchema` — §config/env.ts): re-rank-only
       // jest własnością ZBIORU, nie skali, więc wielkość wagi i tak nie decyduje o tym, czy `outside`
@@ -1412,7 +1391,7 @@ describe('MemoryService (integration, testcontainers)', () => {
     }
 
     it('ramię wektorowe (AC1): trafienie WYŁĄCZNIE semantyczne z projektu X widoczne z Y w cross, niewidoczne w trybie domyślnym', async () => {
-      const provider = new StubEmbeddingProvider('cross-project-vector-model');
+      const provider = new StubEmbeddingProvider('cross-project-vector-model', topicVector(0.9));
       const { memory: vecMemory } = buildMemoryService(provider);
 
       const query = 'crossvektorzapytanie01 usluga';
@@ -1440,7 +1419,7 @@ describe('MemoryService (integration, testcontainers)', () => {
     });
 
     it('ramię FTS-only (AC1): provider down -> cross znajduje leksykalne trafienie z X; default nie; search_events degraded+cross', async () => {
-      const throwingProvider = new StubEmbeddingProvider('cross-project-fts-throwing');
+      const throwingProvider = new StubEmbeddingProvider('cross-project-fts-throwing', topicVector(0.9));
       throwingProvider.throwOnEmbed = true;
       const { memory: ftsMemory } = buildMemoryService(throwingProvider);
 
@@ -1491,7 +1470,7 @@ describe('MemoryService (integration, testcontainers)', () => {
 
     it('graph boost (AC6/G8): krawędź w projekcie X boostuje wyniki cross pytane z Y; bez poszerzenia filtra krawędzi boost by nie zadziałał', async () => {
       const marker = 'crossgraphboostmarker04';
-      const throwingProvider = new StubEmbeddingProvider('cross-graph-boost-throwing');
+      const throwingProvider = new StubEmbeddingProvider('cross-graph-boost-throwing', topicVector(0.9));
       throwingProvider.throwOnEmbed = true;
       const { memory: seedMemory } = buildMemoryService(throwingProvider);
 
@@ -1563,7 +1542,7 @@ describe('MemoryService (integration, testcontainers)', () => {
       const marker = 'crosstopkmarker06';
       const { memory: smallMemory, config: smallConfig } = buildMemoryService(
         (() => {
-          const p = new StubEmbeddingProvider('cross-topk-throwing');
+          const p = new StubEmbeddingProvider('cross-topk-throwing', topicVector(0.9));
           p.throwOnEmbed = true;
           return p;
         })(),
@@ -1621,7 +1600,7 @@ describe('MemoryService (integration, testcontainers)', () => {
     }
 
     it('healthy provider: save zapisuje staging_embeddings dla nowego proposala', async () => {
-      const healthyProvider = new StubEmbeddingProvider('save-staging-model');
+      const healthyProvider = new StubEmbeddingProvider('save-staging-model', topicVector(0.9));
       const { memory: healthyMemory } = buildMemoryService(healthyProvider);
 
       const res = await healthyMemory.save(
@@ -1642,7 +1621,7 @@ describe('MemoryService (integration, testcontainers)', () => {
     });
 
     it('healthy provider, kind=document: staging_embeddings dostaje header dopisany do KAŻDEGO chunku (chunker document, §6 tech-stack)', async () => {
-      const healthyProvider = new StubEmbeddingProvider('save-staging-document-model');
+      const healthyProvider = new StubEmbeddingProvider('save-staging-document-model', topicVector(0.9));
       const { memory: healthyMemory } = buildMemoryService(healthyProvider);
 
       const res = await healthyMemory.save(
@@ -1665,7 +1644,7 @@ describe('MemoryService (integration, testcontainers)', () => {
     });
 
     it('provider down: save i tak tworzy proposal pending, ale BEZ wiersza staging_embeddings', async () => {
-      const downProvider = new StubEmbeddingProvider('save-staging-down-model');
+      const downProvider = new StubEmbeddingProvider('save-staging-down-model', topicVector(0.9));
       downProvider.throwOnEmbed = true;
       const { memory: downMemory } = buildMemoryService(downProvider);
 
@@ -1721,7 +1700,7 @@ describe('MemoryService (integration, testcontainers)', () => {
     });
 
     it('po ProposalsService.approve(...) -> wiersz w memories ma kind=event, source=agent, event_time == podany', async () => {
-      const provider = new StubEmbeddingProvider('event-approve-model');
+      const provider = new StubEmbeddingProvider('event-approve-model', topicVector(0.9));
       const { memory: eventMemory } = buildMemoryService(provider);
       const proposalsService = new ProposalsService(db, config, audit, new EmbeddingService(provider, config));
 
@@ -1853,7 +1832,7 @@ describe('MemoryService (integration, testcontainers)', () => {
     });
 
     it('body ponad BODY_MAX_EVENT -> validation_error', async () => {
-      const { memory: tightMemory, config: tightConfig } = buildMemoryService(new StubEmbeddingProvider('event-body-limit'), {
+      const { memory: tightMemory, config: tightConfig } = buildMemoryService(new StubEmbeddingProvider('event-body-limit', topicVector(0.9)), {
         BODY_MAX_EVENT: 10,
       });
       expect(tightConfig.get('BODY_MAX_EVENT')).toBe(10);

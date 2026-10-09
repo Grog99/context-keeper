@@ -231,7 +231,7 @@ Efekt: brak jednego, **zaufanego** źródła prawdy, do którego wielu agentów 
 - **Adopcja:** agent realnie sięga do pamięci zamiast pytać od zera (rosnący `access_count`).
 - **Higiena sekretów:** wykryte sekrety nie wchodzą do store'u; każda blokada → sygnał rotacji dla operatora.
 
-**Strategia testów** (skupiona na rdzeniu, nie pełne pokrycie — szczegóły [`tech-stack.md`](tech-stack.md) §15): priorytet 1 = transakcja akceptacji + optimistic-concurrency; priorytet 2 = scope/IDOR (zależny od typu tokena, v1.5); dalej skaner sekretów, nocny job, retrieval, `recall@k`, cienki MCP e2e (zarazem smoke łączności bearer).
+**Strategia testów** (skupiona na rdzeniu, nie pełne pokrycie — strategia w [`tech-stack.md`](tech-stack.md) §15, reguły w [`testing.md`](testing.md)): priorytet 1 = transakcja akceptacji + optimistic-concurrency; priorytet 2 = scope/IDOR (zależny od typu tokena, v1.5); dalej skaner sekretów, nocny job, retrieval, migracje i kontrakt MCP (e2e przez oficjalny SDK, zarazem smoke łączności bearer). Smoke `recall@k` jeszcze nie istnieje (backlog: tuning retrievalu).
 
 ---
 

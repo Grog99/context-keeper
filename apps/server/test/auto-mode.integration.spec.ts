@@ -37,6 +37,7 @@ import { AutoApprovalRefusedError, autoModeActor } from '../src/proposals/auto-m
 import { ProposalError } from '../src/proposals/proposals.errors';
 import { ProposalsService } from '../src/proposals/proposals.service';
 import { UsageService } from '../src/usage/usage.service';
+import { StubEmbeddingProvider } from './helpers/fakes';
 import { buildProjectsService } from './helpers/services';
 
 /** Wektor w płaszczyźnie osi (a, b) obrócony o kąt `t` (a, b < FIRST_FREE_AXIS — poza osiami stuba). */
@@ -52,42 +53,6 @@ function angleFor(distance: number): number {
 }
 
 const FIRST_FREE_AXIS = 10;
-
-/**
- * Stub providera: teksty zarejestrowane dostają wskazany wektor, KAŻDY inny tekst — świeżą, parami
- * ortogonalną oś jednostkową (dystans 1 do wszystkiego), więc kolejne zapisy o różnej treści nigdy nie są
- * względem siebie prawie-duplikatami (w odróżnieniu od jednego wspólnego „FAR" z testów A1).
- */
-class StubEmbeddingProvider implements EmbeddingProvider {
-  readonly dim = EMBEDDING_DIM;
-  throwOnEmbed = false;
-  delayMs = 0;
-  private readonly known = new Map<string, number[]>();
-  private nextAxis = FIRST_FREE_AXIS;
-  constructor(public model: string) {}
-
-  register(text: string, vector: number[]): void {
-    this.known.set(text, vector);
-  }
-
-  async embed(texts: string[]): Promise<number[][]> {
-    if (this.delayMs > 0) await new Promise((r) => setTimeout(r, this.delayMs));
-    if (this.throwOnEmbed) throw new Error('StubEmbeddingProvider: symulowana awaria providera');
-    return texts.map((t) => {
-      let v = this.known.get(t);
-      if (!v) {
-        v = new Array<number>(EMBEDDING_DIM).fill(0);
-        v[this.nextAxis++] = 1;
-        this.known.set(t, v);
-      }
-      return v;
-    });
-  }
-
-  async health(): Promise<boolean> {
-    return !this.throwOnEmbed;
-  }
-}
 
 function register(
   provider: StubEmbeddingProvider,
@@ -142,7 +107,10 @@ describe('Auto mode — ścieżka zapisu i bezpieczniki (A2, integration, testco
       autoMode,
       autoModeDailyLimit: opts.limit ?? 50,
     };
-    const provider = new StubEmbeddingProvider(`auto-mode-model-${counter}`);
+    // Teksty zarejestrowane dostają wskazany wektor, KAŻDY inny tekst — świeżą, parami ortogonalną oś jednostkową od
+    // `FIRST_FREE_AXIS` (dystans 1 do wszystkiego), więc kolejne zapisy o różnej treści nigdy nie są względem siebie
+    // prawie-duplikatami (w odróżnieniu od jednego wspólnego „FAR" z testów A1).
+    const provider = new StubEmbeddingProvider(`auto-mode-model-${counter}`, { freshAxisFrom: FIRST_FREE_AXIS });
     return { ctx, provider, model: provider.model, ...buildServices(provider, opts.env) };
   }
 
