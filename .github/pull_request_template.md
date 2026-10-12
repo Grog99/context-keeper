@@ -42,6 +42,7 @@ opisz **wprost**, razem z warunkami, pod którymi nowa reguła obowiązuje.
 - [ ] `pnpm verify` (lint + typecheck + testy całego monorepo) — wynik:
 - [ ] Niezależny przegląd diffu (Codex CLI, `codex exec -s read-only`) — werdykt:
 - [ ] E2E na żywej aplikacji — co przeklikane:
+- [ ] Dokumentacja (`context/`, README, `AGENTS.md`, `docs/`) — co zaktualizowano albo dlaczego bez zmian; werdykt Codex docs:
 
 ## Znane ograniczenia / follow-upy
 

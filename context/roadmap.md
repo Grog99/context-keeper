@@ -113,11 +113,12 @@ systemie, kanon dogania kod zbiorczo po wersji (v1.5 wymagało osobnego PR #44),
 chodzi tylko lokalnie. Po v1.7: testy przed kodem i tylko tam, gdzie się opłacają, spec przed
 ekranem, dokumentacja aktualizowana w tym samym przepływie co zmiana, CI jako bramka merge'a.
 
-- **Konwencja testów i test-first** ⬜ — spisana konwencja: testy dla **najważniejszych miejsc**
-  (kontrakt MCP, human-gate, scope i auth, retrieval, migracje), przemyślane — nie pokrycie dla
-  pokrycia i nie zapychanie aplikacji testami; co mockować i gdzie leżą. W przepływie
-  `plan-implement` **osobny agent pisze testy przed implementacją** (z planu, na czerwono), a
-  **osobny agent implementuje**, aż przejdą — builder nie pisze testów pod własny kod.
+- **Konwencja testów i test-first** ✅ — [`testing.md`](testing.md): testy dla **najważniejszych
+  miejsc** (human-gate, scope i auth, kontrakt MCP, retrieval, migracje), przemyślane — nie pokrycie
+  dla pokrycia; czego nie testować, co mockować (ręczne fake'i w `helpers/fakes.ts`, bez mocka bazy)
+  i gdzie leżą testy; bugfix zaczyna się od testu regresji. W `plan-implement` plan ma sekcję
+  „Testy", **osobny test-writer (Opus) pisze testy przed implementacją** (na czerwono, zamrożone w
+  indeksie git), a **builder (Sonnet) implementuje**, aż przejdą, i nie edytuje testów.
 - **Luki w testach z przeglądu technicznego** ✅ — Vitest w `apps/dashboard` (środowisko node;
   `pnpm verify` obejmuje obie aplikacje), strażnicy logiki decyzji recenzenta
   (`computeInlineWordDiff`, `conflictTargetAge`/`swapDirectionLabel`, `percentShares`), throttle
@@ -126,9 +127,13 @@ ekranem, dokumentacja aktualizowana w tym samym przepływie co zmiana, CI jako b
 - **Design dla każdego ekranu** ⬜ — `design-system.md` §9 dostaje sekcje brakujących ekranów
   (Pomiary, Operacje, Logowanie), plus reguła na przyszłość: nowy ekran albo większa zmiana UI
   najpierw dostaje spec w design systemie (i makietę), dopiero potem kod.
-- **Aktualizacja dokumentacji przez agenta** ⬜ — agent dokumentacji jako etap przepływu po
-  implementacji: aktualizuje kanon (`context/`), README i `AGENTS.md` pod to, co weszło, zamiast
-  zbiorczej synchronizacji po zamknięciu wersji.
+- **Aktualizacja dokumentacji przez agenta** ✅ — w `plan-implement` plan ma sekcję „Dokumentacja"
+  (albo „Brak zmian w dokumentacji, bo …", co pomija etap), a po przejściu weryfikacji **agent docs
+  (Sonnet, Stage 5b)** aktualizuje kanon (`context/` bez archiwum), README, `AGENTS.md` i `docs/` pod
+  to, co weszło. Granicę ścieżek sprawdza orkiestrator, diff docs przechodzi własną rundę Codexa, a
+  kandydatów do `save_memory` proponuje człowiekowi orkiestrator. Szablon PR ma czwarty checkbox o
+  dokumentacji, `AGENTS.md` regułę „docs w tym samym PR", a `prepare-ticket` nie pozwala wycinać docs
+  z „Poza zakresem".
 - **CI** ✅ — `.github/workflows/verify.yml`: `pnpm verify` na każdym PR i pushu do `main`
   (`ubuntu-latest`, testy integracyjne przez testcontainers), job `verify` jako wymagany check w
   ochronie `main`. Deploy na Coolify zostaje automatyczny po wejściu zmian na `main` — świadomie bez
