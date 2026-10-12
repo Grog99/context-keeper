@@ -124,7 +124,9 @@ directory if it does not exist. Requirements:
 
 - acceptance criteria are **testable** — a sentence nobody can check is not a criterion;
 - the scope carries an explicit „Poza zakresem"; „nie omówiliśmy tego" is not the same as „nie
-  robimy tego";
+  robimy tego" — but never put documentation updates there: the docs scope is decided by the
+  „Dokumentacja" section of the plan in `plan-implement`, and a ticket that cuts docs would switch off
+  its docs stage (v1.5 did, which ended in the bulk PR #44);
 - every ustalenie carries its „dlaczego" and the rejected alternative;
 - code touch-points carry `file:line` verified in the source;
 - the template's opening HTML comment is filling guidance — it does **not** go into the ticket.

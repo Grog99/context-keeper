@@ -52,6 +52,10 @@ Zebrane z audytu transkryptów sesji ([`agent-patterns-report.md`](context/agent
   jest wymaganym checkiem przed merge'em do `main` — lokalny przebieg to szybsza pętla, nie zamiennik.
 - **Testy:** co testować, czego nie, co mockować i gdzie leżą testy → [`context/testing.md`](context/testing.md);
   obowiązuje każdego agenta. Bugfix zaczyna się od testu odtwarzającego błąd (najpierw czerwony, potem poprawka).
+- **Dokumentacja w tym samym PR:** zmiana zachowania (API, narzędzia MCP, konfiguracja, przepływ pracy,
+  skille) idzie razem z aktualizacją docs, których dotyczy — kanon `context/`, `README.md`, `AGENTS.md`,
+  `docs/` — w tym samym PR, także poza `plan-implement` (tam robi to etap docs, Stage 5b). Domknięcie
+  wersji (archiwum roadmapy, linia statusu README) zostaje przy `roadmap-reconcile`.
 - **Duże zadania:** faza typu „cała implementacja w jednym ciągłym przebiegu subagenta" (setki
   tysięcy tokenów, dziesiątki użyć narzędzi) zwiększa ryzyko dryfu kontekstu i zostawia mało
   naturalnych punktów na przegląd. Rozdzielaj plan → implementację → weryfikację na osobne
