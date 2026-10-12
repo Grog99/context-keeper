@@ -2,13 +2,13 @@
 
 Prosty przegląd: co robimy po kolei i gdzie jesteśmy. Szczegóły → [`prd.md`](prd.md), [`tech-stack.md`](tech-stack.md), [`design-system.md`](design-system.md).
 
-**Aktualizacja:** 2026-10-08 · **Etap:** v1.6 domknięte (auto mode + nadzór) → wchodzimy w **v1.7** (proces i jakość).
+**Aktualizacja:** 2026-10-12 · **Etap:** v1.7 domknięte (proces i jakość) → wchodzimy w **v1.8** (agenci i projekty).
 
 Legenda: ✅ zrobione · 🔨 w toku · ⬜ przed nami
 
-> Pełne opisy zakresu faz 0 → v1.6 zarchiwizowane w
-> [`archive/roadmap-2026-10-08-v1.6-complete.md`](archive/roadmap-2026-10-08-v1.6-complete.md).
-> Wcześniejsze snapshoty: [v1.5](archive/roadmap-2026-10-06-v1.5-complete.md) · [v1.4](archive/roadmap-2026-10-03-v1.4-complete.md) · [v1.3](archive/roadmap-2026-07-29-v1.3-complete.md) ·
+> Pełne opisy zakresu faz 0 → v1.7 zarchiwizowane w
+> [`archive/roadmap-2026-10-12-v1.7-complete.md`](archive/roadmap-2026-10-12-v1.7-complete.md).
+> Wcześniejsze snapshoty: [v1.6](archive/roadmap-2026-10-08-v1.6-complete.md) · [v1.5](archive/roadmap-2026-10-06-v1.5-complete.md) · [v1.4](archive/roadmap-2026-10-03-v1.4-complete.md) · [v1.3](archive/roadmap-2026-07-29-v1.3-complete.md) ·
 > [v1.2](archive/roadmap-2026-07-27-v1.2-complete.md) ·
 > [v1](archive/roadmap-2026-07-23-v1-complete.md).
 
@@ -103,48 +103,78 @@ Legenda: ✅ zrobione · 🔨 w toku · ⬜ przed nami
 - **Odchylenie od planu:** strojenie limitów nocnego jobu (C2) → [`backlog.md`](backlog.md).
 - **Poza planem:** parytet zmiennych env w trzech plikach compose + test i reguła w `AGENTS.md`.
 
+### v1.7 — Proces i jakość
+
+- **Konwencja testów i test-first** — [`testing.md`](testing.md) (testy tam, gdzie się opłacają);
+  w `plan-implement` osobny test-writer pisze testy na czerwono przed implementacją.
+- **Luki w testach z przeglądu** — Vitest w `apps/dashboard`, strażnicy logiki recenzenta, throttle
+  logowania, macierz portów `surface.middleware` (dług #11–#13).
+- **Spec przed ekranem** — `design-system.md` §9.11 Operacje, §9.12 Logowanie i §12 „Spec przed
+  kodem" egzekwowany w `plan-implement`. **Odchylenie:** szkic ASCII w §9 zamiast klikalnej makiety.
+- **Dokumentacja w tym samym przepływie** — agent docs (Stage 5b) w `plan-implement`, checkbox w
+  szablonie PR, reguła w `AGENTS.md`.
+- **CI** — `.github/workflows/verify.yml`: `pnpm verify` jako wymagany check przed merge'em do `main`.
+
 ---
 
-## v1.7 — Proces i jakość ⬜
+## v1.8 — Agenci i projekty ⬜
 
-**Cel fazy:** repo rozwijane głównie przez agentów potrzebuje bramek, które nie zależą od pamięci
-człowieka ani agenta. Dziś builder pisze testy pod własny kod, ekrany powstają bez specu w design
-systemie, kanon dogania kod zbiorczo po wersji (v1.5 wymagało osobnego PR #44), a `pnpm verify`
-chodzi tylko lokalnie. Po v1.7: testy przed kodem i tylko tam, gdzie się opłacają, spec przed
-ekranem, dokumentacja aktualizowana w tym samym przepływie co zmiana, CI jako bramka merge'a.
+**Cel fazy:** domknąć bugi z przeglądu UX (jeden z nich omija human-gate), dać agentom dwie brakujące
+rzeczy — dziennik pracy i auth dla klientów bez stałego tokena — oraz sprawić, żeby przy wielu
+projektach dało się je odróżnić na pierwszy rzut oka. Zmiany UI zaczynają się od specu w
+[`design-system.md`](design-system.md) (§12).
 
-- **Konwencja testów i test-first** ✅ — [`testing.md`](testing.md): testy dla **najważniejszych
-  miejsc** (human-gate, scope i auth, kontrakt MCP, retrieval, migracje), przemyślane — nie pokrycie
-  dla pokrycia; czego nie testować, co mockować (ręczne fake'i w `helpers/fakes.ts`, bez mocka bazy)
-  i gdzie leżą testy; bugfix zaczyna się od testu regresji. W `plan-implement` plan ma sekcję
-  „Testy", **osobny test-writer (Opus) pisze testy przed implementacją** (na czerwono, zamrożone w
-  indeksie git), a **builder (Sonnet) implementuje**, aż przejdą, i nie edytuje testów.
-- **Luki w testach z przeglądu technicznego** ✅ — Vitest w `apps/dashboard` (środowisko node;
-  `pnpm verify` obejmuje obie aplikacje), strażnicy logiki decyzji recenzenta
-  (`computeInlineWordDiff`, `conflictTargetAge`/`swapDirectionLabel`, `percentShares`), throttle
-  logowania (serwis + throttle-przed-hasłem w `AuthController`) i macierz portów
-  `surface.middleware` (dług #11–#13).
-- **Design dla każdego ekranu** ⬜ — `design-system.md` §9 dostaje sekcje brakujących ekranów
-  (Pomiary, Operacje, Logowanie), plus reguła na przyszłość: nowy ekran albo większa zmiana UI
-  najpierw dostaje spec w design systemie (i makietę), dopiero potem kod.
-- **Aktualizacja dokumentacji przez agenta** ✅ — w `plan-implement` plan ma sekcję „Dokumentacja"
-  (albo „Brak zmian w dokumentacji, bo …", co pomija etap), a po przejściu weryfikacji **agent docs
-  (Sonnet, Stage 5b)** aktualizuje kanon (`context/` bez archiwum), README, `AGENTS.md` i `docs/` pod
-  to, co weszło. Granicę ścieżek sprawdza orkiestrator, diff docs przechodzi własną rundę Codexa, a
-  kandydatów do `save_memory` proponuje człowiekowi orkiestrator. Szablon PR ma czwarty checkbox o
-  dokumentacji, `AGENTS.md` regułę „docs w tym samym PR", a `prepare-ticket` nie pozwala wycinać docs
-  z „Poza zakresem".
-- **CI** ✅ — `.github/workflows/verify.yml`: `pnpm verify` na każdym PR i pushu do `main`
-  (`ubuntu-latest`, testy integracyjne przez testcontainers), job `verify` jako wymagany check w
-  ochronie `main`. Deploy na Coolify zostaje automatyczny po wejściu zmian na `main` — świadomie bez
-  gatingu, bo merge i tak wymaga zielonego `verify`.
+- **Bugi z przeglądu UX** ⬜ — najpierw, każdy od testu regresji (ścieżki względem
+  `apps/dashboard/src/`):
+  - **akord `g ‹litera›` odpala akcje kolejki** — `g a` (skok do Audytu) **zatwierdza** zaznaczoną
+    propozycję, `g s` klika „Zatwierdź jako zamiennik", `g k` przesuwa zaznaczenie; oba handlery
+    słuchają na `document`, `useQueueKeyboard` nie wie o uzbrojonym akordzie
+    (`hooks/useKeyboard.ts`). Odtworzone w przeglądarce. Omija human-gate bez potwierdzenia;
+  - skrót `A` na nieaktualnej propozycji wysyła request (toast 409) — `handleApprove` nie sprawdza
+    `detail.stale` (`screens/QueueScreen.tsx`);
+  - klik w podpis „Tagi" w „Nowa pamięć" usuwa pierwszy tag — pole jest `<label>`
+    (`screens/HumanCreateDialog.tsx`);
+  - Audyt nigdy nie pokazuje ładowania — `isLoading && !isFetching` w React Query v5 jest zawsze
+    fałszem (`screens/AuditScreen.tsx`);
+  - slug projektu niewidoczny — `MonoId label="slug"` renderuje słowo „slug"
+    (`screens/ProjectsScreen.tsx`, `screens/ProjectSettingsDialog.tsx`);
+  - globalny `:focus-visible` w `globals.css` przebija `outline-none` (poza warstwą, później w
+    pliku) — przenieść do `@layer base` i przejść ekrany, czy fokus nigdzie nie zniknął.
+- **Przełącznik projektów od nowa** ⬜ — dziś nieczytelny: nagłówek grupy „Projekty" wygląda jak
+  pozycja (styl nagłówków jest tylko w palecie ⌘K), brak ✓ przy aktywnym kontekście, brak separatora
+  „Wszystkie/Global" ↔ projekty, brak sluga, input 44 px z ramką fokusu wokół samego pola, „global"
+  w triggerze vs „Global" na liście, trigger bez etykiety dostępności. Spec w §9.6 + szkic ASCII.
+- **Znak projektu (`ProjectAvatar`)** ⬜ — domyślnie **automatyczny**: monogram 1–2 znaki + kolor
+  wyliczony ze sluga (działa bez klikania, także dla projektów od agentów przez `create_project`);
+  **opcjonalnie ręczny**: ikona z kuratorowanego zestawu (~24 z lucide) i kolor w ustawieniach
+  projektu. **Osobna paleta** (~8 przytłumionych odcieni, tokeny light/dark) spoza statusów (§2.2) i
+  `kind` (§2.3). Wszędzie, gdzie pojawia się projekt: przełącznik, wiersze Kolejki i Pamięci,
+  Projekty, Audyt. Migracja: nullowalne `projects.icon` / `projects.color`. Spec w §8.2 + §9.3.
+  Decyzja 2026-10-12 (pamięć projektu `mem_ymwfih1jboy9`).
+- **Ikona aplikacji** ⬜ — dziś SPA nie ma żadnej. Znak spójny z design systemem: favicon (SVG +
+  fallback PNG/ICO), `apple-touch-icon`, wersja do README / GitHuba; przy okazji `document.title` per
+  ekran (dziś kilka kart wygląda tak samo).
+- **Typ pamięci `journal`** ⬜ — wpis dodawany przez agenta po każdym zrobionym zadaniu (co zrobiono,
+  na czym skończono, co zostało otwarte). **Do rozstrzygnięcia przed implementacją** (ticket przez
+  `prepare-ticket`): relacja do istniejącego `kind: event` (osobny `kind` czy `event` z
+  konwencją/tagiem), czy wpisy idą przez kolejkę akceptacji czy omijają human-gate, jak nie zalać
+  retrievalu dziennikiem (osobny filtr / niższa waga w rankingu, retencja), oraz jak wymusić zapis
+  „po zadaniu" (opis narzędzia MCP, `AGENTS.md`; hook Stop w pluginie Claude Code zostaje w
+  backlogu razem z pluginem).
+- **OAuth 2.1 + PKCE dla MCP** ⬜ — dla klientów Desktop / web-connector. Projektować od razu pod
+  wymagania nowej specyfikacji MCP (2026-07-28): walidacja issuera, `application_type` w Dynamic
+  Client Registration, scope accumulation, credential binding — nie pod stary model. Na obecnym SDK
+  v1; migracja na SDK v2 zostaje warunkowa w [`backlog.md`](backlog.md).
 
 ## Backlog ⬜
 
-Rzeczy świadomie odłożone poza v1.7 → [`backlog.md`](backlog.md): plugin Claude Code (warunkowy),
-OAuth 2.1 + PKCE, migracja na MCP SDK v2, tuning retrievalu, per-user auth (następny krok po tokenie
-konta), token tylko do odczytu, powiadomienia o kolejce, filtr kolejki dla propozycji projektów, strojenie limitów nocnego jobu, pamięć usera, rewokacja sesji, skalowanie
-poziome / interop, oraz pozostały dług techniczny 🟠/🟢 z przeglądu ([`tech-review.md`](tech-review.md)).
+Rzeczy świadomie odłożone poza v1.8 → [`backlog.md`](backlog.md): plugin Claude Code (warunkowy),
+migracja na MCP SDK v2 (warunkowa), tuning retrievalu, per-user auth (następny krok po tokenie
+konta), token tylko do odczytu, powiadomienia o kolejce, filtr kolejki dla propozycji projektów,
+strojenie limitów nocnego jobu, reszta przeglądu UX dashboardu (stany błędu i sesji, klawiatura i
+fokus w kolejce, dialogi, filtry w URL, wąskie okno, dostępność), pamięć usera, rewokacja sesji,
+skalowanie poziome / interop, oraz pozostały dług techniczny 🟠/🟢 z przeglądu
+([`tech-review.md`](tech-review.md)).
 
 **Wycięte** (nie „odłożone"): Memory Worth — prune po współwystąpieniu z sukcesem/porażką. Sygnał outcome
 jest z natury zaszumiony (sesja się udała ≠ ta pamięć pomogła), a koszt to nowe narzędzie MCP wymagające
