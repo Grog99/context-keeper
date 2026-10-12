@@ -119,13 +119,23 @@ Prompt it to return, in this order:
      builder may not edit tests.
    - Or state explicitly `Brak testów, bo …` with the reason (docs, skills, pure config).
    - Behaviours, not implementation details, and only where `context/testing.md` says tests pay off.
-5. **Verification criteria** — how success will be checked (which tests, which command paths, which
+5. **Design** — whether the task crosses the spec-before-code threshold in `context/design-system.md` §12
+   (new screen or route, new section or panel on a screen, new dialog or product component (§8.2), change
+   of layout or navigation).
+   - If it does: the full proposed spec text — the §9 section (for a product component, the §8.2 entry):
+     what is visible, states, copy, behaviour, shortcuts, plus an ASCII layout sketch like §9.0/§9.1, with
+     any deliberate deviation from the design-system rules named. Writing it into
+     `context/design-system.md` is **step 1** of Concrete steps; the UI code follows the spec.
+   - Or state explicitly `Brak zmiany UI powyżej progu, bo …` with the reason (no UI touched, copy, spacing,
+     colours within tokens, a bugfix that does not change behaviour).
+6. **Verification criteria** — how success will be checked (which tests, which command paths, which
    end-to-end flow to exercise).
-6. **Open questions** — every ambiguity or decision that needs the user. If there are none, say so
+7. **Open questions** — every ambiguity or decision that needs the user. If there are none, say so
    explicitly.
 
-Tell it to read `CLAUDE.md`, `context/testing.md` (the test convention) and relevant existing code so the
-plan matches repo conventions.
+Tell it to read `CLAUDE.md`, `context/testing.md` (the test convention), `context/design-system.md` (the UI
+canon; §12 holds the spec-before-code threshold) and relevant existing code so the plan matches repo
+conventions.
 
 When it returns, **write the plan to a working file** in your scratchpad directory (its absolute path is in
 your environment), e.g. `<scratchpad>/plan-<slug>.md`. This file is the single source of truth passed to
@@ -151,6 +161,10 @@ without that yes.
 The plan's **Testy** section is part of what the user accepts here. It decides whether Stage 2b runs: a list
 of behaviours means the test-writer runs next; `Brak testów, bo …` means it is skipped. If the user changes
 the list, fold the change into the plan file before moving on.
+
+The plan's **Design** section is accepted at the same gate — there is no separate design stage. When it
+carries a spec, show the user the proposed §9 text with its ASCII sketch itself, not a summary: this is where
+the UI is approved before any code exists. If the user changes the spec, fold it into the plan file.
 
 ### Create the task branch — after the go-ahead
 
@@ -332,10 +346,16 @@ Codex to:
    `context/testing.md` too): is every listed behaviour pinned, are `czerwony`/`strażnik` honoured, does each
    test assert observable behaviour (not just an import), are there tests beyond the list, are mocks used per
    `testing.md`? Report a test defect with the **test file path in `file`**.
-4. Report only concrete, reproducible defects — file, symptom, and evidence (failing input/state,
+4. Check the UI against the plan's **Design** section (give the absolute path of `context/design-system.md`):
+   every UI change in the diff (`apps/dashboard/src/**`) must match the spec, and that spec must be added or
+   updated in `context/design-system.md` **in the same diff**. A UI change above the §12 threshold without a
+   matching spec change — including when the plan said `Brak zmiany UI powyżej progu` — is a defect. Report
+   a UI-vs-spec mismatch with the UI file in `file`, a missing or stale spec with `context/design-system.md`
+   in `file`.
+5. Report only concrete, reproducible defects — file, symptom, and evidence (failing input/state,
    expected-vs-actual, or the plan requirement violated). Vague "looks risky" notes are not defects.
-5. Note that `pnpm verify` already passed, so lint/type/test failures are not what it is hunting for.
-6. Return the verdict in the required JSON shape and nothing else.
+6. Note that `pnpm verify` already passed, so lint/type/test failures are not what it is hunting for.
+7. Return the verdict in the required JSON shape and nothing else.
 
 Then run it, reading the prompt from stdin (`-`):
 

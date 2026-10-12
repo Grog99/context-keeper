@@ -52,6 +52,10 @@ Zebrane z audytu transkryptów sesji ([`agent-patterns-report.md`](context/agent
   jest wymaganym checkiem przed merge'em do `main` — lokalny przebieg to szybsza pętla, nie zamiennik.
 - **Testy:** co testować, czego nie, co mockować i gdzie leżą testy → [`context/testing.md`](context/testing.md);
   obowiązuje każdego agenta. Bugfix zaczyna się od testu odtwarzającego błąd (najpierw czerwony, potem poprawka).
+- **Spec przed ekranem:** nowy ekran lub route, nowa sekcja albo panel, nowy dialog albo komponent produktowy
+  i zmiana układu lub nawigacji zaczynają się od specu w [`context/design-system.md`](context/design-system.md)
+  (sekcja w §9: opis + szkic ASCII) — próg, forma i wyjątki w §12; obowiązuje każdego agenta. Spec zmienia
+  się w tym samym diffie co kod UI.
 - **Duże zadania:** faza typu „cała implementacja w jednym ciągłym przebiegu subagenta" (setki
   tysięcy tokenów, dziesiątki użyć narzędzi) zwiększa ryzyko dryfu kontekstu i zostawia mało
   naturalnych punktów na przegląd. Rozdzielaj plan → implementację → weryfikację na osobne

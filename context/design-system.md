@@ -1,6 +1,6 @@
 # Context Keeper — Design System & UI
 
-**Wersja:** v1 (Faza 1) · **Data:** 2026-07-22
+**Wersja:** v1.7 (reguła „spec przed kodem" — §12; ekrany Operacje i Logowanie — §9.11, §9.12) · **Data:** 2026-10-12 (pierwsza wersja: v1, Faza 1, 2026-07-22)
 **Źródła:** [`prd.md`](prd.md) (co/dlaczego), [`tech-stack.md`](tech-stack.md) (jak) · **Stack UI:** React SPA + **Tailwind CSS + shadcn/ui** (Radix) + **lucide-react**
 
 > Ten dokument opisuje **jak wygląda i jak się zachowuje** dashboard recenzenta — jedyna powierzchnia dla człowieka.
@@ -600,6 +600,113 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 - **Sekcja „Auto mode"** (`AutoModeMetricsTable`): akapit objaśniający (los liczony wg czasu auto-akceptacji do dziś; o kubełku decyduje pierwsza akcja spoza auto mode na tej pamięci, późniejsza auto-korekta go nie zmienia; świeże wpisy zaniżają odsetki; zawrócone = skierowane przez bezpiecznik do kolejki, propozycja z kilkoma powodami liczy się przy każdym) i tabela. Kolumny: Projekt · Typ · Auto · Przycięte · Nadpisane · Zarchiwizowane · Cofnięte · Nietknięte · Zawrócone. **Dwa wiersze na projekt:** „utworzenia" (`create`) i „korekty" (`update`); komórka projektu (`rowSpan=2`) niesie nazwę + `Badge variant="info"` „auto" gdy auto mode jest dziś włączony, inaczej przygaszone „wyłączony" (historia z zakresu nadal widoczna). Komórki kubełków: `{pct}%` + liczba w mono, `tabular-nums`, procenty całkowite sumujące się dokładnie do 100 (największa reszta, `percentShares`); brak auto-akceptacji danego typu → „—". „Zawrócone" (`rowSpan=2`): liczba propozycji + lista „powód · n" (krótkie etykiety). Tabela przewija się poziomo wewnątrz kontenera na wąskim ekranie.
 - **Pusty stan:** ekran jest „pusty" dopiero, gdy brak wyszukiwań, decyzji człowieka **i** danych auto mode; same dane auto mode (bez wyszukiwań) pokazują ekran. Sekcja „Auto mode" bez danych (przy innych danych na ekranie): „Brak auto-akceptacji i zawróceń w tym zakresie."
 
+### 9.11 Operacje (v1.1) — ręczne czynności administracyjne
+
+```
+┌ główny obszar AppShell (§9.0) · ScreenContainer width="prose" ───────────────┐
+│ Operacje                                                                     │
+│ Rzadkie, uprzywilejowane czynności administracyjne — poza codziennym flow    │
+│ recenzenta w Kolejce.                                                        │
+│ ┌ karta ─────────────────────────────────────────────────────────────────┐   │
+│ │ Nocny job                                                              │   │
+│ │ Proposer dedup/merge + prune … krok LLM (gdy włączony w Ustawieniach)  │   │
+│ │ … wynik ląduje w Kolejce, nic nie jest zatwierdzane automatycznie …    │   │
+│ │                                                                        │   │
+│ │ [🔧 Uruchom nocny job]      w trakcie: [🔧 Uruchamianie…] (disabled)   │   │
+│ └────────────────────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────────────────┘
+          toast (bottom-center), po odpowiedzi serwera:
+          success │ +3 propozycji · merge 1 · prune 2 · wycofano 0 · sprzeczności: 1
+          info    │ Nocny job już trwa (pominięto) — poczekaj na zakończenie …
+          error   │ ‹describeApiError›
+```
+
+- **Route/label:** `/operacje`, „Operacje" (ikona `wrench`), skrót `g o`, pozycja w palecie `⌘K`. W nawigacji
+  railu (§9.0) między „Pomiary" a „Onboarding". Ekran nie czyta `ContextSwitcher` — przycisk wysyła żądanie
+  bez parametrów.
+- **Rama:** `ScreenContainer width="prose"`; `h1` „Operacje" (`text-xl`), pod nim lead w `text-muted-foreground`:
+  „Rzadkie, uprzywilejowane czynności administracyjne — poza codziennym flow recenzenta w Kolejce." Jedna
+  karta `rounded-lg border bg-surface p-4` — ten sam styl co karta „Model LLM" w Ustawieniach (§9.9).
+- **Karta „Nocny job":** `h2` „Nocny job" (`text-sm font-semibold`) i opis (`text-xs`, muted): przebieg to
+  proposer dedup/merge + prune na zatwierdzonych faktach; gdy krok LLM jest włączony w Ustawieniach (§9.9),
+  model dodatkowo ocenia świeże fakty i szuka par o sprzecznej treści; wynik ląduje w Kolejce jak każda inna
+  propozycja, nic nie jest zatwierdzane automatycznie; normalnie przebieg odpala zewnętrzny scheduler. Pod
+  opisem przycisk `secondary` z ikoną `wrench`: „Uruchom nocny job". Bez dialogu potwierdzenia.
+- **Uruchomienie:** klik → `POST /api/nightly/run` — ten sam `NightlyService.run()` co CLI `run-nightly`.
+  Żądanie jest synchroniczne i trwa do końca przebiegu; przez ten czas przycisk jest `disabled` z etykietą
+  „Uruchamianie…" (ochrona przed podwójnym kliknięciem po stronie klienta — równoległy przebieg i tak
+  odbija się od advisory locka na serwerze).
+- **Feedback wyłącznie toastem** (bez panelu wyniku na ekranie — decyzja z v1.1); toast na dole pośrodku:
+  - **sukces** → `toast.success` z licznikami: „+{created} propozycji · merge {mergeProposed} · prune
+    {pruneProposed} · wycofano {withdrawn}"; gdy detektor LLM prune coś zaproponował, dochodzi
+    „ · LLM: usuń {llmPruneDeleteProposed} · skróć {llmPruneUpdateProposed}"; gdy detektor sprzeczności coś
+    zaproponował — „ · sprzeczności: {llmConflictProposed}". Przy zerach dopiski LLM znikają w całości.
+  - **wariant `skipped-locked`** (inny przebieg trzyma lock; serwer odpowiada 200, nie błędem) →
+    `toast.info` „Nocny job już trwa (pominięto) — poczekaj na zakończenie równoległego przebiegu."
+  - **błąd** → `toast.error` z `describeApiError` (np. 401 „Sesja wygasła — zaloguj się ponownie.", inaczej
+    komunikat serwera albo „Coś poszło nie tak. Spróbuj ponownie."). Przebieg zakończony wyjątkiem trafia
+    tutaj — serwer rzuca błąd dalej, a status `failed` zapisuje tylko w audycie (`nightly_run`).
+- **Odświeżenie:** po każdej odpowiedzi 2xx (także `skipped-locked`) ekran invaliduje zapytania `proposals`
+  (lista i detal Kolejki) i `metrics` (health strip, w tym kafelek „Nocny job", oraz badge Kolejki w railu).
+  Po błędzie nic nie jest invalidowane.
+- **Odstępstwa (odnotowane w v1.7, kod bez zmian):**
+  - lead ma `text-[13.5px]` (wartość spoza skali §3, ta sama co pozycje railu), a opis karty margines
+    `mb-3.5` (14px — poza krokiem 4px z §4);
+  - karta ma `rounded-lg`, choć §4 daje panelom `md`, a `lg` rezerwuje dla dialogów — jak karta w §9.9;
+  - ekran stoi w nawigacji kontekstowej railu (§9.0), choć `ContextSwitcher` go nie dotyczy — jak Pomiary (§9.10);
+  - błąd pokazuje tylko toast, a formularz Ustawień (§9.9) pokazuje błędy API także inline — tu
+    feedback wyłącznie toastem to decyzja z v1.1.
+- Implementacja: [`screens/OperacjeScreen.tsx`](../apps/dashboard/src/screens/OperacjeScreen.tsx).
+
+### 9.12 Logowanie (v1) — poza `AppShell`
+
+```
+┌ cały viewport · bg-background · bez AppShell (rail, top bar, skróty) ────────┐
+│                                                                              │
+│               ┌ karta max-w-sm · p-8 ────────────────────────┐               │
+│               │ ◆ Context Keeper                             │               │
+│               │                                              │               │
+│               │ Hasło dashboardu                             │               │
+│               │ [••••••••••••                   ] autoFocus  │               │
+│               │ ┌ role="alert" — tylko po błędzie ─────────┐ │               │
+│               │ │ Nieprawidłowe hasło.                     │ │               │
+│               │ └──────────────────────────────────────────┘ │               │
+│               │ [                 Zaloguj                  ] │               │
+│               └──────────────────────────────────────────────┘               │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Kiedy:** `Gate` w `App.tsx` pyta `GET /api/auth/session`; do odpowiedzi cały ekran to wyśrodkowane
+  „Ładowanie…" (muted). Bez potwierdzonej sesji (`authenticated: false` albo błąd zapytania) zamiast
+  całego routera renderuje się ekran logowania — pod dowolnym URL-em, bez railu, top baru, health stripu i
+  skrótów klawiszowych (te żyją w `AppShell`). Z aplikacji wraca się tu przez „Wyloguj" w dolnej sekcji
+  railu (§9.0): `POST /api/auth/logout` i odświeżenie sesji.
+- **Układ:** pełny viewport `bg-background`, wyśrodkowana karta `max-w-sm` (`bg-surface`, obrys
+  `border-strong`, `rounded-lg`, `p-8`, `shadow-md`). Na górze marka jak w railu: ikona `diamond`
+  wypełniona iris + „Context Keeper" (`font-semibold`). Pod nią formularz w kolumnie: label „Hasło
+  dashboardu" (`text-xs`, muted), `Input type="password"` (`autoFocus`, `autoComplete="current-password"`),
+  komunikat błędu (gdy jest) i przycisk `primary` „Zaloguj" na pełną szerokość karty. Motyw jasny/ciemny
+  obowiązuje także tutaj (`useTheme` w `Gate`), ale przełącznika na ekranie nie ma.
+- **Zachowanie:** wysłanie formularza (klik albo Enter) → `POST /api/auth/login` z `{ password }`; walidacja
+  przeglądarki wyłączona (`noValidate`). Przycisk jest `disabled` przy pustym polu i w trakcie żądania
+  (etykieta „Logowanie…"); w trakcie także pole jest `disabled`. Sukces → invalidacja zapytania `session`:
+  `Gate` sam przełącza się na aplikację, bez nawigacji z tego ekranu — użytkownik zostaje na URL-u, z którym
+  wszedł (nieznana ścieżka → `/kolejka`).
+- **Błędy** — inline między polem a przyciskiem, w `<p role="alert">`
+  (`rounded-md border-danger bg-danger-subtle text-danger-foreground`, `text-xs`); ekran nie używa toastów.
+  Komunikat znika przy następnym wysłaniu formularza, nie przy edycji pola:
+  - 401 → „Nieprawidłowe hasło."
+  - 429 (throttle logowania) → „Zbyt wiele prób — spróbuj ponownie za chwilę."
+  - każdy inny błąd (sieć, 5xx) → „Logowanie nie powiodło się. Spróbuj ponownie."
+- **Odstępstwa (odnotowane w v1.7, kod bez zmian):**
+  - karta ma `shadow-md`, choć §0 (sygnatura 2) i §4 rezerwują cień dla elementów unoszących się (popover,
+    dialog, toast), a separację niesie keyline;
+  - komunikat błędu jest bez ikony — §2.2 łączy rodzinę danger z ikoną (`triangle-alert`); znaczenie niesie
+    sam tekst.
+- Implementacja: [`screens/LoginScreen.tsx`](../apps/dashboard/src/screens/LoginScreen.tsx); bramka sesji:
+  [`App.tsx`](../apps/dashboard/src/App.tsx).
+
 ---
 
 ## 10. Stany, dostępność, klawiatura
@@ -625,16 +732,40 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 
 ---
 
-## 12. Co dalej (implementacja)
+## 12. Spec przed kodem
 
-1. **Fundament tokenów** — wklej §7 do `globals.css` + `tailwind.config`, dołóż self-hosted Inter + JetBrains Mono (`@font-face`, woff2 w repo — bez CDN).
-2. **shadcn init** — dodaj bazowe komponenty (§8.1), nadpisz tokenami.
-3. **Komponenty produktowe** (§8.2) — zacznij od `StatusChip`, `ProposalRow`, `DiffView`, `ProposalActions` (ścieżka krytyczna kolejki).
-4. **Ekran-bohater** — Kolejka (§9.1) end-to-end na realnym API, potem Pamięć/Projekty/Audyt.
-5. **A11y pass** — focus, kontrast, klawiatura (§10) jako część „definition of done", nie po fakcie.
+Zmiana UI powyżej progu zaczyna się od specu w tym dokumencie, a kod idzie za specem — kanon nie dogania kodu
+po fakcie. Reguła obowiązuje od v1.7; §9.11 i §9.12 są dopisane już według niej.
 
-**Poza v1 (spójne z roadmapą PRD §10):** bulk approve/reject (anti-fatigue) — layout kolejki już to udźwignie (checkbox na wierszu + bulk bar); ręczny trigger nocnego jobu i hard-purge w dashboardzie (v1.1) — miejsce w Audycie/Projektach; per-user auth (v2) — dolna sekcja railu (dziś: Projekty, Ustawienia, toggle motywu, Wyloguj — §9.0) już istnieje i ją rozszerzy.
+**Spec jest wymagany przy:**
+
+- nowym ekranie lub route;
+- nowej sekcji albo panelu na ekranie;
+- nowym dialogu albo komponencie produktowym (§8.2);
+- zmianie układu lub nawigacji.
+
+**Spec nie jest wymagany przy** zmianie copy, odstępów, kolorów w ramach tokenów (§2, §7) ani przy bugfiksie,
+który nie zmienia zachowania.
+
+**Forma:** sekcja w §9 (a dla komponentu produktowego — wpis w §8.2) z opisem tego, co widać: stany, copy,
+zachowanie, skróty — plus **szkic układu ASCII** w bloku kodu, jak w §9.0/§9.1. Szkic ASCII jest makietą:
+leży w kanonie, da się go przejrzeć w diffie PR i nie dubluje tokenów. Świadome odstępstwa od zasad
+(§0–§8) spec nazywa wprost, jak §9.2 (wysokość wiersza vs P5) czy §9.11/§9.12.
+
+**Istniejące ekrany:** makiet nie dorabiamy — źródłem prawdy jest kod + sekcja w §9. Klikalna
+[`design-system-mockup.html`](design-system-mockup.html) to stan z Fazy 0 i nie jest rozbudowywana.
+
+**Egzekwowanie:** skill [`plan-implement`](../.claude/skills/plan-implement/SKILL.md). Plan (Stage 1) ma
+obowiązkową sekcję „Design": projekt sekcji §9 (opis + szkic ASCII) jako pierwszy krok planu albo jawne
+„Brak zmiany UI powyżej progu, bo …". Człowiek akceptuje spec razem z planem (Stage 2), a review Codexa
+(Stage 4b) sprawdza, że UI w diffie zgadza się ze specem i że ten plik zmienia się w tym samym diffie. Poza
+`plan-implement` regułę niesie [`AGENTS.md`](../AGENTS.md) („Zasady pracy").
+
+**Rozszerzenia spoza v1 (PRD §10):** bulk approve/reject — w kolejce od v1.3 (§9.1); ręczny trigger nocnego
+jobu (v1.1) — ekran Operacje (§9.11); hard-purge (v1.1) — przeglądarka pamięci, przycisk „Hard-purge" w
+detalu pamięci (`PurgeMemoryDialog`, §9.2); per-user auth (v2) — dolna sekcja railu (dziś: Projekty,
+Ustawienia, toggle motywu, Wyloguj — §9.0) już istnieje i ją rozszerzy.
 
 ---
 
-*Makieta klikalna kluczowych ekranów: [`design-system-mockup.html`](design-system-mockup.html).*
+*Makieta klikalna z Fazy 0: [`design-system-mockup.html`](design-system-mockup.html) — stan z Fazy 0 (ostatnia zmiana 2026-07-28), niedokładany i nieaktualizowany; obecny układ opisują kod i §9, nowe ekrany dostają szkic ASCII (§12).*
