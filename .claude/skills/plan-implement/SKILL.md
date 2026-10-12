@@ -33,7 +33,7 @@ Communicate with the user in Polish (their preference). Subagent prompts can be 
 | Stage | Who | `subagent_type` | `model` | Can edit files? |
 |-------|-----|-----------------|---------|-----------------|
 | 1. Plan | Opus architect | `Plan` | `opus` | No (read-only) |
-| 2b. Tests first | Opus test-writer | `general-purpose` | `opus` | Only test files (`apps/server/test/**`) — never `src/` |
+| 2b. Tests first | Opus test-writer | `general-purpose` | `opus` | Only test files (`apps/server/test/**`, `apps/dashboard/test/**`) — never `src/` |
 | 3. Implement | Sonnet builder | `general-purpose` | `sonnet` | Yes — except test files |
 | 4a. Checks | You (orchestrator) | — | — | No — run `pnpm verify` |
 | 4b. Review | Codex CLI | — (Bash) | Codex default | No — read-only sandbox |
@@ -184,7 +184,7 @@ snapshot, so none of the snapshot checks below apply later. Never run the test-w
 - The prompt carries the **absolute path to the plan file**, `context/testing.md` and `CLAUDE.md`, and says:
   - Write **exactly** the tests listed in **Testy** — do not add, drop or reinterpret any. Anything the list
     asks for that cannot be expressed as a test goes into the report, not into a guess.
-  - Edit or create only test files under `apps/server/test/` (including `helpers/`). Never touch `src/`,
+  - Edit or create only test files under `apps/server/test/` (including `helpers/`) or `apps/dashboard/test/`. Never touch `src/`,
     configs or `package.json`.
   - `czerwony` tests assert the **new** behaviour and must fail right now. Importing an export that does not
     exist yet is allowed (it fails at call time). A red test that needs a not-yet-existing *module* goes into
@@ -193,6 +193,9 @@ snapshot, so none of the snapshot checks below apply later. Never run the test-w
   - `strażnik` tests must pass against the current code.
   - Follow `testing.md` for mocking and naming (fakes come from `helpers/fakes.ts`; do not copy them).
   - Run the vitest command from "Red/guard check" below on the files it touched before returning.
+  - Also run typecheck and lint on the test files it touched before returning — Vitest does not typecheck, and
+    a type or lint error in a frozen test cannot be fixed by the builder: `pnpm typecheck` and
+    `pnpm exec eslint <touched test files>`.
   - Do not `git add`, commit or push.
   - Return a **manifest**: one line per added or changed test with the repo-relative file, the vitest
     `fullName` (describe titles + test title, space-separated), the plan item and `czerwony`/`strażnik`; the
@@ -200,7 +203,7 @@ snapshot, so none of the snapshot checks below apply later. Never run the test-w
 
 ### Boundary check (you run it)
 
-`git status --porcelain` may show only paths under `apps/server/test/`. Anything else → stop and report it to
+`git status --porcelain` may show only paths under `apps/server/test/` and `apps/dashboard/test/`. Anything else → stop and report it to
 the user; do not silently revert.
 
 ### Red/guard check (you run it)
@@ -211,8 +214,14 @@ test that fails because Docker is down is not red. Then, from Bash:
     pnpm --filter @context-keeper/server exec vitest run test/<a>.spec.ts test/<b>.integration.spec.ts \
       --reporter=json --outputFile="<scratchpad>/tests-red-<slug>.json"
 
-Paths are relative to `apps/server`, with forward slashes and the `test/` prefix (positional arguments are
-substring filters). Use `timeout: 600000`. A non-zero exit is expected — judge from the JSON, not the exit
+For specs under `apps/dashboard/test/` run the dashboard variant instead (or in addition, one command per app):
+
+    pnpm --filter @context-keeper/dashboard exec vitest run test/<a>.spec.ts \
+      --reporter=json --outputFile="<scratchpad>/tests-red-<slug>-dashboard.json"
+
+Paths are relative to the respective app (`apps/server` or `apps/dashboard`), with forward slashes and the
+`test/` prefix (positional arguments are substring filters). The dashboard has no integration specs, so
+there is no Docker dependency there. Use `timeout: 600000`. A non-zero exit is expected — judge from the JSON, not the exit
 code.
 
 Judge `testResults[].assertionResults[]` (`fullName`, `status`):
@@ -247,7 +256,7 @@ output and the manifest.
 
 ### Snapshot check (after Stage 3 and after every Stage 5 round)
 
-- `git status --porcelain -- apps/server/test` must list exactly the snapshot files, each with an empty
+- `git status --porcelain -- apps/server/test apps/dashboard/test` must list exactly the snapshot files, each with an empty
   worktree column (`A  path` / `M  path`). Any `??`, ` M`, `MM`, `AM` or ` D` is a violation.
 - `git ls-files -s -- <files>` must equal the saved output (this catches a builder that staged its own edits).
 - `git diff --stat -- <files>` as evidence.
@@ -266,7 +275,7 @@ The task branch already exists (created at the end of Stage 2). Spawn one implem
 - In the prompt: give the **absolute path to the plan file** and instruct it to read that file plus
   `CLAUDE.md`, implement the plan faithfully, match surrounding code style, and **not** commit or push.
 - **Tests are frozen.** Tell it: do not create, edit, delete, rename, `git add`, `git restore` or `git stash`
-  any test file (`apps/server/test/**`, including `helpers/`) — the tests are the specification. Make them pass
+  any test file (`apps/server/test/**`, including `helpers/`, and `apps/dashboard/test/**`) — the tests are the specification. Make them pass
   by changing code only. If it believes a test is wrong, it leaves the test as is and lists it in the report
   under **Disputed tests** (test, why, evidence: plan line vs. test expectation).
   - Exception: when Stage 2b was skipped and the plan's Concrete steps explicitly list changes to test files
@@ -314,7 +323,7 @@ Codex to:
 
 1. Determine the diff itself — the work is **staged, unstaged and untracked**, not yet committed (the commit
    is Stage 6). Have it start from `git status --porcelain`, `git diff`, `git diff --staged`, and read
-   untracked files directly. If Stage 2b ran, **staged** changes under `apps/server/test/` are the
+   untracked files directly. If Stage 2b ran, **staged** changes under `apps/server/test/` or `apps/dashboard/test/` are the
    test-writer's frozen tests and **unstaged + untracked** changes are the builder's code — it must review
    both halves, and any unstaged change to a staged test file is a blocker.
 2. Read the plan at `<scratchpad>/plan-<slug>.md` (give the absolute path) and judge the diff **against that
@@ -337,7 +346,7 @@ Then run it, reading the prompt from stdin (`-`):
 
 - `--output-schema` pins the answer to `{verdict, summary, defects[]}` — the same shape Stage 5 consumes, so
   the fix loop doesn't have to parse prose. The schema lives next to this skill. It has no field for the kind
-  of defect, so Stage 5 routes by the `file` path (under `apps/server/test/` = test defect).
+  of defect, so Stage 5 routes by the `file` path (under `apps/server/test/` or `apps/dashboard/test/` = test defect).
 - `-o` writes the final message to a file; read that file for the verdict rather than scraping stdout.
 - `-s read-only` still lets Codex run commands (`git`, `tsc`, …); it only blocks writes. That is exactly the
   reviewer-can't-edit property this stage needs.
@@ -366,7 +375,7 @@ path, and the builder's change report — requiring the same `PASS` / `FAIL` + n
 
 If the verdict is `FAIL` — from `pnpm verify`, from Codex, or both — first **partition the defects**:
 
-- **Test defects:** Codex defects whose `file` is under `apps/server/test/`, plus the builder's **Disputed
+- **Test defects:** Codex defects whose `file` is under `apps/server/test/` or `apps/dashboard/test/`, plus the builder's **Disputed
   tests**. If a defect challenges the plan's **Testy** item itself (the plan is wrong, not the test) → take it
   to the user.
 - **Code defects:** everything else, including a failing snapshot test from `pnpm verify`.

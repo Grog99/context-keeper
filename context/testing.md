@@ -1,10 +1,9 @@
-# Context Keeper — konwencja testów (serwer)
+# Context Keeper — konwencja testów
 
-**Zakres:** `apps/server` · **Wiąże:** każdego agenta i człowieka piszącego testy · **Strategia i uzasadnienie:**
+**Zakres:** `apps/server`, `apps/dashboard` · **Wiąże:** każdego agenta i człowieka piszącego testy · **Strategia i uzasadnienie:**
 [`tech-stack.md`](tech-stack.md) §15 · **Etap test-first w workflow:** [`plan-implement`](../.claude/skills/plan-implement/SKILL.md)
 
 > Ten plik trzyma **reguły**: co testować, czego nie, co mockować, gdzie leżą testy i jak się nazywają.
-> Dashboard (`apps/dashboard`) nie ma runnera ani testów — jego sekcję dopisze pozycja roadmapy „Luki w testach".
 
 ## 1. Zasada ogólna
 
@@ -102,3 +101,26 @@ Mechanika (komendy, kontrola git) jest w [`SKILL.md`](../.claude/skills/plan-imp
 - Builder (Sonnet) testów nie edytuje; testy, które uważa za błędne, zgłasza w raporcie. Defekt testu trafia do
   świeżego test-writera albo człowieka, defekt kodu do buildera. Recenzja Codexa ocenia testy względem „Testów".
 - Podział ról obowiązuje **tylko w `plan-implement`** — w sesji ad hoc wiąże reguła z §6.
+
+## 8. Dashboard (`apps/dashboard`)
+
+Reguły §1–§7 obowiązują tak samo; tu tylko to, co dashboard robi inaczej.
+
+- **Runner:** Vitest (ta sama wersja co serwer), `environment: 'node'`, konfig w
+  `apps/dashboard/vitest.config.ts`. Jeden przebieg: `pnpm --filter @context-keeper/dashboard test`;
+  wchodzi do `pnpm verify` i CI przez `pnpm -r test`.
+- **Co testować:** tylko czystą logikę, która wpływa na decyzję recenzenta — `lib/text-diff.ts`
+  (`computeInlineWordDiff`: `ok` i progi fallbacku) oraz `lib/proposals.ts` (kolejność wieku w
+  sprzecznościach, etykieta kierunku zamiany, procenty sumujące się do 100). Mapowań i formatowania
+  wyświetlania nie testujemy (`format.ts`, `errors.ts`, `query-string.ts`, `usage-chart.ts` — §3).
+  Ścieżki `aborted` (timeout jsdiffa) też nie — to test timingu (§3).
+- **Bez jsdom, bez `@testing-library`, bez testów komponentów i hooków.** Logikę wartą przybicia w
+  hooku albo komponencie najpierw wynieś do czystej funkcji w `lib/` (wzorzec: `text-diff.ts`
+  wyjęty z `DiffView.tsx`).
+- **Gdzie:** płasko w `apps/dashboard/test/`, sufiks `*.spec.ts`, importy względne `../src/lib/…`,
+  jawny `import { describe, expect, it } from 'vitest'` (bez `globals`), `describe` / `it` po polsku
+  jak w §4. `include` w `apps/dashboard/tsconfig.json` obejmuje `test`, więc `pnpm typecheck`
+  sprawdza też testy (razem z `noUnusedLocals`). ESLint: tylko reguły bazowe — blok Reacta celuje w
+  `src/**`.
+- **Mockowanie:** obowiązuje §5. Zależności runtime (np. `diff`) nie podmieniamy przez `vi.mock` —
+  test idzie na prawdziwej bibliotece.
