@@ -19,6 +19,7 @@ import { ProjectProposalService } from '../src/onboarding/project-proposal.servi
 import { ACCOUNT_ACTOR } from '../src/projects/project-scope';
 import { ProjectSlugService } from '../src/projects/project-slug.service';
 import type { TokenContext } from '../src/projects/projects.service';
+import { endPool } from './helpers/pg-teardown';
 import { buildProjectsService } from './helpers/services';
 
 const ATTRIBUTION: TokenContext = { tokenId: 'tok_onboarding1', tokenLabel: 'acc-onboarding' };
@@ -60,7 +61,7 @@ describe('ProjectProposalService + OnboardingService (integration, testcontainer
   });
 
   afterAll(async () => {
-    await pool?.end();
+    await endPool(pool);
     await container?.stop();
   });
 

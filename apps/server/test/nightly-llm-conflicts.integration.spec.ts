@@ -35,6 +35,7 @@ import { ProposalsService } from '../src/proposals/proposals.service';
 import type { DeletePayload } from '../src/proposals/proposals.types';
 import { UsageService } from '../src/usage/usage.service';
 import { FakeLlmProvider, headerOf, StubEmbeddingProvider } from './helpers/fakes';
+import { endPool } from './helpers/pg-teardown';
 import { buildProjectsService } from './helpers/services';
 
 // Zachowuje prawdziwą implementację; AC15 podmienia ją jednorazowo, żeby wywołać wyjątek POZA budżetem.
@@ -281,7 +282,7 @@ describe('Detektor sprzeczności w nocnym jobie (integration, testcontainers) �
   });
 
   afterAll(async () => {
-    await pool?.end();
+    await endPool(pool);
     await container?.stop();
   });
 

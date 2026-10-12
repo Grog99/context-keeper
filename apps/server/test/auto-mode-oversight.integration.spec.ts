@@ -33,6 +33,7 @@ import { AUTO_MODE_UNDO_VIA } from '../src/proposals/auto-mode';
 import { ProposalsService } from '../src/proposals/proposals.service';
 import { buildAutoModeFateQuery, UsageService } from '../src/usage/usage.service';
 import { StubEmbeddingProvider } from './helpers/fakes';
+import { endPool } from './helpers/pg-teardown';
 import { buildProjectsService } from './helpers/services';
 
 /**
@@ -145,7 +146,7 @@ describe('Nadzór po fakcie auto mode — cofanie (A3) i pomiary (A4) (integrati
   }, 120_000);
 
   afterAll(async () => {
-    await pool?.end();
+    await endPool(pool);
     await container?.stop();
   });
 

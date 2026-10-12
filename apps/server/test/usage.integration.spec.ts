@@ -15,6 +15,7 @@ import { proposals, searchEvents, type NewProposalRow } from '../src/db/schema';
 import type { ProjectContext } from '../src/projects/projects.service';
 import type { ProjectsService } from '../src/projects/projects.service';
 import { UsageService } from '../src/usage/usage.service';
+import { endPool } from './helpers/pg-teardown';
 import { buildProjectsService } from './helpers/services';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -90,7 +91,7 @@ describe('UsageService (integration, testcontainers) — ekran "Pomiary", roadma
   });
 
   afterAll(async () => {
-    await pool?.end();
+    await endPool(pool);
     await container?.stop();
   });
 

@@ -19,6 +19,7 @@ import { LlmHttpError, type LlmProvider } from '../src/llm/llm-provider';
 import { LlmSettingsService } from '../src/llm/llm-settings.service';
 import { LlmService } from '../src/llm/llm.service';
 import type { LlmChatResult, LlmEndpoint, LlmSettingsUpdate } from '../src/llm/llm.types';
+import { endPool } from './helpers/pg-teardown';
 
 const KEY_A = Buffer.alloc(32, 11).toString('base64');
 const KEY_B = Buffer.alloc(32, 22).toString('base64');
@@ -81,7 +82,7 @@ describe('LlmSettingsService + LlmService (integration, testcontainers) — road
   });
 
   afterAll(async () => {
-    await pool?.end();
+    await endPool(pool);
     await container?.stop();
   });
 

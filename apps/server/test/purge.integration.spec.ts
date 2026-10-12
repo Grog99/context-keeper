@@ -33,6 +33,7 @@ import type { ProjectsService } from '../src/projects/projects.service';
 import { PurgeError } from '../src/purge/purge.errors';
 import { PurgeService } from '../src/purge/purge.service';
 import { StubEmbeddingProvider } from './helpers/fakes';
+import { endPool } from './helpers/pg-teardown';
 import { buildProjectsService } from './helpers/services';
 
 // Stub providera (`helpers/fakes.ts`): jeden stały wektor na wszystkie chunki (mechanika, nie ranking). Potrzebny
@@ -140,7 +141,7 @@ describe('PurgeService (integration, testcontainers) — hard-purge FR-S3', () =
   });
 
   afterAll(async () => {
-    await pool?.end();
+    await endPool(pool);
     await container?.stop();
   });
 

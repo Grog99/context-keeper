@@ -5,6 +5,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { migrateUpTo, REAL_MIGRATIONS_FOLDER } from './helpers/migrations';
+import { endPool } from './helpers/pg-teardown';
 
 /**
  * Migracja 0015 (nightly-scale, dług #5 i #7: GIN `fastupdate = off` na `audit_log.affected_ids` + btree
@@ -62,7 +63,7 @@ describe('migracja 0015 — upgrade 0014 → 0015 na niepustej bazie (testcontai
   });
 
   afterAll(async () => {
-    await pool?.end();
+    await endPool(pool);
     await container?.stop();
     if (tmpFolder) rmSync(tmpFolder, { recursive: true, force: true });
   });

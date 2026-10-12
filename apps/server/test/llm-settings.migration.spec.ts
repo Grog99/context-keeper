@@ -5,6 +5,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { migrateUpTo, REAL_MIGRATIONS_FOLDER } from './helpers/migrations';
+import { endPool } from './helpers/pg-teardown';
 
 /**
  * Migracja 0017 (roadmap v1.6, ticket nightly-llm-provider: tabela `llm_settings` + dwie wartości
@@ -37,7 +38,7 @@ describe('migracja 0017 — upgrade 0016 → 0017 na niepustej bazie (testcontai
   });
 
   afterAll(async () => {
-    await pool?.end();
+    await endPool(pool);
     await container?.stop();
     if (tmpFolder) rmSync(tmpFolder, { recursive: true, force: true });
   });

@@ -23,6 +23,7 @@ import type { ProjectsService } from '../src/projects/projects.service';
 import { ProposalsService } from '../src/proposals/proposals.service';
 import { UsageService } from '../src/usage/usage.service';
 import { StubEmbeddingProvider } from './helpers/fakes';
+import { endPool } from './helpers/pg-teardown';
 import { buildProjectsService } from './helpers/services';
 
 /**
@@ -107,7 +108,7 @@ describe('MemoryService (integration, testcontainers)', () => {
   });
 
   afterAll(async () => {
-    await pool?.end();
+    await endPool(pool);
     await container?.stop();
   });
 

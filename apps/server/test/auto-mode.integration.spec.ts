@@ -38,6 +38,7 @@ import { ProposalError } from '../src/proposals/proposals.errors';
 import { ProposalsService } from '../src/proposals/proposals.service';
 import { UsageService } from '../src/usage/usage.service';
 import { StubEmbeddingProvider } from './helpers/fakes';
+import { endPool } from './helpers/pg-teardown';
 import { buildProjectsService } from './helpers/services';
 
 /** Wektor w płaszczyźnie osi (a, b) obrócony o kąt `t` (a, b < FIRST_FREE_AXIS — poza osiami stuba). */
@@ -189,7 +190,7 @@ describe('Auto mode — ścieżka zapisu i bezpieczniki (A2, integration, testco
   }, 120_000);
 
   afterAll(async () => {
-    await pool?.end();
+    await endPool(pool);
     await container?.stop();
   });
 
