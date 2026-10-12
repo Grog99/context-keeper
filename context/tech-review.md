@@ -25,9 +25,6 @@ Legenda: 🔴 boli teraz · 🟠 będzie boleć · 🟢 higiena · ✅ zrobione
 | 8   | Dwie implementacje archiwizacji, już rozjechane  | struktura | 🟠   | M     |
 | 9   | Zapis embeddingów przepisany w 7 miejscach       | struktura | 🟠   | M     |
 | 10  | Typy SPA jako ręczne lustro enumów serwera       | struktura | 🟠   | S     |
-| 11  | `apps/dashboard` bez runnera testów              | testy     | 🟠   | M     |
-| 12  | Throttle logowania bez testu                     | testy     | 🟠   | S     |
-| 13  | Granica portów MCP/dashboard bez testu           | testy     | 🟠   | S     |
 | 14  | `pnpm audit` nie może być bramką                 | deps      | 🟢   | S     |
 | 15  | Odwrócona zależność ESLint w dashboardzie        | deps      | 🟢   | S     |
 
@@ -37,6 +34,7 @@ Legenda: 🔴 boli teraz · 🟠 będzie boleć · 🟢 higiena · ✅ zrobione
 > [`backlog.md`](backlog.md). Pozycje 1 i 4 zrobione 2026-09-10, pozycje 2 i 3 — 2026-09-27 →
 > „Zrobione". **Planowanie 2026-10-03:** pozycje 5 i 7 → [`roadmap.md`](roadmap.md), v1.6 („Nocny
 > job na skali") — bolą właśnie przy wielu projektach i auto mode; reszta (6, 8–15) w backlogu.
+> Pozycje 11–13 zrobione 2026-10-12 (v1.7, „Luki w testach") → „Zrobione".
 
 ### 5. `GET /api/proposals` bez `LIMIT` 🟠
 
@@ -107,36 +105,6 @@ Legenda: 🔴 boli teraz · 🟠 będzie boleć · 🟢 higiena · ✅ zrobione
 | **Fix**      | Uzupełnić wartość i dołożyć test parytetu porównujący `enumValues` z listami w `types/domain.ts`, żeby rozjazd padał na CI.           |
 | **Koszt**    | S                                                                                                                                     |
 
-### 11. `apps/dashboard` bez runnera testów 🟠
-
-| Pole         | Treść                                                                                                                                                    |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Objaw**    | Brak skryptu `test` w `apps/dashboard/package.json` sprawia, że `pnpm verify` (`… && pnpm -r test`) jest po cichu server-only.                           |
-| **Dowód**    | `apps/dashboard/package.json:7`, niepokryte `apps/dashboard/src/lib/text-diff.ts:48`                                                                     |
-| **Powoduje** | `computeInlineWordDiff` z czterema progami fallbacku jest uruchamiany wyłącznie w przeglądarce — a to ekran, na którym człowiek decyduje approve/reject. |
-| **Fix**      | Dodać vitest + skrypt `test` (jsdom zbędny, to czysty node) i testy `text-diff`; obejmie przy okazji `format.ts`, `errors.ts`, `query-string.ts`.        |
-| **Koszt**    | M                                                                                                                                                        |
-
-### 12. Throttle logowania bez testu 🟠
-
-| Pole         | Treść                                                                                                                                                                                                 |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Objaw**    | Jedyna bariera przed brute-force współdzielonego hasła nie ma testu; `token-bucket.spec.ts` pokrywa samą klasę, nie tę ścieżkę.                                                                       |
-| **Dowód**    | `apps/server/src/dashboard/auth/login-throttle.service.ts:21`, `apps/server/src/dashboard/auth/auth.controller.ts:40`                                                                                 |
-| **Powoduje** | Nieprzybite są dwie regresje w zasięgu ręki: fallback `?? 'unknown'` przy złym `trust proxy` (jeden bucket na całą instalację albo bucket per podrobiony nagłówek) i kolejność throttle-przed-hasłem. |
-| **Fix**      | Test serwisu na fake timerach (6. próba, izolacja IP, odnowa okna) + test kontrolera na atrapach: 429 nie sprawdza hasła i ustawia `Retry-After`.                                                     |
-| **Koszt**    | S                                                                                                                                                                                                     |
-
-### 13. Granica portów MCP/dashboard bez testu 🟠
-
-| Pole         | Treść                                                                                                                                     |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| **Objaw**    | `createSurfaceMiddleware` — jedyna obrona poza proxy — nie występuje w `apps/server/test/` ani razu.                                      |
-| **Dowód**    | `apps/server/src/dashboard/surface.middleware.ts:18`, montowany w `apps/server/src/main.ts:81`                                            |
-| **Powoduje** | Czysta funkcja z rozgałęzieniem na `localPort` i dwiema politykami cicho pęka przy refaktorze, wystawiając `/api/*` na publicznym porcie. |
-| **Fix**      | `test/surface.middleware.spec.ts` z macierzą portów × ścieżek na atrapach `{socket:{localPort}, path}` — bez Nesta i bez bazy.            |
-| **Koszt**    | S                                                                                                                                         |
-
 ### 14. `pnpm audit` nie może być bramką 🟢
 
 | Pole         | Treść                                                                                                                                                                                                                  |
@@ -171,6 +139,9 @@ Legenda: 🔴 boli teraz · 🟠 będzie boleć · 🟢 higiena · ✅ zrobione
 | #4 `/health` bez limitu                      | 2026-09-10 | Wynik probe (DB + TEI, łącznie z in-flight) współdzielony przez 5 s — flood robi ≤1 `SELECT 1` i ≤1 fetch do TEI na okno; throttle odrzucony jako zbędny.                                                                                                                                               |
 | #2 „1 dni temu" w UI                         | 2026-09-27 | `formatRelativeTime` na `Intl.RelativeTimeFormat('pl', { numeric: 'auto', style: 'short' })`; dni liczone kalendarzowo („wczoraj"), od 30 dni data absolutna.                                                                                                                                           |
 | #3 JSON API dashboardu bez walidacji runtime | 2026-09-27 | `ZodValidationPipe` (`common/zod-validation.pipe.ts`) + schematy w `dashboard/dashboard.schemas.ts`, dołożony na KAŻDYM `@Query()`/`@Param()`/`@Body()` w `dashboard/*.controller.ts` (enumy z `db/schema/enums.ts`, nigdy ręczne literały); `AuthController` celowo pominięty (throttle-przed-hasłem). |
+| #11 `apps/dashboard` bez runnera testów | 2026-10-12 | Vitest `^4.1.10` w `apps/dashboard` (środowisko node, `vitest.config.ts`, `test` w `include` tsconfig) — `pnpm verify` i CI obejmują obie aplikacje; strażnicy `computeInlineWordDiff` (`ok`/`too-long`/`too-different`/`whitespace-only`, D5), `conflictTargetAge` + `swapDirectionLabel`, `percentShares`. Bez jsdom; `format.ts`/`errors.ts`/`query-string.ts`/`usage-chart.ts` i ścieżka `aborted` świadomie poza zakresem. |
+| #12 Throttle logowania bez testu | 2026-10-12 | `login-throttle.service.spec.ts` (fake timers: 6. próba → `retryAfterSec ≥ 1`, budżet per IP, odnowa okna) + `auth.controller.spec.ts` na atrapach (429 + `Retry-After` bez czytania hasła, także dla poprawnego; IP z `req.ip`, bez niego z `socket.remoteAddress`). Fallback `'unknown'` celowo nieprzybity. |
+| #13 Granica portów MCP/dashboard bez testu | 2026-10-12 | `surface.middleware.spec.ts` — macierz `PORT_MCP`/`PORT_DASHBOARD` × ścieżki, w tym granica prefiksu `/mcpx` ≠ `/mcp`. |
 
 ---
 

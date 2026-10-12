@@ -118,9 +118,11 @@ ekranem, dokumentacja aktualizowana w tym samym przepływie co zmiana, CI jako b
   pokrycia i nie zapychanie aplikacji testami; co mockować i gdzie leżą. W przepływie
   `plan-implement` **osobny agent pisze testy przed implementacją** (z planu, na czerwono), a
   **osobny agent implementuje**, aż przejdą — builder nie pisze testów pod własny kod.
-- **Luki w testach z przeglądu technicznego** ⬜ — Vitest w `apps/dashboard` (dziś `pnpm verify` jest
-  server-only), test throttlingu logowania, test `surface.middleware`. Według nowej konwencji, nie
-  „na zapas". (z backlogu, dług 🟠)
+- **Luki w testach z przeglądu technicznego** ✅ — Vitest w `apps/dashboard` (środowisko node;
+  `pnpm verify` obejmuje obie aplikacje), strażnicy logiki decyzji recenzenta
+  (`computeInlineWordDiff`, `conflictTargetAge`/`swapDirectionLabel`, `percentShares`), throttle
+  logowania (serwis + throttle-przed-hasłem w `AuthController`) i macierz portów
+  `surface.middleware` (dług #11–#13).
 - **Design dla każdego ekranu** ⬜ — `design-system.md` §9 dostaje sekcje brakujących ekranów
   (Pomiary, Operacje, Logowanie), plus reguła na przyszłość: nowy ekran albo większa zmiana UI
   najpierw dostaje spec w design systemie (i makietę), dopiero potem kod.

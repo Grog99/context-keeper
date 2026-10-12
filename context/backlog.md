@@ -108,7 +108,8 @@ Z przeglądu technicznego 2026-07-29 → [`tech-review.md`](tech-review.md) (tam
 
 > Wszystkie cztery pozycje 🔴 („boli teraz") → zrobione w v1.4. `GET /api/proposals` bez `LIMIT` (#5)
 > i audyt per projekt (#7) → zrobione w v1.6 („Nocny job na skali"). Vitest w
-> dashboardzie, test throttlingu logowania i test `surface.middleware` → v1.7 („Luki w testach").
+> dashboardzie, test throttlingu logowania i test `surface.middleware` (#11–#13) → zrobione w v1.7
+> („Luki w testach z przeglądu technicznego").
 
 - **⌘K: debounce + indeks `memories(updated_at)`** ⬜ 🟠 — request na każdy klawisz, `ILIKE '%q%'` i
   sort po nieindeksowanej kolumnie. Koszt M.
