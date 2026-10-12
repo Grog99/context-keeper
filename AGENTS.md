@@ -56,6 +56,10 @@ Zebrane z audytu transkryptów sesji ([`agent-patterns-report.md`](context/agent
   i zmiana układu lub nawigacji zaczynają się od specu w [`context/design-system.md`](context/design-system.md)
   (sekcja w §9: opis + szkic ASCII) — próg, forma i wyjątki w §12; obowiązuje każdego agenta. Spec zmienia
   się w tym samym diffie co kod UI.
+- **Dokumentacja w tym samym PR:** zmiana zachowania (API, narzędzia MCP, konfiguracja, przepływ pracy,
+  skille) idzie razem z aktualizacją docs, których dotyczy — kanon `context/`, `README.md`, `AGENTS.md`,
+  `docs/` — w tym samym PR, także poza `plan-implement` (tam robi to etap docs, Stage 5b). Domknięcie
+  wersji (archiwum roadmapy, linia statusu README) zostaje przy `roadmap-reconcile`.
 - **Duże zadania:** faza typu „cała implementacja w jednym ciągłym przebiegu subagenta" (setki
   tysięcy tokenów, dziesiątki użyć narzędzi) zwiększa ryzyko dryfu kontekstu i zostawia mało
   naturalnych punktów na przegląd. Rozdzielaj plan → implementację → weryfikację na osobne

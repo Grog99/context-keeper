@@ -5,9 +5,9 @@ description: >-
   An Opus subagent plans, the user answers the plan's open questions, a separate Opus subagent
   writes the tests first (they must fail before implementation), a Sonnet subagent implements without
   touching those tests,
-  then verification runs `pnpm verify` plus an independent code review by the Codex CLI
-  (`codex exec`), the fix→verify loop repeats until green,
-  and it commits only after the user approves. Use this whenever the user wants a feature, refactor,
+  then `pnpm verify` plus an independent Codex CLI review (`codex exec`) repeat with fixes until green,
+  a Sonnet docs agent updates `context/`, README and `AGENTS.md` to match what shipped (with its own
+  Codex review), and it commits only after the user approves. Use this whenever the user wants a feature, refactor,
   or bugfix carried through planning and verification rather than implemented ad hoc — e.g.
   "zaplanuj i zaimplementuj X", "weź to zadanie od planu do commita", "zbuduj funkcję Y z weryfikacją",
   "plan and implement", "implement this properly with a verification pass". Prefer this skill over
@@ -21,7 +21,9 @@ This skill orchestrates a task through several stages using **model-specialised 
 code exists (so the builder never writes the tests that judge its own code), Sonnet implements
 (execution-heavy). Verification is deliberately **not** a
 Claude subagent — it is `pnpm verify` plus the **Codex CLI** reviewing the diff, so the code is judged by a
-model outside the family that wrote it. You stay the **orchestrator** — your job is to spawn subagents, run
+model outside the family that wrote it. Once the code has passed verification, a Sonnet docs agent brings
+the documentation in line with what actually shipped, and Codex reviews that diff too. You stay the
+**orchestrator** — your job is to spawn subagents, run
 the verification pass, carry state between stages, talk to the user, and drive the fix loop. **Do not
 implement the task yourself**; that defection is the most common way this workflow degrades into a normal
 ad-hoc edit session.
@@ -37,6 +39,8 @@ Communicate with the user in Polish (their preference). Subagent prompts can be 
 | 3. Implement | Sonnet builder | `general-purpose` | `sonnet` | Yes — except test files |
 | 4a. Checks | You (orchestrator) | — | — | No — run `pnpm verify` |
 | 4b. Review | Codex CLI | — (Bash) | Codex default | No — read-only sandbox |
+| 5b. Docs | Sonnet docs agent | `general-purpose` | `sonnet` | Only docs: `context/**` (not `context/archive/**`), `README.md`, `AGENTS.md`, `docs/**` |
+| 5b. Docs review | Codex CLI | — (Bash) | Codex default | No — read-only sandbox |
 
 Set `model` explicitly on every `Agent` call — it overrides the agent definition and is what pins each
 stage to the right tier. Subagents **do not share context with each other or with you**, so every stage's
@@ -72,6 +76,9 @@ already happened — deeper than this stage does it, and against the code rather
   own "Open questions".
 - Stage 2 then opens with the ticket's `## Otwarte punkty` plus whatever the planner added after reading
   the code.
+- **A ticket's „Poza zakresem" cannot cut documentation updates** — the docs scope comes only from the
+  plan's „Dokumentacja" section. If a ticket does exclude docs, the planner raises it as an Open question
+  instead of silently writing `Brak zmian w dokumentacji, bo …`.
 
 ### Quick clarify — before planning
 
@@ -128,14 +135,25 @@ Prompt it to return, in this order:
      `context/design-system.md` is **step 1** of Concrete steps; the UI code follows the spec.
    - Or state explicitly `Brak zmiany UI powyżej progu, bo …` with the reason (no UI touched, copy, spacing,
      colours within tokens, a bugfix that does not change behaviour).
-6. **Verification criteria** — how success will be checked (which tests, which command paths, which
+6. **Dokumentacja** — the docs that Stage 5b must update. One line per place under `context/` (not
+   `context/archive/`), `README.md`, `AGENTS.md` or `docs/` that this change makes stale or that must
+   describe it: file, section, what changes.
+   - Include, when applicable: the `context/roadmap.md` item this task closes (⬜→✅ plus a description of
+     what shipped; any further roadmap item only with the user's explicit approval in Stage 2);
+     `context/backlog.md` entries the task adds or closes; durable decisions from the
+     ticket's `## Ustalenia` (behaviour or convention, not task steps) and where they belong in the canon.
+   - Or state explicitly `Brak zmian w dokumentacji, bo …` with the reason.
+   - Not here: docs that are themselves the task's deliverable (they stay in Concrete steps, for the
+     builder); code comments (Concrete steps); version close-out — archive, README status line, roadmap
+     restructuring (`roadmap-reconcile`); drift unrelated to this change (`tech-reconcile`).
+7. **Verification criteria** — how success will be checked (which tests, which command paths, which
    end-to-end flow to exercise).
-7. **Open questions** — every ambiguity or decision that needs the user. If there are none, say so
+8. **Open questions** — every ambiguity or decision that needs the user. If there are none, say so
    explicitly.
 
 Tell it to read `CLAUDE.md`, `context/testing.md` (the test convention), `context/design-system.md` (the UI
-canon; §12 holds the spec-before-code threshold) and relevant existing code so the plan matches repo
-conventions.
+canon; §12 holds the spec-before-code threshold), `context/roadmap.md` and `context/backlog.md` (to find the
+item this task closes) and relevant existing code so the plan matches repo conventions.
 
 When it returns, **write the plan to a working file** in your scratchpad directory (its absolute path is in
 your environment), e.g. `<scratchpad>/plan-<slug>.md`. This file is the single source of truth passed to
@@ -165,6 +183,10 @@ the list, fold the change into the plan file before moving on.
 The plan's **Design** section is accepted at the same gate — there is no separate design stage. When it
 carries a spec, show the user the proposed §9 text with its ASCII sketch itself, not a summary: this is where
 the UI is approved before any code exists. If the user changes the spec, fold it into the plan file.
+
+The plan's **Dokumentacja** section is accepted here too. It decides whether Stage 5b runs: a list means
+the docs agent runs after verification; `Brak zmian w dokumentacji, bo …` means it is skipped. Fold the
+user's changes into the plan file here as well.
 
 ### Create the task branch — after the go-ahead
 
@@ -294,6 +316,8 @@ The task branch already exists (created at the end of Stage 2). Spawn one implem
   under **Disputed tests** (test, why, evidence: plan line vs. test expectation).
   - Exception: when Stage 2b was skipped and the plan's Concrete steps explicitly list changes to test files
     (e.g. refactoring test helpers), the builder makes exactly those changes and no others.
+- The plan's **Dokumentacja** section is not the builder's job — Stage 5b does it after verification. The
+  builder edits docs files only where Concrete steps name them.
 - Ask it to return a concise **change report**: files touched, notable decisions, anything it deviated from
   in the plan and why, anything it couldn't complete, and **Disputed tests** (if any).
 
@@ -342,6 +366,8 @@ Codex to:
    both halves, and any unstaged change to a staged test file is a blocker.
 2. Read the plan at `<scratchpad>/plan-<slug>.md` (give the absolute path) and judge the diff **against that
    plan**: was everything implemented, and correctly? Check the plan's **verification criteria** specifically.
+   Items in the plan's **Dokumentacja** section are done later (Stage 5b), so their absence from the diff is
+   not a defect.
 3. If Stage 2b ran, evaluate the tests against the plan's **Testy** section (give the absolute path of
    `context/testing.md` too): is every listed behaviour pinned, are `czerwony`/`strażnik` honoured, does each
    test assert observable behaviour (not just an import), are there tests beyond the list, are mocks used per
@@ -422,19 +448,139 @@ another retry.
 
 Keep the user informed between rounds (one line: what failed, what's being fixed).
 
+When the verdict is `PASS` — straight from Stage 4 or after the loop — go to Stage 5b.
+
+---
+
+## Stage 5b — Dokumentacja (Sonnet docs agent + Codex docs review)
+
+Docs are written **once, against code that has already passed verification** — they describe what shipped,
+not what was intended. The scope is the plan's **Dokumentacja** list plus any place the diff made stale.
+
+### Skip rule
+
+If **Dokumentacja** says `Brak zmian w dokumentacji, bo …`, skip this stage — both the agent and the Codex
+docs round: tell the user in one line, record `Stage 5b skipped: <reason>` in the plan file, and go to
+Stage 6. Never run the docs agent on an empty list "na sucho".
+
+### Baseline (you run it)
+
+The worktree already holds the builder's code, so docs edits can only be told apart from it by freezing the
+code first:
+
+1. `git -c core.quotePath=false status --porcelain --untracked-files=all` — anything that is not this
+   task's work → stop and ask the user.
+2. `git add -A`. If Stage 2b ran, confirm `git ls-files -s -- <snapshot files>` still equals the output saved
+   in the plan file.
+3. Record `git write-tree` and `git diff --staged --stat` in the plan file under `## Docs baseline (Stage 5b)`.
+
+From here on, **staged = the code after PASS; unstaged + untracked = the docs agent's work.**
+
+### Spawn the docs agent
+
+- `subagent_type: "general-purpose"`, `model: "sonnet"`, label like `docs:<slug>`.
+- The prompt carries the absolute paths to the plan file, the ticket (if any), `CLAUDE.md` and `AGENTS.md`,
+  and says:
+  - The change is `git diff --staged` (nothing is committed yet). Read-only git only; no `git add`,
+    `restore`, `stash`, `commit` or `push`.
+  - Realise every **Dokumentacja** item. Then read the diff and update places outside the list that it made
+    stale — listed separately in the report.
+  - **Allowed edits:** `context/**` except `context/archive/**`, `README.md`, `AGENTS.md`, `docs/**`.
+    Nothing else — not `apps/**` (comments and strings included), tests, `.claude/**`, configs, the ticket
+    or the plan file.
+  - A stale code comment or string, or code that does not do what the plan or ticket says, is **reported,
+    not fixed**: a code change after Codex PASS would bypass verification.
+  - `context/roadmap.md`: only the items listed in the plan's accepted **Dokumentacja** section — normally
+    just the item this task closes; any other item only when the user approved it there in Stage 2. Status
+    ⬜→✅ and a description rewritten to what shipped, in the style of the neighbouring ✅ items. No other
+    items, no milestone header or status, "Cel fazy" or ordering; add no items.
+  - `context/backlog.md`: only when the task added (deferred) or closed an entry; leave the
+    „**Aktualizacja:**" line alone.
+  - Never: `context/archive/**`, the README `> **Status:**` line, version close-out (`roadmap-reconcile`),
+    drift this diff did not cause (`tech-reconcile`).
+  - With a ticket: move its durable decisions from `## Ustalenia` (behaviour, convention — not task steps,
+    not rationale the canon already holds) into `context/`. The ticket stays read-only.
+  - Describe what the staged code actually does; where that differs from the plan, report a defect.
+  - Write in Polish, matching each file's existing style; minimal edits, no rewriting of untouched
+    sections. No `save_memory`, no MCP writes.
+  - Return a report with: 1. realised **Dokumentacja** items (file/section + what changed, or not done +
+    why); 2. additions outside the list (file/section + the code path that made it stale); 3. ticket
+    decisions moved (ticket # → file/section, or „brak ticketu"); 4. `save_memory` candidates (`kind`,
+    proposed text, why it is not derivable from the repo); 5. code or comment defects noticed (`file:line`,
+    symptom, evidence); 6. touched files.
+
+### Boundary check (you run it, after every docs-agent run)
+
+In `git -c core.quotePath=false status --porcelain --untracked-files=all`, every line with `??` or a
+non-space second column is the docs agent's. Each such path must (a) not start with `context/archive/`, and
+(b) start with `context/` or `docs/`, or be exactly `README.md` or `AGENTS.md`. Also `git write-tree` must
+still equal the recorded baseline (the agent staged nothing). Any violation → stop and show the user; do not
+revert on your own. Evidence: `git diff --stat` plus `git ls-files --others --exclude-standard`.
+
+### Codex docs review
+
+Write `<scratchpad>/codex-docs-prompt-<slug>.md`, opening with *"You are a read-only documentation
+reviewer. Do not modify any files."*, and tell Codex to:
+
+1. Review the docs diff: **unstaged + untracked** changes (`git diff`, `git ls-files --others
+   --exclude-standard`, read those files). Staged changes (`git diff --staged`) are the task's code,
+   already reviewed — reference only.
+2. Check exactly two things: (a) the docs describe the code on the branch — behaviour, commands, paths,
+   names and config match the staged code and current files; (b) the docs cover every item of the plan's
+   **Dokumentacja** section (give the absolute plan path), each one realised or justified.
+3. Report concrete defects only; `file` = the docs file with `:line`. If the problem is that the code
+   contradicts the plan, `file` = the code path.
+4. Leave out style, wording preferences, drift unrelated to this diff and version-level items.
+5. Return the verdict in the required JSON shape and nothing else.
+
+Then run it (`timeout: 600000`):
+
+    codex exec -s read-only \
+      --output-schema .claude/skills/plan-implement/codex-review-schema.json \
+      -o <scratchpad>/codex-docs-<slug>.json \
+      - < <scratchpad>/codex-docs-prompt-<slug>.md
+
+The schema is the one from 4b, unchanged; route defects by `file`. The verdict rule is the same as in 4b:
+`FAIL` or any `blocker`/`major` fails, `minor` alone is surfaced to the user. If Codex fails to run, say so
+and fall back to a read-only Sonnet reviewer (`general-purpose`, `sonnet`, label `verify-docs:<slug>`) with
+the same two checks and the same `PASS` / `FAIL` + numbered defects verdict.
+
+### Docs fix loop
+
+- **Docs defects** (`file` is an allowed docs path): spawn a **fresh** docs agent (label `docs-fix:<slug>`,
+  same rules) with the plan path, the previous report and the defects inline → boundary check → Codex docs
+  review again. Limit: **2 fix→re-review rounds** (at most 3 Codex docs runs); then the human decides. These
+  rounds do not count toward Stage 5's 3.
+- **Code defects** — a Codex defect whose `file` is a code path, or an item in the agent's report section
+  5 — **always go to the human**, never to a builder: Codex already passed this code. The human either
+  accepts it (PR „Znane ograniczenia" or backlog) or sends the task back to Stage 5. Not counted in
+  Stage 5's rounds.
+- **Going back to Stage 5 (human decision only):** unstage the baseline but keep the test snapshot —
+  `git restore --staged -- . ":(exclude)apps/server/test" ":(exclude)apps/dashboard/test"` (if Stage 2b was
+  skipped: `git restore --staged -- .`). Docs edits stay in the worktree. After the next Stage 4 PASS, rerun
+  Stage 5b in full with a new baseline.
+
 ---
 
 ## Stage 6 — Commit
 
-Once verification passes:
+Once verification passes and Stage 5b is done or skipped:
 
-1. Summarise for the user what was built and the final verification result (real command output).
-2. **Ask** whether to commit, and propose a commit message. Commit only on an explicit yes — never commit or
+1. Summarise for the user what was built and the final verification result (real command output). Also
+   cover the Stage 5b result: the places from the docs report (sections 1-3) plus the Codex docs verdict and
+   summary, or the skip reason; the docs `git diff --stat`, with the `context/roadmap.md` and
+   `context/backlog.md` hunks shown in full so the human can check them; and any open code defects the docs
+   agent reported.
+2. **Memory candidates.** List the docs agent's `save_memory` candidates and propose each one. Call
+   `save_memory` yourself only for those the user picks, after `search_memory` so a correction uses
+   `supersedes` instead of adding a duplicate.
+3. **Ask** whether to commit, and propose a commit message. Commit only on an explicit yes — never commit or
    push unprompted.
-3. On approval, commit to the task branch created in Stage 2. If Stage 2b ran, the snapshot test files are
-   already staged — stage the rest of the changes before committing. End the commit message with the required
-   trailer: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
-4. Do **not** push yet — pushing and opening the PR happen in Stage 7, as their own explicit-yes gate.
+4. On approval, commit to the task branch created in Stage 2. If Stage 2b ran, the snapshot test files are
+   already staged — stage the rest of the changes before committing; if Stage 5b ran, the code is already
+   staged as its baseline, so `git add -A` the docs changes before committing. End the commit message with
+   the required trailer: `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+5. Do **not** push yet — pushing and opening the PR happen in Stage 7, as their own explicit-yes gate.
 
 ---
 
@@ -457,6 +603,10 @@ After the commit lands:
      from the ticket's `**Źródło:**` header rather than re-deriving them.
    - Fill the Weryfikacja checkboxes with **real results** (test counts, Codex verdict, what was clicked
      through E2E). A step that wasn't run stays unchecked with a one-line reason — never check it optimistically.
+   - The Dokumentacja checkbox: fill it with the files updated, or with `pominięto: <reason>` taken from
+     `Stage 5b skipped: …`, plus the Codex docs verdict. It is checked when Stage 5b passed or its skip was
+     accepted in Stage 2; unchecked with a one-line reason only when the human accepted a `FAIL`. If the
+     fallback reviewer was used, say so.
 3. Report the PR URL back to the user. Do **not** merge it — opening the PR ends this workflow.
 
 ---
@@ -471,7 +621,13 @@ After the commit lands:
 - **Keep the tiers right.** Opus for planning is worth it; downgrading the planner to save tokens is a false
   economy because a bad plan costs far more downstream. Opus also writes the tests: they are the
   specification, so weaker edge-case coverage there is paid for in every later stage. Sonnet is the right tier
-  for the builder.
+  for the builder. Sonnet is also enough for the docs agent: the accepted plan section sets its scope and
+  Codex checks the substance.
+- **Docs come after PASS, never before or alongside the builder.** They describe what shipped, not the
+  intent. The docs agent never touches code or comments — a stale comment is a defect for the human.
+- **`save_memory` runs only from you, in Stage 6.** The docs agent only proposes candidates.
+- **Version close-out belongs to `roadmap-reconcile`, whole-canon audits to `tech-reconcile`** — Stage 5b
+  handles only what this diff changed.
 - **Tests are frozen after Stage 2b — only a test-writer changes them.** Don't let the builder "fix" a red test
   to get green; a test it finds wrong goes into **Disputed tests**, and Stage 5 routes it.
 - **The Codex review is the point of Stage 4b, not a formality.** Don't replace it with a Claude subagent

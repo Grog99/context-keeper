@@ -8,7 +8,8 @@ Zasady wypełniania:
 - `Cel` — checklista kryteriów akceptacji. Każdy punkt musi dać się SPRAWDZIĆ: „X zwraca 401 bez
   tokenu", nie „X jest bezpieczne". Punkt, którego nikt nie umie zweryfikować, nie jest kryterium.
 - `Poza zakresem` — świadome „nie w tym tickecie", z jednozdaniowym powodem. To nie jest lista rzeczy,
-  o których zapomnieliśmy — to lista rzeczy, które odcięliśmy celowo.
+  o których zapomnieliśmy — to lista rzeczy, które odcięliśmy celowo. Nie wpisuj tu aktualizacji
+  dokumentacji — zakres docs ustala sekcja „Dokumentacja" planu w `plan-implement`.
 - `Ustalenia` — tabela do SKANOWANIA, jedna linijka na decyzję. Kolumny:
   · Decyzja   — co postanowiliśmy, w trybie oznajmującym
   · Dlaczego  — powód w jednym zdaniu
