@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { conflictTargetAge, percentShares, swapDirectionLabel } from '../src/lib/proposals';
+import { approveBlockReason, conflictTargetAge, percentShares, swapDirectionLabel } from '../src/lib/proposals';
 
 describe('percentShares — całkowite procenty sumujące się do 100 (tech-review #11)', () => {
   it('suma 100 tam, gdzie Math.round daje 99', () => {
@@ -70,5 +70,15 @@ describe('swapDirectionLabel — etykieta nazywa wpis archiwizowany po kliknięc
     const label = swapDirectionLabel(null);
     expect(label).not.toMatch(/starszy/);
     expect(label).not.toMatch(/nowszy/);
+  });
+});
+
+describe('approveBlockReason — zatwierdzenie nieaktualnej propozycji blokowane przed requestem (roadmap v1.8, Bugi z przeglądu UX)', () => {
+  it('propozycja stale → powód blokady stale', () => {
+    expect(approveBlockReason({ stale: true })).toBe('stale');
+  });
+
+  it('propozycja aktualna → brak blokady (null)', () => {
+    expect(approveBlockReason({ stale: false })).toBeNull();
   });
 });

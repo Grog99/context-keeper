@@ -119,7 +119,7 @@ export function AuditScreen() {
   if (from) filterParams.from = new Date(from).toISOString();
   if (to) filterParams.to = new Date(to).toISOString();
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isPending } = useQuery({
     queryKey: queryKeys.audit({ ...filterParams, cursor }),
     queryFn: () => api.get<AuditPage>(`/audit${toQueryString({ ...filterParams, cursor })}`),
   });
@@ -190,7 +190,7 @@ export function AuditScreen() {
         />
       </div>
 
-      {isLoading && !isFetching ? (
+      {isPending && allRows.length === 0 ? (
         <Skeleton className="h-64 w-full" />
       ) : allRows.length === 0 ? (
         <EmptyState title="Brak zdarzeń" description="Zmień filtry — nic tu nie pasuje." />

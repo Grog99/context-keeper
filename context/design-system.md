@@ -711,10 +711,10 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 
 ## 10. Stany, dostępność, klawiatura
 
-- **Focus:** zawsze widoczny `focus-visible` — ring 2px iris + offset 2px. Nawigacja Tab przez wszystkie interaktywne.
+- **Focus:** zawsze widoczny `focus-visible` — ring 2px iris + offset 2px. Nawigacja Tab przez wszystkie interaktywne. Globalny `:focus-visible` stoi w `@layer base` (`globals.css`), więc `outline-none` i `rounded-*` na elemencie go przebijają — element z `outline-none` musi nieść własny wskaźnik fokusu. Pole wyszukiwania `Command` (⌘K, przełączniki, popovery) zamiast ringu zmienia dolny keyline wrappera na iris (`focus-within:border-ring`).
 - **Kontrast:** cel **WCAG AA** (tekst ≥4.5:1, UI/ikony ≥3:1). Palety §2 dobrane pod to w obu motywach; status-fg na status-subtle spełnia AA.
 - **Kolor nie jest jedynym sygnałem** (P2): każdy status = kolor **+ ikona + label**.
-- **Klawiatura (kolejka):** `j/k` góra/dół, `Enter` detal, `A` approve, `R` reject, `E` edit, `S` zamiennik, `x` zaznacz/odznacz (bulk approve/reject, roadmap v1.3), `/` search, `⌘K` paleta poleceń, `g` potem `k/p/c/t/a/m/o/w/s` — skok do ekranu (Kolejka/Pamięć/Oś czasu/Projekty/Audyt/Pomiary/Operacje/Onboarding/Ustawienia). Skróty widoczne w tooltipach i „?" cheatsheet.
+- **Klawiatura (kolejka):** `j/k` góra/dół, `Enter` detal, `A` approve, `R` reject, `E` edit, `S` zamiennik, `x` zaznacz/odznacz (bulk approve/reject, roadmap v1.3), `/` search, `⌘K` paleta poleceń, `g` potem `k/p/c/t/a/m/o/w/s` — skok do ekranu (Kolejka/Pamięć/Oś czasu/Projekty/Audyt/Pomiary/Operacje/Onboarding/Ustawienia). Po `g` **każdy** następny klawisz w ~900 ms należy do akordu: zmapowany → ekran, niezmapowany → nic, do skrótów kolejki nie trafia żaden (`g a` = Audyt, nie approve; `g r` nic nie odrzuca). Sam modyfikator (Shift…) akordu nie przerywa, przytrzymane `g` (auto-repeat) go podtrzymuje (odświeża okno), a `g` z Ctrl/Meta/Alt go nie uzbraja. `A` na propozycji `stale` nie wysyła requestu — pokazuje toast, że zatwierdzenie jest zablokowane. Skróty widoczne w tooltipach i „?" cheatsheet.
 - **Reduced motion:** `prefers-reduced-motion` → bez translate/shimmer.
 - **Empty / loading / error:** każdy list ma `EmptyState`, `Skeleton`, i inline error (nie modal) z akcją „Ponów".
 - **Live vs polling:** v1 kolejka odświeżana pollingiem — pokaż „ostatnia aktualizacja Xs temu" + ręczny refresh; bez fałszywego „real-time".

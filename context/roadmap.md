@@ -124,22 +124,26 @@ rzeczy — dziennik pracy i auth dla klientów bez stałego tokena — oraz spra
 projektach dało się je odróżnić na pierwszy rzut oka. Zmiany UI zaczynają się od specu w
 [`design-system.md`](design-system.md) (§12).
 
-- **Bugi z przeglądu UX** ⬜ — najpierw, każdy od testu regresji (ścieżki względem
+- **Bugi z przeglądu UX** ✅ — każdy z logiką od testu regresji (ścieżki względem
   `apps/dashboard/src/`):
-  - **akord `g ‹litera›` odpala akcje kolejki** — `g a` (skok do Audytu) **zatwierdza** zaznaczoną
-    propozycję, `g s` klika „Zatwierdź jako zamiennik", `g k` przesuwa zaznaczenie; oba handlery
-    słuchają na `document`, `useQueueKeyboard` nie wie o uzbrojonym akordzie
-    (`hooks/useKeyboard.ts`). Odtworzone w przeglądarce. Omija human-gate bez potwierdzenia;
-  - skrót `A` na nieaktualnej propozycji wysyła request (toast 409) — `handleApprove` nie sprawdza
-    `detail.stale` (`screens/QueueScreen.tsx`);
-  - klik w podpis „Tagi" w „Nowa pamięć" usuwa pierwszy tag — pole jest `<label>`
-    (`screens/HumanCreateDialog.tsx`);
-  - Audyt nigdy nie pokazuje ładowania — `isLoading && !isFetching` w React Query v5 jest zawsze
-    fałszem (`screens/AuditScreen.tsx`);
-  - slug projektu niewidoczny — `MonoId label="slug"` renderuje słowo „slug"
+  - **akord `g ‹litera›` nie odpala już akcji kolejki** — `g a` szło do Audytu **i** zatwierdzało
+    zaznaczoną propozycję (human-gate), bo dwa niezależne listenery na `document` łapały ten sam
+    klawisz. Teraz jeden listener w `hooks/useKeyboard.ts`, a o trasie klawisza (ekran / paleta /
+    komenda kolejki / nic) decyduje wyłącznie czysta `routeKey` w `lib/keyboard.ts`: po `g` każdy
+    drugi klawisz w oknie 900 ms należy do akordu (zmapowany → ekran, inny → nic). Szczegóły:
+    [`design-system.md`](design-system.md) §10;
+  - skrót `A` na nieaktualnej (`stale`) propozycji nie wysyła requestu, tylko pokazuje toast, że
+    zatwierdzenie jest zablokowane (`approveBlockReason` w `lib/proposals.ts`, wołana z
+    `handleApprove` w `screens/QueueScreen.tsx`);
+  - klik w podpis „Tagi" w „Nowa pamięć" nie usuwa już tagu — podpis to `<label htmlFor>` na polu
+    wpisywania (`screens/HumanCreateDialog.tsx`);
+  - Audyt pokazuje skeleton przy pierwszym ładowaniu — `isPending && allRows.length === 0`
+    (`screens/AuditScreen.tsx`);
+  - slug projektu jest widoczny jako wartość — `MonoId` bez `label="slug"`
     (`screens/ProjectsScreen.tsx`, `screens/ProjectSettingsDialog.tsx`);
-  - globalny `:focus-visible` w `globals.css` przebija `outline-none` (poza warstwą, później w
-    pliku) — przenieść do `@layer base` i przejść ekrany, czy fokus nigdzie nie zniknął.
+  - globalny `:focus-visible` w `globals.css` stoi w `@layer base` i nie przebija już `outline-none`
+    ani `rounded-*`; input palety ⌘K zamiast ramki wokół pola ma irisowy dolny keyline
+    (`focus-within:border-ring` na wrapperze w `components/ui/command.tsx`).
 - **Przełącznik projektów od nowa** ⬜ — dziś nieczytelny: nagłówek grupy „Projekty" wygląda jak
   pozycja (styl nagłówków jest tylko w palecie ⌘K), brak ✓ przy aktywnym kontekście, brak separatora
   „Wszystkie/Global" ↔ projekty, brak sluga, input 44 px z ramką fokusu wokół samego pola, „global"
