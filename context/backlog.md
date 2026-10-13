@@ -3,7 +3,16 @@
 Rzeczy świadomie odłożone poza bieżącą wersję. Nie są porzucone — czekają na decyzję albo na sygnał
 z danych (część jest **warunkowa**). Aktywny plan i to, co robimy teraz → [`roadmap.md`](roadmap.md).
 
-**Aktualizacja:** 2026-10-08 · domknięcie v1.6: z [`roadmap.md`](roadmap.md) wróciło strojenie
+**Aktualizacja:** 2026-10-12 · otwarcie v1.8 („Agenci i projekty"): do [`roadmap.md`](roadmap.md)
+poszły OAuth 2.1 + PKCE, typ pamięci `journal`, bugi z przeglądu UX, przełącznik projektów ze znakiem
+projektu (`ProjectAvatar`) i ikona aplikacji. Plugin Claude Code i migracja na SDK v2 zostają tu jako
+warunkowe. Tego samego dnia przegląd UX dashboardu rozbudował sekcję „Dashboard / UI" (stany błędu,
+klawiatura, dialogi, filtry w URL, wąskie okno — zostają tu). Wcześniej tego dnia —
+domknięcie v1.7 (snapshot
+[`archive/roadmap-2026-10-12-v1.7-complete.md`](archive/roadmap-2026-10-12-v1.7-complete.md)): bez
+przesunięć między roadmapą a backlogiem, zakres v1.8 do wybrania stąd; doszły ikona aplikacji i typ
+pamięci `journal`.
+2026-10-08 — domknięcie v1.6: z [`roadmap.md`](roadmap.md) wróciło strojenie
 limitów nocnego jobu (C2, warunkowe — czeka na realną mieszankę propozycji z prune i
 `conflicts_report`); lepszy prune, `conflicts_report`, auto mode i dług 🟠 #5/#7 zrobione w v1.6.
 2026-10-06 — domknięcie v1.5: trzy pozycje długu testowego 🟠 (Vitest w
@@ -32,10 +41,6 @@ Legenda: ⬜ przed nami · ⏸️ warunkowe (czeka na sygnał / decyzję)
 - **Plugin Claude Code** ⏸️ — bundle: config połączenia + skill proaktywności („Warstwa 3" kontraktu
   narzędzi). **Warunkowy:** budujemy tylko, jeśli instrumentacja (ekran Pomiary) pokaże, że czysty
   MCP + `AGENTS.md` nie wymuszają proaktywnego recallu. v1.2 najpierw wyciska maksimum z samego MCP.
-- **OAuth 2.1 + PKCE dla MCP** ⬜ — dla klientów Desktop / web-connector. **Uwaga:** nowa specyfikacja
-  MCP (2026-07-28) zaostrza wymagania wokół auth (walidacja issuera, `application_type` w Dynamic
-  Client Registration, scope accumulation, credential binding) — projektować od razu pod te
-  wymagania, nie pod stary model.
 - **Migracja na nowy standard MCP / SDK v2** ⏸️ — spec z 2026-07-28 wprowadza m.in. stateless
   architecture (bez handshake `initialize`), MRTR (`InputRequiredResult` w trakcie wywołania) i
   standaryzację kodów błędów JSON-RPC. TS SDK v2 jest **ESM-only** (Node 20+, split na
@@ -44,7 +49,10 @@ Legenda: ⬜ przed nami · ⏸️ warunkowe (czeka na sygnał / decyzję)
   z v1 SDK, brak twardego terminu wymuszającego zmianę. Nasz transport MCP jest już bezstanowy
   (Faza 2, `StreamableHTTPServerTransport` bez sesji) — kierunek nowej specyfikacji już pasuje do
   architektury. **Warunkowe:** wracamy do tematu, gdy SDK v2 się ustabilizuje albo pojawi się
-  konkretna potrzeba (np. przy OAuth wyżej).
+  konkretna potrzeba (np. przy OAuth w v1.8, który powstaje na obecnym SDK v1).
+
+> OAuth 2.1 + PKCE i typ pamięci `journal` → w v1.8 ([`roadmap.md`](roadmap.md)). Hook Stop
+> wymuszający wpis `journal` należy do pluginu wyżej i czeka razem z nim.
 
 ## Retrieval i higiena pamięci
 
@@ -101,6 +109,103 @@ Legenda: ⬜ przed nami · ⏸️ warunkowe (czeka na sygnał / decyzję)
 - **Bulk-import dokumentów** ⬜.
 - **Chunk-targeted `get`** ⬜ — pobranie konkretnego fragmentu dokumentu zamiast całości.
 
+## Dashboard / UI
+
+Z przeglądu UX 2026-10-12: przejście apki w przeglądarce (lokalna instancja z danymi dev) + przegląd
+kodu wszystkich ekranów. Każda pozycja sprawdzona w źródle, oznaczone **(E2E)** odtworzone w
+przeglądarce. Ścieżki względem `apps/dashboard/src/`. Zmiany układu, nowe sekcje i komponenty
+zaczynają się od specu w [`design-system.md`](design-system.md) (§12).
+
+> Bugi z przeglądu (akord `g ‹litera›`, skrót `A` na `stale`, klik w „Tagi", ładowanie Audytu,
+> niewidoczny slug, globalny `:focus-visible`), przełącznik projektów ze znakiem projektu
+> (`ProjectAvatar`) i ikona aplikacji → w v1.8 ([`roadmap.md`](roadmap.md)).
+
+### Stany błędu, sesja, zdrowie instancji
+
+- **Błąd ładowania wygląda jak „pusto"** ⬜ — listy nie czytają `isError`: przy błędzie serwera
+  Kolejka pokazuje „Inbox zero", inne ekrany „Brak pamięci / zdarzeń / projektów / tokenów / danych"
+  (Kolejka, Pamięć, Oś czasu, Projekty, `TokenManager`, Audyt, Pomiary); nieudany refetch zostawia
+  starą listę bez ostrzeżenia. §10 wymaga błędu inline z „Ponów" — wzorzec już jest w Ustawieniach.
+- **Wieczny skeleton w detalu propozycji** ⬜ — gdy pobranie pamięci „przed" / źródeł merge się nie
+  uda, `!beforeMemory` trzyma skeleton bez końca (`screens/QueueScreen.tsx`); recenzent nie może
+  zdecydować. Użyć bloku „pamięć niedostępna" jak w B3.
+- **Wygaśnięcie sesji w trakcie pracy** ⬜ — brak globalnej obsługi 401: listy robią się puste,
+  akcje dają tylko toast, ekran logowania pojawia się dopiero przy kolejnym sprawdzeniu sesji (do
+  60 s) i wtedy zrzuca niezapisane formularze (`lib/api.ts`, `lib/query.ts`, `hooks/useSession.ts`).
+- **Pasek zdrowia ukrywa problemy** ⬜ — „Nocny job" pokazuje ✓ także po nieudanym przebiegu (Backup
+  sprawdza `failed`, nocny job nie); brak kafla `secret_blocked`/24h z §9.0 (`secretBlocked24h` jest
+  w typach, nie jest renderowany); brak czasu ostatniego przebiegu / backupu (tooltip)
+  (`components/AppShell.tsx`).
+
+### Kolejka: klawiatura, fokus, czytelność
+
+- **`j`/`k` wyprowadza zaznaczenie poza ekran** ⬜ — brak `scrollIntoView` gdziekolwiek w SPA.
+- **Niewidoczny fokus na wierszach** ⬜ — `focus-visible:outline-none` bez ringu w `ProposalRow` i
+  wierszu przeglądarki pamięci; nawigacja Tabem nie pokazuje pozycji (§10). Wzorzec ringu jest w
+  `OsCzasuScreen`.
+- **Po zatwierdzeniu/odrzuceniu zaznaczenie skacze na pierwszy wiersz** ⬜ — zamiast na następny;
+  fokus ginie razem z odmontowanym przyciskiem.
+- **Wiersze nocnego jobu nie do odróżnienia** ⬜ **(E2E)** — tytuł wiersza propozycji `delete` to
+  „Archiwizacja pamięci mem_…" (ucięty przed ID), nagłówek pamięci widać dopiero w detalu
+  (`rowTitle` w `screens/QueueScreen.tsx`). Serwerowy `summary` powinien nieść nagłówek celu.
+- **Prune po wieku bez powodu** ⬜ **(E2E)** — detal pokazuje samo przekreślenie; uzasadnienie ma
+  tylko prune z LLM (`rationale`). Dopisać powód recency („nieużywana od N dni").
+- **Teksty** ⬜ — żargon w toaście („pamięć zmaterializowana"), angielskie etykiety (zakładka
+  „Body", filtry `approved/archived/purged`), niejasne „acc N" na liście pamięci (§11).
+
+### Dialogi i utrata pracy
+
+- **Dialogi destrukcyjne zamykają się od razu** ⬜ — `AlertDialogAction` bez `preventDefault`
+  (Hard-purge, Odrzuć, bulk approve/reject, Archiwizuj): stanu „Wymazywanie…" nie widać, a przy
+  błędzie wpisany powód przepada. Poprawnie robi to `AutoModeUndoDialog`.
+- **Jednorazowy token można zgubić** ⬜ — okno „pokazujemy raz" zamyka się na Esc i klik obok, akord
+  `g ‹litera›` też je zamyka (`components/TokenReveal.tsx`); kopiowanie po samym http cicho zawodzi.
+  Zamykać tylko przez „Zapisałem token".
+- **Niezapisane zmiany przepadają bez pytania** ⬜ — „Nowa pamięć" (Esc / klik obok / ✕, także
+  wklejony dokument), „Anuluj" w edycji pamięci, formularz Ustawień przy nawigacji; dialog
+  potwierdzenia w Pamięci pyta nawet, gdy nic się nie zmieniło. Flaga „dirty".
+- **„Zatwierdź jako zamiennik" bez potwierdzenia** ⬜ — pierwszy klik w liście kandydatów od razu
+  supersede'uje; wyszukiwanie bez debounce i bez obsługi błędu, starsza odpowiedź nadpisuje nowszą
+  (`components/ProposalActions.tsx`). Wzorzec jest w `RelationsPanel`.
+- **„Promuj do global" bez potwierdzenia** ⬜ — akcja widoczna we wszystkich projektach.
+- **Dialog rotacji tokena** ⬜ — zepsute zdanie („zostanie wydany na jeszcze") sugerujące natychmiastową
+  podmianę wbrew okresowi karencji, czerwony (destrukcyjny) przycisk, zamyka się przed końcem
+  requestu (`components/TokenManager.tsx`).
+
+### Stan w URL i nawigacja
+
+- **Filtry poza URL** ⬜ — Kolejka (origin/type), Pamięć (kind/status/zatwierdzenie/tagi/q), Audyt
+  (filtry + doczytane strony), Pomiary (zakres/bucket/projekt) trzymają filtry w stanie lokalnym;
+  odświeżenie albo „wstecz" (np. po skoku z `DedupHint` do `/pamiec?id=`) je kasuje. `useSearchParams`.
+- **Audyt: „Zarządzaj tokenem →" otwiera tylko listę Projektów** ⬜ — §9.4 chce dialogu tokenów
+  danego projektu (`/projekty?tokens=<id>`).
+- **Paleta ⌘K** ⬜ — wyniki błędu jako „Brak wyników", brak akcji (Nowa pamięć, motyw, ściągawka);
+  debounce → pozycja „⌘K: debounce + indeks" w długu technicznym niżej.
+
+### Układ i wąskie okno
+
+- **Wąskie okno rozjeżdża aplikację** ⬜ **(E2E)** — przy 1024 px w Kolejce tytuły ucinają się do
+  „A…", cała strona dostaje poziomy scroll, a „Zatwierdź jako zamiennik" wypada poza ekran. Rail
+  240 px i search 280 px się nie zwijają, pasek akcji się nie zawija, tabela Projektów ucina kolumny.
+  Zmiana układu → najpierw spec (§9.0, §9.1): rail zwijany do ikon poniżej `lg`, `flex-wrap` paska
+  akcji, `overflow-x-auto` tabel.
+
+### Drobne i dostępność
+
+- **Dostępność** ⬜ — etykiety tylko z placeholdera (filtry tagów i szukania w Pamięci, daty w
+  Audycie), selektor `kind` w „Nowa pamięć" bez `aria-pressed`/radiogroup, drop-zone bez roli i
+  `tabIndex`, `aria-selected` na `role=button` w `ProposalRow`, nazwa przycisku odświeżania to
+  „2 min temu", nazwa przycisku motywu różni się od widocznego tekstu.
+- **Skróty mało odkrywalne** ⬜ — podpowiedź `⌘K` także na Windows, brak widocznego wejścia do
+  ściągawki i podpowiedzi skrótów na pozycjach railu (§10).
+- **Drobne poprawki ekranów** ⬜ — `DedupHint` w „Nowa pamięć" ma martwe linki i copy „propozycja i
+  tak powstała" (tu żadnej nie ma); Onboarding: blok env miesza `setx` i `export` w jednym kopiowaniu
+  (dwa bloki), przy błędzie „Odśwież stronę" bez przycisku; nieudany podgląd purge nic nie pokazuje,
+  a purge dalej jest dozwolony; wylogowanie bez obsługi błędu.
+- **Zepsute polskie znaki w danych** ⬜ — w danych dev jest „za�o�ony" (najpewniej zapis testowy z
+  PowerShella w złym kodowaniu); serwer przyjmuje U+FFFD bez ostrzeżenia. Do zbadania: czy
+  `save_memory` / create powinny ostrzegać albo odrzucać.
+
 ## Dług techniczny / architektura
 
 Z przeglądu technicznego 2026-07-29 → [`tech-review.md`](tech-review.md) (tam objawy z dowodami
@@ -109,7 +214,8 @@ Z przeglądu technicznego 2026-07-29 → [`tech-review.md`](tech-review.md) (tam
 > Wszystkie cztery pozycje 🔴 („boli teraz") → zrobione w v1.4. `GET /api/proposals` bez `LIMIT` (#5)
 > i audyt per projekt (#7) → zrobione w v1.6 („Nocny job na skali"). Vitest w
 > dashboardzie, test throttlingu logowania i test `surface.middleware` (#11–#13) → zrobione w v1.7
-> („Luki w testach z przeglądu technicznego").
+> („Luki w testach z przeglądu technicznego",
+> [`archive/roadmap-2026-10-12-v1.7-complete.md`](archive/roadmap-2026-10-12-v1.7-complete.md)).
 
 - **⌘K: debounce + indeks `memories(updated_at)`** ⬜ 🟠 — request na każdy klawisz, `ILIKE '%q%'` i
   sort po nieindeksowanej kolumnie. Koszt M.
