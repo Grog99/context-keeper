@@ -90,3 +90,16 @@ describe('evaluateAutoModeGuards (A2, czysta funkcja decyzyjna)', () => {
     expect(all).not.toContain('auto_failed');
   });
 });
+
+describe('evaluateAutoModeGuards — kind=journal (roadmap v1.8, journal-kind)', () => {
+  it('journal wyłączony z (a)/(a′) jak event; D1 (not_computed bez wektora) i daily_limit nadal działają', () => {
+    expect(evaluateAutoModeGuards({ ...CLEAN, kind: 'journal', similar: [HIT] })).toEqual([]);
+    expect(evaluateAutoModeGuards({ ...CLEAN, kind: 'journal', similar: null })).toEqual([]);
+    expect(evaluateAutoModeGuards({ ...CLEAN, kind: 'journal', similar: null, vectorStaged: false })).toEqual([
+      'not_computed',
+    ]);
+    expect(
+      evaluateAutoModeGuards({ ...CLEAN, kind: 'journal', similar: null, approvalsInWindow: 50, dailyLimit: 50 }),
+    ).toEqual(['daily_limit']);
+  });
+});

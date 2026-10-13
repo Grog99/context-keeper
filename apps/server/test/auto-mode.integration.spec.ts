@@ -646,4 +646,61 @@ describe('Auto mode — ścieżka zapisu i bezpieczniki (A2, integration, testco
       expect((await plain.proposalsService.getProposal(plainProp.id)).autoHoldReasons).toBeNull();
     });
   });
+
+  describe('kind=journal (roadmap v1.8, journal-kind)', () => {
+    it('zatwierdzony journal + prawie identyczny nowy journal (ten sam wektor) → approved, bez powodów, similar_memories NULL', async () => {
+      const { ctx, provider, model, memoryService } = await freshCase();
+      // Zatwierdzony wpis z autorytatywnym wektorem vec(0, 1).
+      const [existing] = await db
+        .insert(memories)
+        .values({
+          id: generateId(ID_PREFIX.memory),
+          header: 'Dziennik: migracja enuma',
+          body: 'Zrobione: migracja. Na czym skończono: testy. Otwarte: dashboard.',
+          kind: 'journal',
+          tags: [],
+          scope: 'project',
+          projectId: ctx.projectId,
+          status: 'approved',
+          source: 'agent',
+          version: 0,
+          approvedAt: new Date(),
+        })
+        .returning();
+      await db.insert(embeddings).values({
+        id: generateId(ID_PREFIX.embedding),
+        memoryId: existing.id,
+        chunkIndex: 0,
+        chunkText: 'chunk',
+        embeddingModel: model,
+        vector: vec(0, 1),
+      });
+      // Nowy wpis dostaje TEN SAM wektor — dla fact/document byłby to near_duplicate.
+      const next = { kind: 'journal' as const, header: 'Dziennik: migracja enuma (cd.)', body: 'Zrobione: testy. Na czym skończono: UI. Otwarte: docs.' };
+      register(provider, next, [vec(0, 1)]);
+
+      const res = await memoryService.save(next, ctx);
+
+      expect(res.status).toBe('approved');
+      const prop = await proposalForMemory(res.id);
+      expect(prop.autoHoldReasons).toBeNull();
+      expect(prop.similarMemories).toBeNull();
+      expect((await getMemory(res.id))!.kind).toBe('journal');
+    });
+
+    it('wspólny limit dzienny: limit 2 → dwa journal approved, trzeci zapis (fact) pending z daily_limit; journal przy wyczerpanym limicie → pending, daily_limit', async () => {
+      const { ctx, memoryService } = await freshCase({ limit: 2 });
+      expect((await memoryService.save({ header: 'J1', body: 'Pierwszy wpis.', kind: 'journal' }, ctx)).status).toBe('approved');
+      expect((await memoryService.save({ header: 'J2', body: 'Drugi wpis.', kind: 'journal' }, ctx)).status).toBe('approved');
+      const third = await memoryService.save({ header: 'F3', body: 'Fakt po dwóch wpisach.' }, ctx);
+      expect(third.status).toBe('pending');
+      expect((await proposalForMemory(third.id)).autoHoldReasons).toEqual(['daily_limit']);
+
+      const other = await freshCase({ limit: 1 });
+      expect((await other.memoryService.save({ header: 'F1', body: 'Zużywa limit.' }, other.ctx)).status).toBe('approved');
+      const journal = await other.memoryService.save({ header: 'J po limicie', body: 'Wpis przy wyczerpanym limicie.', kind: 'journal' }, other.ctx);
+      expect(journal.status).toBe('pending');
+      expect((await proposalForMemory(journal.id)).autoHoldReasons).toEqual(['daily_limit']);
+    });
+  });
 });

@@ -1038,4 +1038,41 @@ describe('MemoryAdminService (integration, testcontainers) — przeglądarka pam
       }
     });
   });
+
+  describe('kind=journal (roadmap v1.8, journal-kind)', () => {
+    it('promoteToGlobal(<journal>) -> validation_error; wiersz bez zmian, brak rewizji i audytu promote', async () => {
+      const seeded = await seedApprovedMemory({
+        header: 'Wpis dziennika do promocji',
+        body: '## Done\nX.',
+        kind: 'journal',
+        source: 'agent',
+        projectId: projectA.projectId,
+      });
+      const { admin } = buildAdmin(new StubEmbeddingProvider('promote-journal-model'));
+
+      await expect(admin.promoteToGlobal(seeded.id)).rejects.toMatchObject({ code: 'validation_error' });
+
+      const [row] = await db.select().from(memories).where(eq(memories.id, seeded.id));
+      expect(row.scope).toBe('project');
+      expect(row.projectId).toBe(projectA.projectId);
+      expect(row.version).toBe(0);
+      expect(row.status).toBe('approved');
+      const revRows = await db.select().from(revisions).where(eq(revisions.memoryId, seeded.id));
+      expect(revRows).toHaveLength(0);
+      const promoteAudit = await db.select().from(auditLog).where(eq(auditLog.eventType, 'promote'));
+      expect(promoteAudit.some((a) => a.affectedIds.includes(seeded.id))).toBe(false);
+    });
+
+    it('listEvents (Oś czasu) nie zwraca zatwierdzonego wpisu journal', async () => {
+      const journal = await seedApprovedMemory({
+        header: `Wpis dziennika ${generateId('m')}`,
+        kind: 'journal',
+        source: 'agent',
+        projectId: projectA.projectId,
+      });
+      const { admin } = buildAdmin(new StubEmbeddingProvider('list-events-journal-model'));
+      const results = await admin.listEvents({ scope: 'project', projectId: projectA.projectId });
+      expect(results.map((r) => r.id)).not.toContain(journal.id);
+    });
+  });
 });

@@ -13,9 +13,10 @@ import { describeApiError } from '../lib/errors';
 import { toDatetimeLocalValue } from '../lib/format';
 import { queryKeys } from '../lib/query';
 import type { DashboardLimits, HumanCreateResponse, MemoryListItem } from '../types/api';
-import type { MemoryKind, MemoryScope } from '../types/domain';
+import type { HumanCreateKind, MemoryScope } from '../types/domain';
 
-const KINDS: { value: MemoryKind; label: string }[] = [
+// Bez `journal` (roadmap v1.8, #28): dziennik pisze wyłącznie agent; serwer odrzuca go w POST /api/memories.
+const KINDS: { value: HumanCreateKind; label: string }[] = [
   { value: 'fact', label: 'Fakt' },
   { value: 'document', label: 'Dokument' },
   { value: 'event', label: 'Zdarzenie' },
@@ -79,7 +80,7 @@ function HumanCreateForm({ onOpenChange, scope, projectId, projectName }: HumanC
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [kind, setKind] = useState<MemoryKind>('fact');
+  const [kind, setKind] = useState<HumanCreateKind>('fact');
   const [header, setHeader] = useState('');
   const [body, setBody] = useState('');
   const [eventTime, setEventTime] = useState(() => toDatetimeLocalValue(new Date()));

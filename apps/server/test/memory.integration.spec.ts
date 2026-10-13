@@ -1851,4 +1851,252 @@ describe('MemoryService (integration, testcontainers)', () => {
       ).rejects.toMatchObject({ code: 'validation_error' });
     });
   });
+
+  describe('roadmap v1.8 — kind=journal', () => {
+    let projectJournal: ProjectContext;
+
+    beforeAll(async () => {
+      const created = await projects.createProject('memory-test-journal-v18');
+      projectJournal = { projectId: created.project.id, projectName: created.project.name };
+    });
+
+    /** Świeży projekt per test, który liczy wpisy dziennika (list_journal zwraca CAŁY dziennik projektu). */
+    async function freshJournalProject(name: string): Promise<ProjectContext> {
+      const created = await projects.createProject(name);
+      return { projectId: created.project.id, projectName: created.project.name };
+    }
+
+    /** Zatwierdzony wpis `journal` bezpośrednim insertem (jak `seedEvent` wyżej) — z kontrolą `created_at`. */
+    async function seedJournal(values: Partial<typeof schema.memories.$inferInsert> & { projectId: string | null }) {
+      const [row] = await db
+        .insert(schema.memories)
+        .values({
+          id: generateId(ID_PREFIX.memory),
+          header: 'Wpis dziennika',
+          body: '## Done\nZrobione.\n## Where I stopped\nTutaj.\n## Open\nNic.',
+          kind: 'journal',
+          tags: [],
+          scope: 'project',
+          status: 'approved',
+          source: 'agent',
+          approvedAt: new Date(),
+          ...values,
+        })
+        .returning();
+      return row;
+    }
+
+    async function proposalFor(memoryId: string, projectId: string) {
+      const rows = await db.select().from(proposals).where(eq(proposals.projectId, projectId));
+      const match = rows.find((p) => (p.payload as { memoryId: string }).memoryId === memoryId);
+      if (!match) throw new Error(`Brak proposala dla memoryId=${memoryId}`);
+      return match;
+    }
+
+    const minutesAgo = (n: number): Date => new Date(Date.now() - n * 60_000);
+
+    it('save({kind:"journal"}) (auto mode off) -> pending, id ~ ^mem_, proposal type=create z payload.kind=journal, bez eventTime, similar_memories NULL', async () => {
+      // Zdrowy provider: wektor POWSTAJE, więc NULL w similar_memories znaczy „nie dotyczy" (jak event), a nie
+      // „nie policzono".
+      const { memory: healthyMemory } = buildMemoryService(new StubEmbeddingProvider('journal-save-model', topicVector(0.9)));
+      const res = await healthyMemory.save(
+        {
+          header: 'Dodano kind=journal do enuma',
+          body: '## Done\nMigracja.\n## Where I stopped\nTesty.\n## Open\nDashboard.',
+          kind: 'journal',
+        },
+        projectJournal,
+      );
+      expect(res.status).toBe('pending');
+      expect(res.id).toMatch(/^mem_/);
+
+      const proposalRow = await proposalFor(res.id, projectJournal.projectId);
+      expect(proposalRow.type).toBe('create');
+      expect(proposalRow.origin).toBe('agent');
+      const payload = proposalRow.payload as { kind: string; eventTime?: string };
+      expect(payload.kind).toBe('journal');
+      expect(payload).not.toHaveProperty('eventTime');
+      expect(proposalRow.similarMemories).toBeNull();
+    });
+
+    it('save({kind:"journal", eventTime}) -> validation_error, zero nowych proposali', async () => {
+      const before = await db.select().from(proposals).where(eq(proposals.projectId, projectJournal.projectId));
+
+      await expect(
+        memory.save(
+          { header: 'Wpis z datą', body: 'Treść.', kind: 'journal', eventTime: '2026-03-01T09:00:00Z' },
+          projectJournal,
+        ),
+      ).rejects.toMatchObject({ code: 'validation_error' });
+
+      const after = await db.select().from(proposals).where(eq(proposals.projectId, projectJournal.projectId));
+      expect(after.length).toBe(before.length);
+    });
+
+    it('supersedes: kind=journal + supersedes -> validation_error; supersedes na wpis journal -> validation_error bez proposala update; journal z innego projektu -> not_found', async () => {
+      const fact = await memory.devSeedApproved({
+        header: 'Fakt do próby supersede wpisem dziennika',
+        body: 'Treść faktu.',
+        kind: 'fact',
+        scope: 'project',
+        projectId: projectJournal.projectId,
+      });
+      await expect(
+        memory.save(
+          { header: 'Korekta dziennikiem', body: 'Treść.', kind: 'journal', supersedes: fact.id },
+          projectJournal,
+        ),
+      ).rejects.toMatchObject({ code: 'validation_error' });
+
+      const ownJournal = await seedJournal({ header: 'Wpis do próby korekty', projectId: projectJournal.projectId });
+      await expect(
+        memory.save({ header: 'Korekta wpisu', body: 'Nowa treść.', kind: 'fact', supersedes: ownJournal.id }, projectJournal),
+      ).rejects.toMatchObject({ code: 'validation_error' });
+      const updates = await db
+        .select()
+        .from(proposals)
+        .where(and(eq(proposals.type, 'update'), eq(proposals.projectId, projectJournal.projectId)));
+      expect(updates.filter((p) => p.affectedIds.includes(ownJournal.id))).toHaveLength(0);
+
+      const foreignJournal = await seedJournal({ header: 'Wpis projektu B', projectId: projectB.projectId });
+      await expect(
+        memory.save({ header: 'Korekta cudzego wpisu', body: 'Treść.', kind: 'fact', supersedes: foreignJournal.id }, projectJournal),
+      ).rejects.toMatchObject({ code: 'not_found' });
+    });
+
+    it('search: journal NIGDY w domyślnym zestawie (także z togglem eventów i w all_projects); kind:"journal" go zwraca', async () => {
+      const ctx = await freshJournalProject('memory-test-journal-search');
+      const marker = 'journalsearchdefaultmarker1';
+      const seeded = await seedJournal({ header: `Wpis ${marker}`, body: `Treść ${marker}.`, projectId: ctx.projectId });
+
+      const byDefault = await memory.search({ query: marker }, ctx);
+      expect(byDefault.some((r) => r.id === seeded.id)).toBe(false);
+
+      const withEventToggle = await memory.search({ query: marker }, { ...ctx, includeEventsInDefaultSearch: true });
+      expect(withEventToggle.some((r) => r.id === seeded.id)).toBe(false);
+
+      const crossDefault = await memory.search({ query: marker }, ctx, 'all_projects');
+      expect(crossDefault.some((r) => r.id === seeded.id)).toBe(false);
+
+      const explicit = await memory.search({ query: marker, kind: 'journal' }, ctx);
+      expect(explicit.some((r) => r.id === seeded.id)).toBe(true);
+    });
+
+    it('search kind:"journal" bez age-decay: wpis sprzed 365 dni jako jedyne trafienie ma score DOKŁADNIE 1/(RRF_K+1)', async () => {
+      const ctx = await freshJournalProject('memory-test-journal-decay');
+      const marker = 'journalnodecaymarker2';
+      await seedJournal({
+        header: `Stary wpis ${marker}`,
+        body: `Treść ${marker}.`,
+        projectId: ctx.projectId,
+        createdAt: new Date(Date.now() - 365 * 86_400_000),
+      });
+
+      const results = await memory.search({ query: marker, kind: 'journal' }, ctx);
+      expect(results.length).toBe(1);
+      expect(results[0].score).toBeCloseTo(1 / (config.get('RRF_K') + 1), 10);
+    });
+
+    it('listJournal: wyłącznie zatwierdzone journal bieżącego projektu, created_at DESC; element dokładnie {id, header, tags, createdAt}', async () => {
+      const ctx = await freshJournalProject('memory-test-journal-list');
+      const older = await seedJournal({ header: 'Starszy wpis', tags: ['a'], projectId: ctx.projectId, createdAt: minutesAgo(120) });
+      const newer = await seedJournal({ header: 'Nowszy wpis', tags: ['b', 'c'], projectId: ctx.projectId, createdAt: minutesAgo(60) });
+
+      // Szum, który NIE może wejść do wyniku.
+      await seedJournal({ header: 'Wpis innego projektu', projectId: projectB.projectId, createdAt: minutesAgo(1) });
+      await seedJournal({ header: 'Wpis global', scope: 'global', projectId: null, createdAt: minutesAgo(1) });
+      await seedJournal({ header: 'Wpis zarchiwizowany', status: 'archived', projectId: ctx.projectId, createdAt: minutesAgo(1) });
+      await memory.save({ header: 'Wpis oczekujący', body: 'Czeka w kolejce.', kind: 'journal' }, ctx);
+      await memory.devSeedApproved({ header: 'Fakt projektu', body: 'Fakt.', kind: 'fact', scope: 'project', projectId: ctx.projectId });
+      await db.insert(schema.memories).values({
+        id: generateId(ID_PREFIX.memory),
+        header: 'Zdarzenie projektu',
+        body: 'Zdarzenie.',
+        kind: 'event',
+        tags: [],
+        scope: 'project',
+        projectId: ctx.projectId,
+        status: 'approved',
+        source: 'human',
+        approvedAt: new Date(),
+        eventTime: new Date(),
+      });
+
+      const items = await memory.listJournal({}, ctx);
+      expect(items.map((i) => i.id)).toEqual([newer.id, older.id]);
+      expect(Object.keys(items[0]).sort()).toEqual(['createdAt', 'header', 'id', 'tags']);
+      expect(items[0]).toEqual({
+        id: newer.id,
+        header: 'Nowszy wpis',
+        tags: ['b', 'c'],
+        createdAt: newer.createdAt.toISOString(),
+      });
+    });
+
+    it('listJournal limit: domyślnie 10 (z 12); {limit:3} -> 3 najnowsze; {limit:0}/{limit:51}/{limit:2.5} -> validation_error', async () => {
+      const ctx = await freshJournalProject('memory-test-journal-limit');
+      const seeded: Array<{ id: string }> = [];
+      for (let i = 0; i < 12; i++) {
+        seeded.push(await seedJournal({ header: `Wpis ${i}`, projectId: ctx.projectId, createdAt: minutesAgo(100 - i) }));
+      }
+      const newestFirst = [...seeded].reverse().map((r) => r.id);
+
+      const byDefault = await memory.listJournal({}, ctx);
+      expect(byDefault.map((i) => i.id)).toEqual(newestFirst.slice(0, 10));
+
+      const three = await memory.listJournal({ limit: 3 }, ctx);
+      expect(three.map((i) => i.id)).toEqual(newestFirst.slice(0, 3));
+
+      for (const limit of [0, 51, 2.5]) {
+        await expect(memory.listJournal({ limit }, ctx), `limit=${limit}`).rejects.toMatchObject({
+          code: 'validation_error',
+        });
+      }
+    });
+
+    it('listJournal nie bumpuje access_count/last_accessed_at i nie zapisuje search_events', async () => {
+      const ctx = await freshJournalProject('memory-test-journal-noaccess');
+      const seeded = await seedJournal({ header: 'Wpis bez odczytu', projectId: ctx.projectId });
+      const eventsBefore = await db.select().from(searchEvents).where(eq(searchEvents.projectId, ctx.projectId));
+
+      const items = await memory.listJournal({}, ctx);
+      expect(items.map((i) => i.id)).toEqual([seeded.id]);
+
+      const [row] = await db.select().from(schema.memories).where(eq(schema.memories.id, seeded.id));
+      expect(row.accessCount).toBe(0);
+      expect(row.lastAccessedAt).toBeNull();
+      const eventsAfter = await db.select().from(searchEvents).where(eq(searchEvents.projectId, ctx.projectId));
+      expect(eventsAfter.length).toBe(eventsBefore.length);
+    });
+
+    it('[Q1] created_at wpisu = proposals.created_at (czas zapisu): akceptacja B przed A nie zmienia kolejności listJournal (B, A)', async () => {
+      const ctx = await freshJournalProject('memory-test-journal-created-at');
+      const provider = new StubEmbeddingProvider('journal-created-at-model', topicVector(0.9));
+      const { memory: journalMemory } = buildMemoryService(provider);
+      const proposalsService = new ProposalsService(db, config, audit, new EmbeddingService(provider, config));
+
+      const a = await journalMemory.save({ header: 'Wpis A', body: 'Zapisany pierwszy.', kind: 'journal' }, ctx);
+      const b = await journalMemory.save({ header: 'Wpis B', body: 'Zapisany drugi.', kind: 'journal' }, ctx);
+      const propA = await proposalFor(a.id, ctx.projectId);
+      const propB = await proposalFor(b.id, ctx.projectId);
+      await db.execute(sql`UPDATE proposals SET created_at = now() - interval '2 days' WHERE id = ${propA.id}`);
+      await db.execute(sql`UPDATE proposals SET created_at = now() - interval '1 day' WHERE id = ${propB.id}`);
+
+      // Akceptacja ODWROTNIE do zapisu: najpierw B, potem A.
+      await proposalsService.approve(propB.id, { actor: 'tester' });
+      await proposalsService.approve(propA.id, { actor: 'tester' });
+
+      for (const [memoryId, proposalId] of [
+        [a.id, propA.id],
+        [b.id, propB.id],
+      ]) {
+        const [propRow] = await db.select().from(proposals).where(eq(proposals.id, proposalId));
+        const [memRow] = await db.select().from(schema.memories).where(eq(schema.memories.id, memoryId));
+        expect(memRow.createdAt.getTime(), memoryId).toBe(propRow.createdAt.getTime());
+      }
+
+      const items = await memory.listJournal({}, ctx);
+      expect(items.map((i) => i.id)).toEqual([b.id, a.id]);
+    });
+  });
 });

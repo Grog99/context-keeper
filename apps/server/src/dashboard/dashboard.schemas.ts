@@ -160,7 +160,8 @@ export type CreateRelationBody = z.output<typeof createRelationBody>;
 // ---- POST /api/memories ---------------------------------------------------
 
 export const humanCreateBody = z.strictObject({
-  kind: z.enum(memoryKind.enumValues),
+  // `journal` (roadmap v1.8, #28) pisze wyłącznie agent — human-create go nie oferuje (400).
+  kind: z.enum(memoryKind.enumValues).exclude(['journal']),
   header: z.string(),
   body: z.string(),
   tags: z.array(z.string()).optional(),

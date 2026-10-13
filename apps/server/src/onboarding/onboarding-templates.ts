@@ -63,7 +63,7 @@ export const AGENTS_MD_BLOCK = `## ${AGENTS_MD_HEADING} (MCP)
 
 This project uses a Context Keeper instance as shared, persistent, human-gated
 project memory, exposed as an MCP server named \`context-keeper\`. Tools:
-\`search_memory\`, \`get_memory\`, \`save_memory\`. Each tool's own MCP description
+\`search_memory\`, \`get_memory\`, \`save_memory\`, \`list_journal\`. Each tool's own MCP description
 carries the full contract (writes are human-gated, secrets are rejected, return
 statuses) — this snippet only covers when to reach for them and what to store.
 
@@ -74,8 +74,14 @@ environment variable and is never committed. If a memory tool returns \`project_
 with an account token, \`list_projects\` and \`create_project\` fix the setup.
 
 Work proactively:
-- At the START of a task, call \`search_memory\` to pull relevant project context
-  (decisions, conventions, environment specifics) before you start guessing.
+- At the START of a task, call \`list_journal\` to see what was done last, where work
+  stopped and what is still open; then call \`search_memory\` to pull relevant project
+  context (decisions, conventions, environment specifics) before you start guessing.
+- After you finish a task that changed the repo or the project state (code, docs, a
+  deploy, a decision) — and whenever you stop with work still open — save a journal
+  entry: \`save_memory\` with \`kind: "journal"\`, a one-line \`header\` summarising the
+  task, and a markdown body with three sections: Done / Where I stopped / Open. Pure
+  Q&A that changed nothing needs no entry.
 - When a non-obvious decision, fact, or convention comes up, propose it with
   \`save_memory\` yourself — don't wait to be asked.
 
@@ -90,6 +96,10 @@ What to save, and as which kind:
   "now", and it is when the event HAPPENED, not when you save it. Backdating is
   unrestricted. Correcting an event afterwards (including its \`event_time\`) stays
   human-only.
+- \`journal\` — the work-log entry described above. No \`event_time\` (the save time is
+  the entry's time); never corrected with \`supersedes\` — write a new entry instead.
+  Not returned by a default \`search_memory\`; read it with \`list_journal\` (or
+  \`search_memory\` with \`kind: "journal"\`).
 - To fix something already in memory, find it via \`search_memory\` and re-save it
   with \`supersedes: <id>\` — your new header+body replace it in place — rather than
   adding a near-duplicate.

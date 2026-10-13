@@ -21,15 +21,16 @@ export interface AutoModeGuardInput {
  * zapis ma ZOSTAĆ w kolejce (pusty = wolno auto-zatwierdzić). Kolejność wyniku = kolejność
  * `AUTO_HOLD_REASONS`. `auto_failed` nigdy nie wychodzi stąd — ustawia je wyłącznie `catch` w
  * `MemoryService.decideAutoMode`.
- * - `near_duplicate` (a): create fact/document z niepustym `similar` (event wyłączony — G2/G4, korekta ma (b)),
+ * - `near_duplicate` (a): create fact/document z niepustym `similar` (event i journal wyłączone — G2/G4,
+ *   korekta ma (b); kolejne wpisy dziennika z natury są do siebie podobne),
  * - `not_computed` (a′): create fact/document bez sygnału (`similar===null`) ORAZ — D1 — każdy zapis
- *   (też event i update) bez staging wektora,
+ *   (też event, journal i update) bez staging wektora,
  * - `human_target` (b): korekta treści napisanej/poprawionej przez człowieka,
- * - `daily_limit` (c): limit okna 24 h wyczerpany.
+ * - `daily_limit` (c): limit okna 24 h wyczerpany (dotyczy każdego zapisu, także journal).
  */
 export function evaluateAutoModeGuards(input: AutoModeGuardInput): AutoHoldReason[] {
   const { type, kind } = input;
-  const isFactOrDocCreate = type === 'create' && kind !== 'event';
+  const isFactOrDocCreate = type === 'create' && (kind === 'fact' || kind === 'document');
   const reasons = new Set<AutoHoldReason>();
 
   if (isFactOrDocCreate && input.similar !== null && input.similar.length > 0) reasons.add('near_duplicate');

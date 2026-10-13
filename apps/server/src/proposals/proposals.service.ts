@@ -486,6 +486,9 @@ export class ProposalsService {
             // INVARIANT: `memories.auto_approved_at` i `proposals.auto_approved_at` (niżej) dostają TEN SAM `now` —
             // filtr po tokenie i join cofania (`memory/auto-mode-filters.ts`) łączą pamięć z propozycją po ich równości.
             autoApprovedAt: opts.auto ? now : null,
+            // #14 (v1.8): czas wpisu dziennika = moment zapisu przez agenta, nie akceptacji — inaczej
+            // przy human-gate `list_journal` sortowałby po kolejności zatwierdzania.
+            createdAt: createPayload.kind === 'journal' ? propRow.createdAt : undefined,
           });
           materializedId = created.id;
           await this.writeRevision(tx, {
@@ -1051,6 +1054,8 @@ export class ProposalsService {
       origin: ProposalOrigin;
       /** v1.6 A2: znacznik „treść z auto mode" (G6) — `null` dla akceptacji człowieka/merge. */
       autoApprovedAt?: Date | null;
+      /** v1.8 [Q1]: nadpisuje `created_at` (domyślnie `now()` bazy = czas materializacji). Tylko `journal`. */
+      createdAt?: Date;
     },
   ): Promise<MemoryRow> {
     const [row] = await tx
@@ -1068,6 +1073,7 @@ export class ProposalsService {
         version: 0,
         approvedAt: new Date(),
         autoApprovedAt: ctx.autoApprovedAt ?? null,
+        ...(ctx.createdAt ? { createdAt: ctx.createdAt } : {}),
         // Tylko `kind='event'` (roadmap v1.3, "kind=event przez agenta") — `CreatePayload.eventTime`
         // niesie ISO string (jsonb), `MergePayload` nigdy nie ma tego pola (nocny job produkuje
         // wyłącznie `kind='fact'`, `nightly.service.ts`), stąd `in` zamiast optional chaining.

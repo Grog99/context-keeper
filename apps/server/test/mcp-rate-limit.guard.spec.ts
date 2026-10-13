@@ -116,3 +116,32 @@ describe('McpRateLimitGuard', () => {
     expect(guard.canActivate(ctxFor(undefined, call('search_memory')))).toBe(true);
   });
 });
+
+describe('list_journal (roadmap v1.8, journal-kind) — narzędzie pamięci z limitem RATE_LIMIT_SEARCH_PER_MIN', () => {
+  it('klucz tokenId:projectId, limit z RATE_LIMIT_SEARCH_PER_MIN, kubełek osobny od search_memory; nierozwiązany projekt bez kubełka', () => {
+    expect(rateLimitKey(auth('tok_a', 'account', resolved('proj_x')), 'list_journal')).toBe('tok_a:proj_x');
+
+    const limiter = new RateLimiterService(
+      config({ RATE_LIMIT_SEARCH_PER_MIN: 1, RATE_LIMIT_SAVE_PER_MIN: 1000, RATE_LIMIT_GET_PER_MIN: 1000 }, 1000),
+    );
+    const guard = new McpRateLimitGuard(limiter);
+    const buckets = (): string[] => [...(limiter as unknown as { buckets: Map<string, unknown> }).buckets.keys()];
+
+    // Nierozwiązany projekt: przepuszcza zawsze i nie zakłada kubełka.
+    const unresolved = ctxFor(
+      auth('tok_acc', 'account', { status: 'unresolved', reason: 'project_required' }),
+      call('list_journal'),
+    );
+    for (let i = 0; i < 3; i++) expect(guard.canActivate(unresolved)).toBe(true);
+    expect(buckets()).toEqual([]);
+
+    const journal = ctxFor(auth('tok_acc', 'account', resolved('proj_x')), call('list_journal'));
+    expect(guard.canActivate(journal)).toBe(true);
+    expect(() => guard.canActivate(journal)).toThrow(RateLimitedException);
+
+    // search_memory tego samego tokena i projektu ma własny, nietknięty kubełek.
+    const search = ctxFor(auth('tok_acc', 'account', resolved('proj_x')), call('search_memory'));
+    expect(guard.canActivate(search)).toBe(true);
+    expect(buckets().sort()).toEqual(['tok_acc:proj_x:list_journal', 'tok_acc:proj_x:search_memory']);
+  });
+});

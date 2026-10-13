@@ -141,3 +141,13 @@ describe('normalizeProjectName', () => {
     );
   });
 });
+
+describe('AGENTS_MD_BLOCK — rytuał dziennika (roadmap v1.8, journal-kind)', () => {
+  it('wymienia list_journal, kind: "journal" i trzy sekcje wpisu (Done / Where I stopped / Open)', () => {
+    expect(AGENTS_MD_BLOCK).toContain('list_journal');
+    expect(AGENTS_MD_BLOCK).toContain('kind: "journal"');
+    for (const section of ['Done', 'Where I stopped', 'Open']) {
+      expect(AGENTS_MD_BLOCK, section).toContain(section);
+    }
+  });
+});

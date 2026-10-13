@@ -20,6 +20,7 @@ import { buildScopeError } from './scope-errors';
 import {
   CREATE_PROJECT_DESCRIPTION,
   GET_MEMORY_DESCRIPTION,
+  LIST_JOURNAL_DESCRIPTION,
   LIST_PROJECTS_DESCRIPTION,
   SAVE_MEMORY_DESCRIPTION,
   SEARCH_MEMORY_DESCRIPTION,
@@ -140,7 +141,9 @@ export function createMcpServer(
           .optional()
           .describe(
             'Optional kind filter. Default is fact + document; event is excluded from the default ' +
-              'unless enabled for your project by an operator. Pass kind="event" to target it explicitly.',
+              'unless enabled for your project by an operator; journal is NEVER in the default. Pass ' +
+              'kind="event" or kind="journal" to target them explicitly (for the latest journal entries ' +
+              'use list_journal).',
           ),
         // Zawsze w schemacie (oba typy tokena, G3): token projektowy z `true` dostaje jawny
         // `validation_error` zamiast cichego strip-u nieznanego klucza przez SDK.
@@ -186,7 +189,7 @@ export function createMcpServer(
       description: SAVE_MEMORY_DESCRIPTION,
       inputSchema: {
         header: z.string().min(1).describe('Short one-line title (<=200 chars).'),
-        body: z.string().min(1).describe('Content in markdown (fact/event <=~8KB, document <=~256KB).'),
+        body: z.string().min(1).describe('Content in markdown (fact/event/journal <=~8KB, document <=~256KB).'),
         tags: z
           .array(z.string())
           .optional()
@@ -196,7 +199,9 @@ export function createMcpServer(
           .optional()
           .describe(
             'Optional memory kind. Default "fact". "document" for longer canonical reference ' +
-              'material. "event" for something that happened at a point in time — requires event_time.',
+              'material. "event" for something that happened at a point in time — requires event_time. ' +
+              '"journal" for a work-log entry after a task (Done / Where I stopped / Open) — no ' +
+              'event_time, no supersedes.',
           ),
         event_time: z
           .string()
@@ -214,8 +219,9 @@ export function createMcpServer(
           .describe(
             'Optional. Id of an existing fact/document in YOUR project to correct in place. ' +
               'When set, header+body are the full corrected replacement content (kind must match the ' +
-              'target). Cannot target events, global memories, or other projects. Not available for ' +
-              'kind="event" — correcting an event (including its event_time) is human-only.',
+              'target). Cannot target events, journal entries, global memories, or other projects. Not ' +
+              'available for kind="event" or kind="journal" — correcting an event (including its ' +
+              'event_time) is human-only, and a journal entry is corrected by saving a new one.',
           ),
         relations: z
           .array(
@@ -247,6 +253,26 @@ export function createMcpServer(
           ctx,
         );
         return jsonResult(result);
+      }),
+  );
+
+  server.registerTool(
+    'list_journal',
+    {
+      description: LIST_JOURNAL_DESCRIPTION,
+      inputSchema: {
+        // Zakres liczby całkowitej CELOWO nie w zodzie (jak przy `create_project`): SDK zwróciłby
+        // surowy błąd walidacji zamiast koperty `{code}`; `MemoryService.listJournal` rzuca `validation_error`.
+        limit: z
+          .number()
+          .optional()
+          .describe('Optional, default 10, max 50 — how many of the most recent journal entries to return.'),
+      },
+    },
+    async ({ limit }) =>
+      runTool(async () => {
+        const ctx = await requireProject();
+        return jsonResult(await memory.listJournal({ limit }, ctx));
       }),
   );
 
