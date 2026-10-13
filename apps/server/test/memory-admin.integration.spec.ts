@@ -30,6 +30,7 @@ import { MemoryAdminService } from '../src/memory/memory-admin.service';
 import type { ProjectContext } from '../src/projects/projects.service';
 import type { ProjectsService } from '../src/projects/projects.service';
 import { StubEmbeddingProvider } from './helpers/fakes';
+import { endPool } from './helpers/pg-teardown';
 import { buildProjectsService } from './helpers/services';
 
 // Stub providera (`helpers/fakes.ts`): wektor stały — testy tutaj sprawdzają MECHANIKĘ
@@ -88,7 +89,7 @@ describe('MemoryAdminService (integration, testcontainers) — przeglądarka pam
   });
 
   afterAll(async () => {
-    await pool?.end();
+    await endPool(pool);
     await container?.stop();
   });
 

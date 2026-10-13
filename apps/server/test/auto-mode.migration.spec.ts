@@ -5,6 +5,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { migrateUpTo, REAL_MIGRATIONS_FOLDER } from './helpers/migrations';
+import { endPool } from './helpers/pg-teardown';
 
 /**
  * Migracja 0019 (roadmap v1.6, A2 „auto mode": `projects.auto_mode`/`auto_mode_daily_limit`,
@@ -38,7 +39,7 @@ describe('migracja 0019 — upgrade 0018 → 0019 na niepustej bazie (testcontai
   });
 
   afterAll(async () => {
-    await pool?.end();
+    await endPool(pool);
     await container?.stop();
     if (tmpFolder) rmSync(tmpFolder, { recursive: true, force: true });
   });

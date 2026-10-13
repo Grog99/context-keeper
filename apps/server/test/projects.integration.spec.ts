@@ -19,6 +19,7 @@ import { readProjectHeader, resolveProjectScope } from '../src/projects/project-
 import { ProjectSlugService } from '../src/projects/project-slug.service';
 import { DEFAULT_TOKEN_LABEL, ProjectsService, type CreatedProject, type TokenLookup } from '../src/projects/projects.service';
 import { effectiveTokenStatus } from '../src/projects/token-status';
+import { endPool } from './helpers/pg-teardown';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -42,7 +43,7 @@ describe('ProjectsService (integration, testcontainers) — roadmap v1.3, wiele 
   });
 
   afterAll(async () => {
-    await pool?.end();
+    await endPool(pool);
     await container?.stop();
   });
 

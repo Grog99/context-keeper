@@ -6,7 +6,9 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
 import type { AppModule as AppModuleType } from '../../src/app.module';
+import { PG_POOL, type PgPool } from '../../src/db/db.tokens';
 import * as schema from '../../src/db/schema';
+import { endPool, poolDrained } from './pg-teardown';
 
 export interface McpE2eApp {
   app: NestExpressApplication;
@@ -35,7 +37,7 @@ export async function startMcpE2eApp(envOverrides: Record<string, string> = {}):
     const migPool = new Pool({ connectionString: container.getConnectionUri() });
     const migDb = drizzle(migPool, { schema });
     await migrate(migDb, { migrationsFolder: resolve(process.cwd(), 'src/db/migrations') });
-    await migPool.end();
+    await endPool(migPool);
 
     const { AppModule }: { AppModule: typeof AppModuleType } = await import('../../src/app.module');
     app = await NestFactory.create<NestExpressApplication>(AppModule, { logger: false });
@@ -48,7 +50,10 @@ export async function startMcpE2eApp(envOverrides: Record<string, string> = {}):
       app: started,
       baseUrl: `http://127.0.0.1:${port}/mcp`,
       stop: async () => {
+        // Pulę zamyka `DbModule.onModuleDestroy` w `app.close()` — czekamy na sockety przed stopem kontenera.
+        const drained = poolDrained(started.get<PgPool>(PG_POOL));
         await started.close();
+        await drained;
         await container.stop();
       },
     };

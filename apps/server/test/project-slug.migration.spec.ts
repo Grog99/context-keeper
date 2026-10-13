@@ -7,6 +7,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { isValidProjectSlug } from '../src/projects/slug';
+import { endPool } from './helpers/pg-teardown';
 import { assignSlugsLikeMigration, MIGRATION_SLUG_FIXTURES } from './helpers/project-slug-fixtures';
 
 /**
@@ -57,7 +58,7 @@ describe('migracja 0012 — backfill slugów na niepustej bazie (testcontainers)
   });
 
   afterAll(async () => {
-    await pool?.end();
+    await endPool(pool);
     await container?.stop();
     if (tmpFolder) rmSync(tmpFolder, { recursive: true, force: true });
   });

@@ -5,6 +5,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { migrateUpTo, REAL_MIGRATIONS_FOLDER } from './helpers/migrations';
+import { endPool } from './helpers/pg-teardown';
 
 /**
  * Migracja 0020 (roadmap v1.6, A3+A4 „nadzór po fakcie": `proposals.token_id` + FK `SET NULL` + indeks częściowy
@@ -51,7 +52,7 @@ describe('migracja 0020 — upgrade 0019 → 0020 na niepustej bazie (testcontai
   }, 120_000);
 
   afterAll(async () => {
-    await pool?.end();
+    await endPool(pool);
     await container?.stop();
     if (tmpFolder) rmSync(tmpFolder, { recursive: true, force: true });
   });

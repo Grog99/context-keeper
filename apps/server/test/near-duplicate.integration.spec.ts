@@ -30,6 +30,7 @@ import type { ProjectContext, ProjectsService } from '../src/projects/projects.s
 import { ProposalsService } from '../src/proposals/proposals.service';
 import { UsageService } from '../src/usage/usage.service';
 import { StubEmbeddingProvider } from './helpers/fakes';
+import { endPool } from './helpers/pg-teardown';
 import { buildProjectsService } from './helpers/services';
 
 /** Wektor w płaszczyźnie osi (a, b) obróconej o kąt `t`: dystans kosinusowy do `vec(a, b, 0)` to
@@ -164,7 +165,7 @@ describe('Detekcja prawie-duplikatów przy zapisie (A1, integration, testcontain
   });
 
   afterAll(async () => {
-    await pool?.end();
+    await endPool(pool);
     await container?.stop();
   });
 

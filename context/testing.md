@@ -60,6 +60,11 @@ Odstępstwa `dashboard-validation.http.spec.ts` i `dashboard-inputs.coverage.spe
 wzorcem** — nowy test bierze sufiks z tabeli. Nazwy `describe` / `it` po polsku, z odniesieniem do wymagania
 (FR-…, AC…), jak w istniejących specach.
 
+**Teardown kontenera:** w `afterAll` najpierw `await endPool(pool)` (`helpers/pg-teardown.ts`), potem
+`container.stop()` — nie gołe `pool.end()`. pg-pool rozwiązuje `end()` przed zamknięciem socketów, a stop
+kontenera (fast shutdown) wysyła wtedy podłączonym klientom FATAL 57P01, który Vitest liczy jako „Unhandled
+Error" i oblewa przebieg mimo zielonych testów. Gdy pulę zamyka `app.close()`, użyj `poolDrained` (jak `mcp-app.ts`).
+
 Jeden przebieg vitest: `pnpm verify` albo `pnpm --filter @context-keeper/server test`. Integration, migration i
 e2e wymagają **Dockera** (testcontainers); wersja Node z `.nvmrc`. E2e wchodzi przez `AppModule`, który czyta
 `.env` z korzenia repo (`env.ts`, `DOTENV_FALLBACKS`) — lokalny `.env` może zmienić wynik.
