@@ -22,7 +22,7 @@ const MAX_VISIBLE_TAGS = 2;
 /**
  * §8.2/§9.1 — wiersz kolejki `min-h-[56px]` (makieta `.row`): [checkbox opcjonalny] [StatusChip]
  * [type ikona] Header (truncate) … [OriginPath] [tagi ≤2 + "+N"] [czas rel.]. Stale → dodatkowy
- * `danger` badge po prawej. Hover `surface-muted`, aktywny `accent-subtle` + lewy pasek 2px iris.
+ * `danger` badge po prawej. Hover `surface-muted`, aktywny `accent-subtle` + lewy pasek 2px `primary` (akcent).
  *
  * DOM restrukturyzowany dla bulk selection (roadmap v1.3, "Bulk approve/reject w kolejce"): zewnętrzny
  * `div` NIE jest już `role="button"` (a11y — element interaktywny zagnieżdżony w innym interaktywnym

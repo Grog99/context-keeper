@@ -148,12 +148,19 @@ projektach dało się je odróżnić na pierwszy rzut oka. Zmiany UI zaczynają 
   wyliczony ze sluga (działa bez klikania, także dla projektów od agentów przez `create_project`);
   **opcjonalnie ręczny**: ikona z kuratorowanego zestawu (~24 z lucide) i kolor w ustawieniach
   projektu. **Osobna paleta** (~8 przytłumionych odcieni, tokeny light/dark) spoza statusów (§2.2) i
-  `kind` (§2.3). Wszędzie, gdzie pojawia się projekt: przełącznik, wiersze Kolejki i Pamięci,
-  Projekty, Audyt. Migracja: nullowalne `projects.icon` / `projects.color`. Spec w §8.2 + §9.3.
+  `kind` (§2.3) **i zielonego akcentu** (§2.1, od ikony aplikacji). Wszędzie, gdzie pojawia się
+  projekt: przełącznik, wiersze Kolejki i Pamięci, Projekty, Audyt. Migracja: nullowalne `projects.icon` / `projects.color`. Spec w §8.2 + §9.3.
   Decyzja 2026-10-12 (pamięć projektu `mem_ymwfih1jboy9`).
-- **Ikona aplikacji** ⬜ — dziś SPA nie ma żadnej. Znak spójny z design systemem: favicon (SVG +
-  fallback PNG/ICO), `apple-touch-icon`, wersja do README / GitHuba; przy okazji `document.title` per
-  ekran (dziś kilka kart wygląda tak samo).
+- **Ikona aplikacji** ✅ — własny znak „zapieczętowana księga z dziurką od klucza" (metafora
+  human-gate) zamiast lucide `Diamond`: `public/favicon.svg` z wariantem dark przez
+  `@media (prefers-color-scheme)`, rastry `favicon.ico` (16+32) i `apple-touch-icon.png` (180)
+  generowane jednorazowo i commitowane, komponent `BrandMark` w railu i na logowaniu (wariant za `data-theme`,
+  tokeny `--brand-*`), znak przy tytule README. **Akcent UI i `info` zmieniły się z irysu na
+  butelkową zieleń znaku** (§2.1, P3; kontrast AA zmierzony w obu motywach, strażnik
+  `theme-tokens.spec.ts`). `document.title` per ekran: „(N) ‹Ekran› · Context Keeper" (licznik
+  kolejki tylko przy N > 0), na logowaniu „Logowanie · Context Keeper". Spec w §2.1, §2.5, §8.2, §9.0.
+  **Odchylenie:** w Pomiarach zieleń akcentu leży obok zieleni `success` — zostaje w
+  [`backlog.md`](backlog.md), do rozwiązania razem z paletą `ProjectAvatar`.
 - **Typ pamięci `journal`** ⬜ — wpis dodawany przez agenta po każdym zrobionym zadaniu (co zrobiono,
   na czym skończono, co zostało otwarte). **Do rozstrzygnięcia przed implementacją** (ticket przez
   `prepare-ticket`): relacja do istniejącego `kind: event` (osobny `kind` czy `event` z
