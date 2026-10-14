@@ -38,7 +38,14 @@ import { api } from '../lib/api';
 import { useActiveContext, contextQueryParams } from '../lib/context';
 import { describeApiError, describeBulkFailures } from '../lib/errors';
 import { formatAbsoluteTime, formatRelativeTime, pluralProposals } from '../lib/format';
-import { conflictTargetAge, isConflictProposal, PROPOSAL_CAPABILITIES, swapDirectionLabel } from '../lib/proposals';
+import {
+  APPROVE_BLOCKED_MESSAGE,
+  approveBlockReason,
+  conflictTargetAge,
+  isConflictProposal,
+  PROPOSAL_CAPABILITIES,
+  swapDirectionLabel,
+} from '../lib/proposals';
 import { queryKeys } from '../lib/query';
 import { toQueryString } from '../lib/query-string';
 import { cn } from '../lib/utils';
@@ -425,6 +432,12 @@ export function QueueScreen() {
   // zamiast działać na lekkim elemencie listy bez payloadu.
   function handleApprove(): void {
     if (!detail) return;
+    // Skrót `A` omija zablokowany przycisk "Zatwierdź" — bramka musi stać też tutaj, przed requestem.
+    const blocked = approveBlockReason(detail);
+    if (blocked) {
+      toast.error(APPROVE_BLOCKED_MESSAGE[blocked]);
+      return;
+    }
     approveMutation.mutate({ id: detail.id });
   }
 

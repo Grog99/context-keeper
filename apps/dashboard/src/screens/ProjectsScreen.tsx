@@ -137,7 +137,7 @@ export function ProjectsScreen() {
                     </span>
                   </td>
                   <td className="px-3.5 py-2.5">
-                    <MonoId value={project.slug} label="slug" />
+                    <MonoId value={project.slug} />
                   </td>
                   <td className="px-3.5 py-2.5">
                     <MonoId value={project.id} />

@@ -87,3 +87,17 @@ export function swapDirectionLabel(targetAge: 'older' | 'newer' | null): string 
 export function isConflictProposal(proposal: Pick<ProposalView, 'type' | 'payload' | 'editedPayload'>): boolean {
   return proposal.type === 'delete' && Boolean((proposal.editedPayload ?? proposal.payload).counterpartId);
 }
+
+/** Powód, dla którego zatwierdzenie propozycji jest zablokowane po stronie UI (przed requestem). */
+export type ApproveBlockReason = 'stale';
+
+export const APPROVE_BLOCKED_MESSAGE: Record<ApproveBlockReason, string> = {
+  stale:
+    'Zatwierdzenie zablokowane — propozycja jest nieaktualna (stale): baza zmieniła się od jej utworzenia. Przejrzyj różnicę albo odrzuć.',
+};
+
+/** `null` = można zatwierdzać. Skrót `A` omijał zablokowany przycisk "Zatwierdź" przy `stale` (roadmap v1.8,
+ * "Bugi z przeglądu UX") — ta sama bramka stoi teraz przed `approveMutation` niezależnie od źródła akcji. */
+export function approveBlockReason(proposal: Pick<ProposalView, 'stale'>): ApproveBlockReason | null {
+  return proposal.stale ? 'stale' : null;
+}
