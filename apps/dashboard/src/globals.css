@@ -35,23 +35,28 @@
   --border-strong: #C4BFBA;
   --input: #D6D3D1;
 
-  /* brand accent — iris */
-  --primary: #5B4BD6;
-  --primary-hover: #4E3FC0;
+  /* akcent marki — butelkowa zieleń znaku (G3, §2.1) */
+  --primary: #1E4D3A;
+  --primary-hover: #173D2E;
   --primary-foreground: #FFFFFF;
-  --accent-subtle: #EEEBFB;
-  --ring: #5B4BD6;
+  --accent-subtle: #E2EBE6;
+  --ring: #1E4D3A;
+
+  /* znak marki — tylko dla BrandMark (§2.5); kafel i pieczęć mają osobny wariant dark */
+  --brand-tile: #1E4D3A;
+  --brand-paper: #F3EBD8;
+  --brand-seal: #C9643A;
 
   /* status — semantyka (para: solid + subtle + foreground-on-subtle) */
   --success: #16A34A;  --success-subtle: #DCFCE7;  --success-foreground: #14532D;
   --warning: #B45309;  --warning-subtle: #FEF3C7;  --warning-foreground: #78350F;
   --danger:  #DC2626;  --danger-subtle:  #FEE2E2;  --danger-foreground:  #7F1D1D;
-  --info:    #5B4BD6;  --info-subtle:    #EEEBFB;  --info-foreground:    #372F8C;
+  --info:    #1E4D3A;  --info-subtle:    #E2EBE6;  --info-foreground:    #143327;
   --neutral: #78716C;  --neutral-subtle: #E8E4DF;  --neutral-foreground: #44403C;
 
   /* kind — TOŻSAMOŚĆ, nie status (§2.3; konsument: `components/KindMarker.tsx`).
      Hue dobrane celowo w martwych strefach koła: petrol ~198° i wrzos ~312° nie sąsiadują z
-     żadnym znaczeniem z §2.2 (zieleń 145°, bursztyn 35°, czerwień 5°, iris 250°). Niska chroma
+     żadnym znaczeniem z §2.2 (zieleń statusu 142° i akcentu ~150°, bursztyn 35°, czerwień 5°). Niska chroma
      jest częścią kontraktu — te kolory mają czytać się jak barwiony papier, nie jak sygnał.
      `fact` świadomie NIE ma tokenu: to najczęstszy kind, zostaje neutralną bazą. */
   --kind-document: #4C7788;  --kind-document-subtle: #E3EDF1;  --kind-document-foreground: #2B5464;
@@ -75,16 +80,20 @@
     --border-strong: #4C463F;
     --input: #383430;
 
-    --primary: #8B7CF6;
-    --primary-hover: #9E90F8;
-    --primary-foreground: #15131F;
-    --accent-subtle: #221E3A;
-    --ring: #8B7CF6;
+    --primary: #7FB79A;
+    --primary-hover: #93C5AA;
+    --primary-foreground: #0D1A14;
+    --accent-subtle: #17261F;
+    --ring: #7FB79A;
+
+    --brand-tile: #26604A;
+    --brand-paper: #F3EBD8;
+    --brand-seal: #D6744A;
 
     --success: #4ADE80;  --success-subtle: #0F2A18;  --success-foreground: #BBF7D0;
     --warning: #FBBF24;  --warning-subtle: #2A2008;  --warning-foreground: #FDE68A;
     --danger:  #F87171;  --danger-subtle:  #2A1414;  --danger-foreground:  #FECACA;
-    --info:    #8B7CF6;  --info-subtle:    #221E3A;  --info-foreground:    #DDD6FE;
+    --info:    #7FB79A;  --info-subtle:    #17261F;  --info-foreground:    #CFE6DA;
     --neutral: #A8A29E;  --neutral-subtle: #2A2724;  --neutral-foreground: #E7E5E4;
 
     --kind-document: #79ADC3;  --kind-document-subtle: #1D2D34;  --kind-document-foreground: #BAD3DE;
@@ -106,15 +115,18 @@
   --border: #D6D3D1;
   --border-strong: #C4BFBA;
   --input: #D6D3D1;
-  --primary: #5B4BD6;
-  --primary-hover: #4E3FC0;
+  --primary: #1E4D3A;
+  --primary-hover: #173D2E;
   --primary-foreground: #FFFFFF;
-  --accent-subtle: #EEEBFB;
-  --ring: #5B4BD6;
+  --accent-subtle: #E2EBE6;
+  --ring: #1E4D3A;
+  --brand-tile: #1E4D3A;
+  --brand-paper: #F3EBD8;
+  --brand-seal: #C9643A;
   --success: #16A34A;  --success-subtle: #DCFCE7;  --success-foreground: #14532D;
   --warning: #B45309;  --warning-subtle: #FEF3C7;  --warning-foreground: #78350F;
   --danger:  #DC2626;  --danger-subtle:  #FEE2E2;  --danger-foreground:  #7F1D1D;
-  --info:    #5B4BD6;  --info-subtle:    #EEEBFB;  --info-foreground:    #372F8C;
+  --info:    #1E4D3A;  --info-subtle:    #E2EBE6;  --info-foreground:    #143327;
   --neutral: #78716C;  --neutral-subtle: #E8E4DF;  --neutral-foreground: #44403C;
   --kind-document: #4C7788;  --kind-document-subtle: #E3EDF1;  --kind-document-foreground: #2B5464;
   --kind-event:    #955F8B;  --kind-event-subtle:    #F2E9F0;  --kind-event-foreground:    #63365A;
@@ -131,15 +143,18 @@
   --border: #383430;
   --border-strong: #4C463F;
   --input: #383430;
-  --primary: #8B7CF6;
-  --primary-hover: #9E90F8;
-  --primary-foreground: #15131F;
-  --accent-subtle: #221E3A;
-  --ring: #8B7CF6;
+  --primary: #7FB79A;
+  --primary-hover: #93C5AA;
+  --primary-foreground: #0D1A14;
+  --accent-subtle: #17261F;
+  --ring: #7FB79A;
+  --brand-tile: #26604A;
+  --brand-paper: #F3EBD8;
+  --brand-seal: #D6744A;
   --success: #4ADE80;  --success-subtle: #0F2A18;  --success-foreground: #BBF7D0;
   --warning: #FBBF24;  --warning-subtle: #2A2008;  --warning-foreground: #FDE68A;
   --danger:  #F87171;  --danger-subtle:  #2A1414;  --danger-foreground:  #FECACA;
-  --info:    #8B7CF6;  --info-subtle:    #221E3A;  --info-foreground:    #DDD6FE;
+  --info:    #7FB79A;  --info-subtle:    #17261F;  --info-foreground:    #CFE6DA;
   --neutral: #A8A29E;  --neutral-subtle: #2A2724;  --neutral-foreground: #E7E5E4;
   --kind-document: #79ADC3;  --kind-document-subtle: #1D2D34;  --kind-document-foreground: #BAD3DE;
   --kind-event:    #C695BC;  --kind-event-subtle:    #352231;  --kind-event-foreground:    #DEC4D9;

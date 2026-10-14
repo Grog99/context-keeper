@@ -3,7 +3,7 @@ import { Slot } from '@radix-ui/react-slot';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '../../lib/utils';
 
-/** §8.1 design-system.md: warianty primary(iris solid)/secondary(obrys border-strong)/ghost/
+/** §8.1 design-system.md: warianty primary(akcent solid)/secondary(obrys border-strong)/ghost/
  * destructive(danger); rozmiary sm/md; radius md. */
 const buttonVariants = cva(
   'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ' +

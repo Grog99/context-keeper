@@ -2,7 +2,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
   Archive,
-  Diamond,
   FolderKanban,
   History,
   Inbox,
@@ -15,13 +14,16 @@ import {
   Wrench,
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useTheme } from '../hooks/useTheme';
 import { type ScreenKey, useGlobalKeyboard } from '../hooks/useKeyboard';
 import { api } from '../lib/api';
 import { useActiveContext } from '../lib/context';
+import { documentTitle, screenLabelForPath } from '../lib/document-title';
 import { queryKeys } from '../lib/query';
 import type { DashboardMetrics, ProjectListItem } from '../types/api';
+import { BrandMark } from './BrandMark';
 import { CommandPalette } from './CommandPalette';
 import { ContextSwitcher } from './ContextSwitcher';
 import { HumanCreateDialog } from '../screens/HumanCreateDialog';
@@ -57,6 +59,9 @@ const PROJECTS_NAV_ITEM: RailNavItem = { to: '/projekty', label: 'Projekty', ico
  * sekcji railu pod "Projekty" — ten sam precedens co `PROJECTS_NAV_ITEM`. */
 const SETTINGS_NAV_ITEM: RailNavItem = { to: '/ustawienia', label: 'Ustawienia', icon: Settings, screen: 'ustawienia' };
 
+/** Pozycje railu, z których `document.title` bierze nazwę ekranu (§9.0) — nawigacja + dolna sekcja. */
+const RAIL_ITEMS: readonly RailNavItem[] = [...NAV_ITEMS, PROJECTS_NAV_ITEM, SETTINGS_NAV_ITEM];
+
 const SCREEN_PATH: Record<ScreenKey, string> = {
   kolejka: '/kolejka',
   pamiec: '/pamiec',
@@ -85,7 +90,7 @@ function railNavLinkClass({ isActive }: { isActive: boolean }): string {
     'relative flex h-9 items-center gap-2.5 rounded-md px-2 text-[13.5px] font-medium text-muted-foreground transition-colors',
     'hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
     // Aktywna pozycja niesie akcent trzema kanałami (nie samym tłem): tint `accent-subtle`,
-    // ikona w irysie i 2px pasek marki przy krawędzi railu — spójne z `ProposalRow` (§8.2).
+    // ikona w kolorze akcentu i 2px pasek akcentu przy krawędzi railu — spójne z `ProposalRow` (§8.2).
     isActive &&
       "bg-accent-subtle text-foreground [&_svg]:text-primary before:absolute before:inset-y-1 before:left-0 before:w-[2px] before:rounded-full before:bg-primary before:content-['']",
   ]
@@ -118,6 +123,7 @@ function RailNavLink({ item, children }: RailNavLinkProps) {
  */
 export function AppShell() {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const queryClient = useQueryClient();
   const { theme, toggleTheme } = useTheme();
   const { active } = useActiveContext();
@@ -131,6 +137,8 @@ export function AppShell() {
     queryFn: () => api.get<DashboardMetrics>('/metrics'),
     refetchInterval: 20_000,
   });
+
+  useDocumentTitle(documentTitle(screenLabelForPath(pathname, RAIL_ITEMS), metrics?.queueDepth));
 
   const { data: projects } = useQuery({
     queryKey: queryKeys.projects(),
@@ -161,7 +169,7 @@ export function AppShell() {
     >
       <aside className="flex min-h-0 flex-col gap-1 overflow-y-auto border-r border-border-strong bg-background p-3">
         <div className="flex items-center gap-2 px-2 pb-2.5 pt-1 text-[15px] font-semibold tracking-tight">
-          <Diamond className="size-[22px] fill-primary text-primary" />
+          <BrandMark className="size-[22px]" />
           Context Keeper
         </div>
         <ContextSwitcher projects={(projects ?? []).map((p) => ({ id: p.id, name: p.name }))} />

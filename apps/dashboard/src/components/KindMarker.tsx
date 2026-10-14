@@ -8,7 +8,7 @@ import type { MemoryKind } from '../types/domain';
  * go zostawia działające rozróżnienie, co jest wymogiem P2 (kolor nigdy nie jest jedynym sygnałem).
  *
  * Hue (`--kind-*` w `globals.css`) leżą świadomie w martwych strefach koła — petrol ~198° i wrzos
- * ~312° nie sąsiadują z żadnym znaczeniem z §2.2 (zieleń 145°, bursztyn 35°, czerwień 5°, iris 250°),
+ * ~312° nie sąsiadują z żadnym znaczeniem z §2.2 (zieleń 142° (status) i ~150° (akcent), bursztyn 35°, czerwień 5°),
  * więc nie da się ich odczytać jako status. Niska chroma jest częścią kontraktu: te kolory mają
  * czytać się jak barwiony papier, nie jak sygnał. `fact` NIE ma koloru — jako najczęstszy kind
  * zostaje neutralną bazą, od której odcinają się dwa pozostałe.

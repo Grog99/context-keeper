@@ -8,7 +8,7 @@ import { cn } from '../../lib/utils';
  * „zaznacz wszystkie" w pasku filtrów `QueueScreen`. Radix (nie natywny `<input type="checkbox">`),
  * bo `indeterminate` („zaznacz wszystkie" gdy zaznaczona jest tylko CZĘŚĆ widocznej listy) jest tu
  * deklaratywny (`checked="indeterminate"`) — natywny input wymaga imperatywnego zapisu przez ref.
- * Checked/indeterminate = `bg-primary` (iris, jak `Switch`); focus ring jak reszta interaktywnych
+ * Checked/indeterminate = `bg-primary` (akcent, jak `Switch`); focus ring jak reszta interaktywnych
  * (§10 — focus-visible zawsze widoczny). */
 const Checkbox = React.forwardRef<
   React.ElementRef<typeof CheckboxPrimitive.Root>,

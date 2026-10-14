@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Diamond } from 'lucide-react';
+import { BrandMark } from '../components/BrandMark';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { ApiError, api } from '../lib/api';
+import { documentTitle, LOGIN_SCREEN_TITLE } from '../lib/document-title';
 import { queryKeys } from '../lib/query';
 
 interface LoginResponse {
@@ -17,6 +19,8 @@ export function LoginScreen() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const queryClient = useQueryClient();
+
+  useDocumentTitle(documentTitle(LOGIN_SCREEN_TITLE));
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -42,7 +46,7 @@ export function LoginScreen() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm rounded-lg border border-border-strong bg-surface p-8 shadow-md">
         <div className="mb-6 flex items-center gap-2 text-[15px] font-semibold tracking-tight text-foreground">
-          <Diamond className="size-[22px] fill-primary text-primary" />
+          <BrandMark className="size-[22px]" />
           Context Keeper
         </div>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
