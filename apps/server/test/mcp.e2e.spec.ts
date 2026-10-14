@@ -49,10 +49,10 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
     await mcpApp?.stop();
   });
 
-  it('tools/list zwraca dokładnie 3 narzędzia z load-bearing kontraktem w opisach', async () => {
+  it('tools/list zwraca dokładnie 4 narzędzia z load-bearing kontraktem w opisach', async () => {
     await withClient(token, undefined, async (client) => {
       const { tools } = await client.listTools();
-      expect(tools.map((t) => t.name).sort()).toEqual(['get_memory', 'save_memory', 'search_memory']);
+      expect(tools.map((t) => t.name).sort()).toEqual(['get_memory', 'list_journal', 'save_memory', 'search_memory']);
 
       const save = tools.find((t) => t.name === 'save_memory')!;
       expect(save.description).toMatch(/pending/i);
@@ -394,6 +394,65 @@ describe('MCP e2e — oficjalny SDK client po Streamable HTTP', () => {
       expect(res.isError).toBe(true);
       const envelope = JSON.parse(textOf(res as CallToolResult)) as { code: string };
       expect(envelope.code).toBe('validation_error');
+    });
+  });
+
+  describe('roadmap v1.8 — kind=journal i list_journal', () => {
+    it('list_journal: inputSchema = [limit], opis niesie START i get_memory; opis save_memory niesie journal, list_journal i trzy sekcje wpisu', async () => {
+      await withClient(token, undefined, async (client) => {
+        const { tools } = await client.listTools();
+        const listJournal = tools.find((t) => t.name === 'list_journal');
+        expect(listJournal).toBeDefined();
+        const props = (listJournal!.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
+        expect(Object.keys(props)).toEqual(['limit']);
+        expect(listJournal!.description).toContain('START');
+        expect(listJournal!.description).toContain('get_memory');
+
+        const save = tools.find((t) => t.name === 'save_memory')!;
+        for (const fragment of ['journal', 'list_journal', 'Done', 'Where I stopped', 'Open']) {
+          expect(save.description, fragment).toContain(fragment);
+        }
+      });
+    });
+
+    it('list_journal zwraca {id, header, tags, createdAt} z zasianym wpisem; {limit: 0} -> isError + validation_error; save_memory {kind: "journal"} -> pending', async () => {
+      const memoryService = app.get(MemoryService);
+      const projectId = (await app.get(ProjectsService).resolveByToken(token))!.project.id;
+      const seeded = await memoryService.devSeedApproved({
+        header: 'Wpis dziennika e2e',
+        body: '## Done\nE2e.\n## Where I stopped\nTutaj.\n## Open\nNic.',
+        kind: 'journal',
+        tags: ['e2e'],
+        scope: 'project',
+        projectId,
+      });
+
+      await withClient(token, undefined, async (client) => {
+        const listRes = await client.callTool({ name: 'list_journal', arguments: {} });
+        expect(listRes.isError).not.toBe(true);
+        const items = JSON.parse(textOf(listRes as CallToolResult)) as Array<Record<string, unknown>>;
+        expect(items.some((i) => i.id === seeded.id)).toBe(true);
+        for (const item of items) {
+          expect(Object.keys(item).sort()).toEqual(['createdAt', 'header', 'id', 'tags']);
+        }
+
+        const badLimit = await client.callTool({ name: 'list_journal', arguments: { limit: 0 } });
+        expect(badLimit.isError).toBe(true);
+        const envelope = JSON.parse(textOf(badLimit as CallToolResult)) as { code: string };
+        expect(envelope.code).toBe('validation_error');
+
+        const saveRes = await client.callTool({
+          name: 'save_memory',
+          arguments: {
+            header: 'Wpis dziennika przez MCP',
+            body: '## Done\nZapis.\n## Where I stopped\nKoniec.\n## Open\nNic.',
+            kind: 'journal',
+          },
+        });
+        expect(saveRes.isError).not.toBe(true);
+        const saved = JSON.parse(textOf(saveRes as CallToolResult)) as { id: string; status: string };
+        expect(saved.status).toBe('pending');
+      });
     });
   });
 

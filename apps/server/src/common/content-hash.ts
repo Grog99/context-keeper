@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
 
+import type { MemoryKind } from '../db/schema/enums';
+
 export interface ContentHashInput {
   header: string;
   body: string;
   scope: 'global' | 'project';
   projectId: string | null;
-  kind: 'fact' | 'document' | 'event';
+  kind: MemoryKind;
   /** Wyłącznie dla `kind='event'` (roadmap v1.3, "kind=event przez agenta") — patrz komentarz
    * `computeContentHash` niżej. Ignorowane (nie wchodzi do materiału hasha) dla `fact`/`document`. */
   eventTime?: Date | null;
@@ -28,6 +30,9 @@ const FIELD_SEPARATOR = String.fromCharCode(31); // ASCII Unit Separator
  * identyczne z formułą migracji 0011 (bez szóstego pola) — bezwarunkowe dołożenie zmieniłoby hash
  * WSZYSTKICH istniejących fact/document i wymagałoby migracji 0012 przeliczającej
  * `proposals.content_hash`, tak jak zrobiła to 0011 dla `kind`.
+ *
+ * `journal` (roadmap v1.8) nie ma `event_time` (jego czas to moment zapisu), więc NIE ma szóstego
+ * pola — `kind` w materiale wystarcza, żeby wpis dziennika nie sklejał się z `fact` o tej samej treści.
  */
 export function computeContentHash(input: ContentHashInput): string {
   const fields = [input.header, input.body, input.scope, input.projectId ?? '', input.kind];

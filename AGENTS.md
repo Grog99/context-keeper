@@ -7,12 +7,17 @@
 
 Ten projekt **dogfooduje własną instancję** jako trwałą pamięć projektu. Pamięć jest wystawiona
 jako serwer MCP `context-keeper` (skonfigurowany w commitowanym [`.mcp.json`](.mcp.json)).
-Narzędzia: `mcp__context-keeper__search_memory`, `get_memory`, `save_memory`.
+Narzędzia: `mcp__context-keeper__search_memory`, `get_memory`, `save_memory`, `list_journal`.
 
 **Tryb pracy: proaktywny.**
 
-- **Na starcie zadania** wołaj `search_memory`, żeby pobrać istotny kontekst projektu (decyzje,
-  konwencje, specyfikę środowiska) — zanim zaczniesz zgadywać.
+- **Na starcie zadania** wołaj `list_journal` (co zrobiono ostatnio, na czym skończono, co zostało
+  otwarte), a potem `search_memory`, żeby pobrać istotny kontekst projektu (decyzje, konwencje,
+  specyfikę środowiska) — zanim zaczniesz zgadywać.
+- **Po zakończonym zadaniu, które zmieniło repo albo stan** (kod, docs, deploy, decyzja), **oraz przy
+  przerwaniu pracy** z otwartymi wątkami zapisz wpis dziennika: `save_memory` z `kind: "journal"`,
+  `header` = jednolinijkowe podsumowanie zadania, body w markdownie z sekcjami **Zrobione** /
+  **Na czym skończono** / **Otwarte**. Czyste Q&A bez zmian — bez wpisu.
 - **Gdy pojawi się nieoczywista decyzja lub konwencja**, sam proponuj ją przez `save_memory`,
   bez czekania na polecenie.
 
@@ -36,6 +41,9 @@ Narzędzia: `mcp__context-keeper__search_memory`, `get_memory`, `save_memory`.
   ZDARZENIA, nie zapisu. Backdate bez ograniczeń, daty przyszłe dozwolone. Poprawienie już
   zapisanego zdarzenia (w tym jego `event_time`) zostaje po stronie człowieka — `supersedes`
   nie działa na eventy.
+- `journal` — wpis dziennika po zadaniu (rytuał wyżej): bez `event_time` (czasem wpisu jest moment
+  zapisu); bez `supersedes` w obie strony — korekta = nowy wpis. Poza domyślnym `search_memory`,
+  czytany przez `list_journal` (albo `search_memory` z `kind: "journal"`).
 - Żeby poprawić coś, co już jest w pamięci, znajdź to przez `search_memory` i zapisz ponownie z
   `supersedes: <id>` — zamiast dokładać luźny duplikat.
 - Żeby powiązać zapisywaną pamięć z inną już istniejącą, dołóż `relations: [{type, targetId}]`

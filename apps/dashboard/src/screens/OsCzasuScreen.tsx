@@ -61,7 +61,8 @@ export function OsCzasuScreen() {
       <h1 className="mb-1 text-xl font-semibold tracking-tight">Oś czasu</h1>
       <p className="mb-5 max-w-2xl text-[13.5px] text-muted-foreground">
         Zdarzenia (<span className="font-mono">kind=event</span>) w kolejności chronologicznej, wg{' '}
-        <span className="font-mono">event_time</span>. Tworzone wyłącznie przez człowieka w „Nowa pamięć".
+        <span className="font-mono">event_time</span>. Dodaje je człowiek w „Nowa pamięć" albo agent przez{' '}
+        <span className="font-mono">save_memory</span>.
       </p>
 
       {isLoading ? (

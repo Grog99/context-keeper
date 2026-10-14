@@ -78,14 +78,17 @@ Pięć znaczeń. Każde ma: `solid` (ikona/kropka/akcja), `subtle` (tło chipa),
 
 > Dopisane po rewizji kontrastu (2026-07-27). Zastępuje wcześniejszą regułę „`kind` zawsze neutralny".
 
-`kind` (`fact`/`document`/`event`) dostaje **własny kolor**, ale należący do rozłącznej rodziny
+`kind` (`fact`/`document`/`event`/`journal`) dostaje **własny kolor**, ale należący do rozłącznej rodziny
 znaczeniowej niż §2.2. Reguła P3 nie mówi „kolor tylko dla statusu" — mówi, że **każdy kolor coś
 znaczy**. Tożsamość rekordu to prawomocne znaczenie; nielegalne jest dopiero mieszanie jej z sygnałem.
 
 Trzy zasady, które trzymają te rodziny osobno:
 
-1. **Hue z martwych stref koła.** Statusy zajmują 142° (zieleń — w tej samej strefie co akcent marki ~150°, §2.1), 35° (bursztyn) i 5° (czerwień). `kind` bierze **petrol ~198°** i **wrzos ~312°** — pasma, w których nie ma żadnego
-   znaczenia z §2.2, więc pomyłka „to chyba ostrzeżenie" jest strukturalnie niemożliwa.
+1. **Hue z martwych stref koła.** Statusy zajmują 142° (zieleń — w tej samej strefie co akcent marki ~150°, §2.1), 35° (bursztyn) i 5° (czerwień). `kind` bierze **petrol ~198°**, **wrzos ~312°** i **oliwkę ~90°** (v1.8, `journal`) — pasma, w których nie ma żadnego
+   znaczenia z §2.2, więc pomyłka „to chyba ostrzeżenie" jest strukturalnie niemożliwa. Oliwka leży w
+   największej luce między bursztynem (26° light / 43° dark) a zielenią statusu (142°) i akcentu (~150°),
+   ≥ 47° od nich; niska chroma odróżnia ją od nasyconej zieleni sukcesu (świadomie: najbliższy sąsiad
+   w rodzinie `kind`, dlatego kształt i ikona `journal` są najmocniej odmienne).
 2. **Niska chroma jako część kontraktu** (~22–30% nasycenia). Nasycony kolor czyta się jako sygnał;
    przygaszony czyta się jako barwiony papier. Podbicie nasycenia tych tokenów łamie regułę,
    nawet jeśli hue zostaje.
@@ -100,11 +103,26 @@ Trzy zasady, które trzymają te rodziny osobno:
 | `kind-event` | `#955F8B` | `#C695BC` | gutter (kropkowany), obrys markera |
 | `kind-event-subtle` | `#F2E9F0` | `#352231` | tło markera |
 | `kind-event-foreground` | `#63365A` | `#DEC4D9` | ikona na `subtle`, stempel `event_time` |
+| `kind-journal` | `#64794E` | `#95B276` | gutter (podwójna linia), obrys markera |
+| `kind-journal-subtle` | `#EBF0E6` | `#29331F` | tło markera |
+| `kind-journal-foreground` | `#465A30` | `#CFDCC1` | ikona na `subtle` |
+
+Kontrasty `journal`: `#64794E` na `#FFFFFF` ≈ 4.8:1, na `#F2F0ED` ≈ 4.2:1; `#95B276` na `#1E1C1A`
+≈ 7.2:1; foreground/subtle light ≈ 6.6:1, dark ≈ 9.2:1.
 
 **Kolor jest tu kanałem trzecim, nie jedynym** (P2). `kind` niesie równolegle: **kształt** (gutter
-przy lewej krawędzi — `fact` żaden, `document` pełny, `event` kropkowany), **ikonę**
-(`notebook`/`file-text`/`clock` w `KindMarker`) i dopiero **kolor**. Wyłączenie koloru zostawia
+przy lewej krawędzi — `fact` żaden, `document` pełny, `event` kropkowany, `journal` **podwójna
+linia** 1px + 1px + 1px, „Ruled ledger" §0), **ikonę**
+(`notebook`/`file-text`/`clock`/`scroll-text` w `KindMarker`) i dopiero **kolor**. Wyłączenie koloru zostawia
 działające rozróżnienie — to jest test, który każda zmiana w tej sekcji musi przejść.
+
+```
+ wiersz listy, lewa krawędź (3px)
+ │   fact      — brak paska
+ █   document  — pełny
+ ┊   event     — kropkowany (3px/3px)
+ ‖   journal   — podwójna linia (1px · 1px · 1px)
+```
 
 Implementacja: [`components/KindMarker.tsx`](../apps/dashboard/src/components/KindMarker.tsx)
 (`KindMarker` + `KindGutter`) — jedno miejsce definicji, konsumowane przez wiersz i detal §9.2.
@@ -339,7 +357,7 @@ Bazujemy na shadcn (kopiowane do repo → pełna kontrola). Poniżej — bazowe 
 
 **`MonoId`** — `mem_…`/`ck_…`/`rev_…` w mono `text-xs`, klik = kopiuj (toast). Token zawsze maskowany poza jednorazowym reveal.
 
-**`ProposalRow`** — wiersz kolejki `h-12`: `[StatusChip] [KindMarker] [type ikona] Header (truncate) … [OriginPath] [tagi ≤2 + „+N"] [czas rel.]`. Stale → dodatkowy `danger` badge po prawej. Hover `surface-muted`, aktywny `accent-subtle` + lewy pasek `2px` `primary`. `kind` (v1.4) tymi samymi kanałami co wiersz pamięci (§2.3): `KindGutter` przy lewej krawędzi (ustępuje paskowi zaznaczenia) + `KindMarker`; propozycja bez `kind` w payloadzie (patch `update` bez zmiany kind, `delete`) dostaje pusty slot 22px, żeby tytuły się nie rozjeżdżały. Podpowiedź „podobne do istniejących" (v1.6, A1) → ikona `sparkles` w kolorze `info` tuż za tytułem (`similarHint`; tooltip + `aria-label`) — sygnał dla recenzenta zatwierdzającego bez otwierania detalu. Propozycja `delete` z detektora sprzeczności (v1.6, B3) ma tytuł „Sprzeczność: archiwizacja ‹id› (sprzeczne z ‹id›)” (z `summary.memoryId`/`summary.counterpartId` — serwerowo z efektywnego payloadu, więc po zamianie kierunku tytuł się odwraca), żeby recenzent odróżnił ją od zwykłej archiwizacji bez otwierania detalu; ikona wiersza bez zmian (`trash-2`).
+**`ProposalRow`** — wiersz kolejki `h-12`: `[StatusChip] [KindMarker] [type ikona] Header (truncate) … [OriginPath] [tagi ≤2 + „+N"] [czas rel.]`. Stale → dodatkowy `danger` badge po prawej. Hover `surface-muted`, aktywny `accent-subtle` + lewy pasek `2px` `primary`. `kind` (v1.4) tymi samymi kanałami co wiersz pamięci (§2.3): `KindGutter` przy lewej krawędzi (ustępuje paskowi zaznaczenia) + `KindMarker`; propozycja bez `kind` w payloadzie (patch `update` bez zmiany kind, `delete`) dostaje pusty slot 22px, żeby tytuły się nie rozjeżdżały. `journal` (v1.8) — ten sam `KindGutter`/`KindMarker`, bez dodatkowych znaczników; propozycja `journal` nie ma podpowiedzi „podobne do istniejących" (`similar_memories` zawsze NULL, jak `event`). Podpowiedź „podobne do istniejących" (v1.6, A1) → ikona `sparkles` w kolorze `info` tuż za tytułem (`similarHint`; tooltip + `aria-label`) — sygnał dla recenzenta zatwierdzającego bez otwierania detalu. Propozycja `delete` z detektora sprzeczności (v1.6, B3) ma tytuł „Sprzeczność: archiwizacja ‹id› (sprzeczne z ‹id›)” (z `summary.memoryId`/`summary.counterpartId` — serwerowo z efektywnego payloadu, więc po zamianie kierunku tytuł się odwraca), żeby recenzent odróżnił ją od zwykłej archiwizacji bez otwierania detalu; ikona wiersza bez zmian (`trash-2`).
 
 **`ProposalRow` — znacznik zawrócenia z auto mode (v1.6, A2, G5)** — gdy `autoHoldReasons` niepuste, za tytułem (obok `sparkles` podpowiedzi A1) stoi ikona `undo-2` w kolorze `warning` (rodzina `attention`); tooltip i `aria-label`: „Zawrócone z auto mode: ‹powody›". Brak powodów (projekt bez auto mode, zapisy sprzed A2) → brak znacznika.
 
@@ -476,7 +494,7 @@ Geometria jest zdublowana w `BrandMark.tsx` i `favicon.svg` — zmiana znaku zmi
 
 ### 9.2 Przeglądarka pamięci (FR-D2) — list/detail
 
-- **Filtry:** `scope` (toggle group: wg kontekstu), `kind` (`fact`/`document`/`event`, v1.2), status (`approved`/`archived`), **zatwierdzenie** (v1.6, A2/G6: „wszystkie" / „auto-zaakceptowane" — pamięci, których bieżąca treść weszła przez auto mode; zdejmuje je każda późniejsza zmiana człowieka), tagi (multi), search.
+- **Filtry:** `scope` (toggle group: wg kontekstu), `kind` (`fact`/`document`/`event`, v1.2; `journal`, v1.8 — opcje z jednej listy `MEMORY_KINDS`; filtr `journal` = przegląd dziennika, osobnego ekranu nie ma), status (`approved`/`archived`), **zatwierdzenie** (v1.6, A2/G6: „wszystkie" / „auto-zaakceptowane" — pamięci, których bieżąca treść weszła przez auto mode; zdejmuje je każda późniejsza zmiana człowieka), tagi (multi), search.
 - **Znacznik „auto" (v1.6, A2):** pamięć z `autoApprovedAt` ma `Badge variant="info"` z ikoną `bot` i napisem „auto" — w wierszu listy (pod licznikiem `acc`), w nagłówku detalu obok `StatusChip` oraz jako wiersz „Auto-zaakceptowano" (czas) w zakładce „Metadane". **`auto · korekta` (v1.6, A3):** gdy bieżąca treść to auto-korekta pamięci utworzonej lub zatwierdzonej przez człowieka (`autoCorrection`), znacznik ma ten napis, a tooltip mówi, że cofanie jej nie archiwizuje.
 - **Zawężenia filtra „auto" i cofanie (v1.6, A3):** gdy aktywny jest filtr „auto-zaakceptowane", pod paskiem filtrów pojawia się drugi wiersz. **W kontekście jednego projektu** (nie „wszystkie"/„global"): dwa `datetime-local` („auto od"/„auto do", przedział po czasie wejścia bieżącej treści przez auto mode; odwrócony przedział = czerwony obrys, bez zapytania), `Select` tokena („token: wszystkie" + tokeny projektu + `konto: …`; token w karencji/unieważniony ma przyrostek) i przycisk `secondary` **„Archiwizuj pasujące (N)"** — N z serwera (`/memories/auto-undo/preview`), nie z długości listy (limit 200). Przycisk jest wyłączony (z wyjaśnieniem w `title` na wrapperze): poza kontekstem projektu, gdy N = 0 / trwa liczenie, oraz gdy ustawiony jest jakikolwiek inny filtr listy (kind, status inny niż approved, tagi, szukaj) — lista musi pokazywać dokładnie to, co zostanie zarchiwizowane.
 - **Dialog cofania (v1.6, A3, `AutoModeUndoDialog`, `AlertDialog`):** tytuł „Archiwizować wpisy z auto mode?"; opis z projektem, przedziałem, tokenem i stanem na `asOf`; liczby „Do archiwizacji (utworzone przez auto mode)" (N) i „Pominięte — auto-korekty istniejących pamięci" (M, z wyjaśnieniem); przy `capped` ostrzeżenie (`warning`), że jednorazowo archiwizowanych jest najwyżej 2000 najstarszych; **uczciwy tekst**: soft-delete, utrata embeddingów i relacji (audytowana), treść zostaje w bazie i rewizjach, **dashboard nie ma ścieżki przywrócenia**, wpisy zapisane po otwarciu okna nie zostaną zarchiwizowane. Checkbox „Wyłącz też auto mode w projekcie" (domyślnie zaznaczony, ukryty gdy auto mode wyłączony). Przycisk „Archiwizuj {N}" nie zamyka dialogu do końca mutacji; toast: „Zarchiwizowano {n} wpisów z auto mode[ · {k} pominięto (zmienione od podglądu)][ · auto mode wyłączony]".
@@ -502,6 +520,24 @@ Geometria jest zdublowana w `BrandMark.tsx` i `favicon.svg` — zmiana znaku zmi
   — renderowany z ikoną zegara (`Clock`, `lucide-react`) w wierszu listy, w pasku metadanych detalu
   i w tabie „Metadane". `event_time` **nie** jest edytowalny z formularza edycji (ustawiany raz przy
   tworzeniu, v1) — `Edytuj` zmienia tylko header/body/tagi jak dla fact/document.
+- **`kind=journal` (v1.8):** `KindMarker` oliwka, gutter podwójną linią (§2.3); wiersz jak `fact`;
+  brak `event_time`; detal: body markdown (Zrobione / Na czym skończono / Otwarte), `Edytuj` i
+  `Archiwizuj` jak dla `fact`; bez „zmień kind".
+- **`Promuj do global` dla `journal` (v1.8):** przycisk widoczny, ale **nieaktywny**; wyjaśnienie w
+  `title` na wrapperze (precedens: cofanie auto mode): „Wpisu dziennika nie promuje się do global —
+  dziennik jest per projekt. Wiedzę wartą global zapisz jako nowy fakt („Nowa pamięć") i zarchiwizuj
+  ten wpis." Serwer i tak odrzuca promote `journal` (`validation_error`) → toast z `describeApiError`.
+
+```
+┌ detal pamięci · kind=journal ───────────────────────────────────────────────┐
+│ [▤ journal] Filtr journal w Przeglądarce pamięci            [✓ APPROVED]     │
+│ mem_… · project:acme · agent · utw. 2 h temu                                 │
+│ ## Zrobione … ## Na czym skończono … ## Otwarte …                            │
+│ ─ sticky ────────────────────────────────────────────────────────────────── │
+│ [Edytuj] [Archiwizuj] [Promuj do global]⃠ ← disabled, title=„Wpisu …"   [Hard-purge] │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
 - **Gdzie `Badge variant="kind"` zostaje:** w kontekstach, gdzie `kind` jest etykietą obcego rekordu,
   nie tożsamością wiersza — `RelationsPanel` i `ProposalRelations` (targety relacji). Tam neutralność
   jest celowa: kolor tożsamości ma wyróżniać rekord na liście, a nie każde wystąpienie słowa.
@@ -561,7 +597,7 @@ Geometria jest zdublowana w `BrandMark.tsx` i `favicon.svg` — zmiana znaku zmi
 ### 9.5 Human-create (FR-D5) — Dialog/drawer „Nowa pamięć"
 
 - Wyzwalane z railu; dostępne tylko gdy kontekst = konkretny projekt lub `Global` (w `Wszystkie` — disabled + wyjaśnienie).
-- Pola: `kind` (segmented `fact`/`document`/`event`, v1.2), `header` (licznik ~200 zn.), `body` (`textarea`, licznik per-kind cap; dla `document` większy obszar), `tags` (chip-input z normalizacją na blur: trim+lowercase+collapse, walidacja charset/limit).
+- Pola: `kind` (segmented `fact`/`document`/`event`, v1.2; `journal` (v1.8) **nie jest** oferowany — dziennik pisze wyłącznie agent; `POST /api/memories` z `kind=journal` → 400 `validation_error`), `header` (licznik ~200 zn.), `body` (`textarea`, licznik per-kind cap; dla `document` większy obszar), `tags` (chip-input z normalizacją na blur: trim+lowercase+collapse, walidacja charset/limit).
 - **`kind=event` (v1.2):** dodatkowe pole „Kiedy się wydarzyło" (`datetime-local`, domyślnie teraz) —
   backdatable, przyszłe daty dozwolone bez walidacji blokującej (decay je traktuje jak „teraz").
 - **Import:** zakładka „Wklej" / „Wgraj `.md`" (drop-zone, bez bulk).
@@ -575,12 +611,13 @@ Geometria jest zdublowana w `BrandMark.tsx` i `favicon.svg` — zmiana znaku zmi
 ### 9.7 Oś czasu (v1.2, `kind=event`) — chronologiczna lista, grupowana wg dnia
 
 - **Route/label:** `/os-czasu`, „Oś czasu" — spójne z polskimi slugami (`/kolejka`, `/pamiec`, `/operacje`). Skrót klawiaturowy `g c`.
-- **Zawartość:** WYŁĄCZNIE `kind=event`, status `approved`, sortowane `event_time DESC`. Scoped przez `ContextSwitcher` jak przeglądarka pamięci (§9.6) — `project` strict, bez leakage.
+- **Podtytuł (v1.8):** „Zdarzenia (`kind=event`) w kolejności chronologicznej, wg `event_time`. Dodaje je człowiek w „Nowa pamięć" albo agent przez `save_memory`."
+- **Zawartość:** WYŁĄCZNIE `kind=event` (`journal` nie trafia na Oś czasu, v1.8), status `approved`, sortowane `event_time DESC`. Scoped przez `ContextSwitcher` jak przeglądarka pamięci (§9.6) — `project` strict, bez leakage.
 - **Grupowanie: wg dnia kalendarzowego** (lokalna strefa przeglądarki) — nagłówek dnia (np. „środa,
   22 lipca 2026", ruled-ledger styl jak reszta ekranów) + wpisy pod spodem, każdy z godziną (mono,
   tabular), headerem, originem (`OriginPath`) i tagami. Bez osobnego panelu detalu — klik na wiersz
   otwiera pełny szczegół w „Pamięć" (`/pamiec?id=`).
-- **Tworzenie:** wyłącznie przez `HumanCreateDialog` (`kind=Zdarzenie`) — patrz §9.5.
+- **Tworzenie:** przez `HumanCreateDialog` (`kind=Zdarzenie`, §9.5) albo przez agenta (`save_memory` z `kind=event` i `event_time`, v1.3).
 - **Puste/loading:** `EmptyState`/`Skeleton` jak reszta list (§10).
 
 ### 9.8 Onboarding (v1.2, przebudowa v1.5) — bloki do wklejenia w zewnętrznym repo

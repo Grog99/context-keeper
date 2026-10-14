@@ -189,3 +189,12 @@ describe('envSchema — SECRETS_ENCRYPTION_KEY (roadmap v1.6, G5)', () => {
     }
   });
 });
+
+describe('envSchema — BODY_MAX_JOURNAL (roadmap v1.8, journal-kind)', () => {
+  it('default 8192, parsuje wartość z env (coerce), odrzuca 0 i ujemne', () => {
+    expect(envSchema.parse({ ...BASE }).BODY_MAX_JOURNAL).toBe(8192);
+    expect(envSchema.parse({ ...BASE, BODY_MAX_JOURNAL: '4096' }).BODY_MAX_JOURNAL).toBe(4096);
+    expect(() => envSchema.parse({ ...BASE, BODY_MAX_JOURNAL: '0' })).toThrow();
+    expect(() => envSchema.parse({ ...BASE, BODY_MAX_JOURNAL: '-5' })).toThrow();
+  });
+});

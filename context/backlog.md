@@ -51,8 +51,25 @@ Legenda: ⬜ przed nami · ⏸️ warunkowe (czeka na sygnał / decyzję)
   architektury. **Warunkowe:** wracamy do tematu, gdy SDK v2 się ustabilizuje albo pojawi się
   konkretna potrzeba (np. przy OAuth w v1.8, który powstaje na obecnym SDK v1).
 
-> OAuth 2.1 + PKCE i typ pamięci `journal` → w v1.8 ([`roadmap.md`](roadmap.md)). Hook Stop
-> wymuszający wpis `journal` należy do pluginu wyżej i czeka razem z nim.
+- **Ekran „Dziennik"** ⏸️ — osobny widok wpisów `journal` (route + spec w `design-system.md` §9 +
+  nawigacja) zamiast samego filtra `kind` w Przeglądarce pamięci. Odłożone z v1.8 (2026-10-13): na
+  start wystarcza filtr, a zakres wersji był już duży. **Warunkowe:** wracamy, gdy przegląd dziennika
+  przez filtr okaże się niewygodny (wpisy po każdym zadaniu to wysoki wolumen).
+- **`all_projects` w `list_journal`** ⏸️ — dziś `list_journal` czyta wyłącznie bieżący projekt,
+  także tokenem konta (dziennik jest z natury per repo). Parametr dla tokenu konta (jak
+  `search_memory`) otworzyłby „co robiono w innych repo" — dodatkowa ścieżka i testy scope'u.
+  Odłożone z v1.8 (2026-10-13). **Warunkowe:** wracamy, gdy pojawi się potrzeba przeglądu dzienników
+  wielu repo naraz (dziś obejście: `search_memory(kind: "journal", all_projects: true)`).
+- **Osobny dzienny limit auto mode dla `journal` + licznik per `kind` na Pomiarach** ⏸️ — auto-
+  akceptacje `journal` liczą się dziś do wspólnego `auto_mode_daily_limit` (domyślnie 50 / projekt /
+  24 h), więc aktywny agent może wstrzymać fakty powodem `daily_limit`; „Pomiary" nie dzielą
+  auto-akceptacji ani wstrzymań per `kind`, więc widać to tylko po powodach zawróceń. Odłożone z v1.8
+  (2026-10-13). **Warunkowe:** wracamy, jeśli Pomiary pokażą wstrzymania `daily_limit` wywołane
+  dziennikiem (osobna kolumna + pole w Ustawieniach albo wyłączenie `journal` z limitu).
+
+> OAuth 2.1 + PKCE → w v1.8 ([`roadmap.md`](roadmap.md)). Typ pamięci `journal` → zrobiony w v1.8
+> (`kind=journal` + narzędzie `list_journal`, [`roadmap.md`](roadmap.md)). Hook Stop wymuszający
+> wpis `journal` należy do pluginu wyżej i czeka razem z nim.
 
 ## Retrieval i higiena pamięci
 

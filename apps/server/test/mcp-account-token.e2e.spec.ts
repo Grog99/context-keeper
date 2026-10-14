@@ -33,8 +33,15 @@ describe('MCP e2e v1.5 — token konta + X-Context-Keeper-Project', () => {
   let accountToken: string;
   let accountTokenId: string;
   const { withClient } = mcpClients(() => baseUrl);
-  const ACCOUNT_TOOL_NAMES = ['create_project', 'get_memory', 'list_projects', 'save_memory', 'search_memory'];
-  const PROJECT_TOOL_NAMES = ['get_memory', 'save_memory', 'search_memory'];
+  const ACCOUNT_TOOL_NAMES = [
+    'create_project',
+    'get_memory',
+    'list_journal',
+    'list_projects',
+    'save_memory',
+    'search_memory',
+  ];
+  const PROJECT_TOOL_NAMES = ['get_memory', 'list_journal', 'save_memory', 'search_memory'];
 
   beforeAll(async () => {
     mcpApp = await startMcpE2eApp();
@@ -179,7 +186,7 @@ describe('MCP e2e v1.5 — token konta + X-Context-Keeper-Project', () => {
     });
   });
 
-  it('token konta bez nagłówka: połączenie OK, 5 narzędzi, memory tools -> project_required + details.projects, zero skutków ubocznych', async () => {
+  it('token konta bez nagłówka: połączenie OK, 6 narzędzi, memory tools -> project_required + details.projects, zero skutków ubocznych', async () => {
     // `withClient` łączy się bez nagłówka — HTTP 200, brak nagłówka NIE jest błędem transportu.
     await withClient(accountToken, undefined, async (client) => {
       const { tools } = await client.listTools();
@@ -384,7 +391,7 @@ describe('MCP e2e v1.5 — token konta + X-Context-Keeper-Project', () => {
     await withClient(accountToken, undefined, async (client) => {
       const { tools } = await client.listTools();
       const memoryTools = tools.filter((t) => (MEMORY_TOOLS as readonly string[]).includes(t.name));
-      expect(memoryTools).toHaveLength(3);
+      expect(memoryTools).toHaveLength(4);
       for (const tool of memoryTools) {
         for (const code of ['project_required', 'project_not_found', 'project_pending', 'project_forbidden']) {
           expect(tool.description, `${tool.name} → ${code}`).toContain(code);
@@ -655,7 +662,7 @@ describe('MCP e2e v1.5 — token konta + X-Context-Keeper-Project', () => {
       JSON.parse(textOf((await client.callTool({ name: 'list_projects', arguments: {} })) as CallToolResult));
     const parseCreate = (res: unknown): CreateResult => JSON.parse(textOf(res as CallToolResult));
 
-    it('tools/list: token konta (bez nagłówka i z nagłówkiem) -> 5 narzędzi; token projektowy (bez i z własnym nagłówkiem) -> 3', async () => {
+    it('tools/list: token konta (bez nagłówka i z nagłówkiem) -> 6 narzędzi; token projektowy (bez i z własnym nagłówkiem) -> 4', async () => {
       for (const [bearer, slug, expected] of [
         [accountToken, undefined, ACCOUNT_TOOL_NAMES],
         [accountToken, 'mcp-e2e', ACCOUNT_TOOL_NAMES],

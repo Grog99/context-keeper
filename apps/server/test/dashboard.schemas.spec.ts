@@ -404,3 +404,13 @@ describe('llmSettingsBody (roadmap v1.6) — PUT /api/settings/llm', () => {
     expect(llmSettingsBody.safeParse({ ...VALID, apiKey: undefined }).success).toBe(false);
   });
 });
+
+describe('dashboard.schemas — kind=journal (roadmap v1.8, journal-kind)', () => {
+  it('humanCreateBody odrzuca kind=journal (dziennik pisze wyłącznie agent); memoriesListQuery przyjmuje filtr kind=journal', () => {
+    expect(
+      humanCreateBody.safeParse({ kind: 'journal', header: 'Wpis', body: 'Treść.', scope: 'project', projectId: 'proj_abc123def456' })
+        .success,
+    ).toBe(false);
+    expect(memoriesListQuery.parse({ kind: 'journal' })).toEqual({ kind: 'journal' });
+  });
+});

@@ -32,22 +32,28 @@ import { evaluateAutoModeGuards } from './auto-mode-guards';
 import { classifyDedup } from './dedup';
 import { eventDecayFactor } from './decay';
 import { graphBoostFactor, selectBoostedIds, type RelationEdge } from './graph-boost';
-import type {
-  GetMemoryResult,
-  MemoryKindFilter,
-  SaveMemoryInput,
-  SaveMemoryKind,
-  SaveMemoryResult,
-  SaveRelationInput,
-  SearchMemoryInput,
-  SearchResultItem,
-  SeedApprovedInput,
+import {
+  LIST_JOURNAL_DEFAULT_LIMIT,
+  LIST_JOURNAL_MAX_LIMIT,
+  type GetMemoryResult,
+  type JournalListItem,
+  type ListJournalInput,
+  type MemoryKindFilter,
+  type SaveMemoryInput,
+  type SaveMemoryKind,
+  type SaveMemoryResult,
+  type SaveRelationInput,
+  type SearchMemoryInput,
+  type SearchResultItem,
+  type SeedApprovedInput,
 } from './memory.types';
 import { normalizeHeader, normalizeTags, validateBody, validateEventTime } from './validation';
 import { isReadable, readScopeCondition, type ReadScope } from './read-scope';
 import { findNearDuplicates } from './near-duplicates';
 import { rrfFuse } from './rrf';
 
+// `journal` NIGDY nie jest w domyślnym zestawie (roadmap v1.8, #17) — ani przez toggle eventów
+// (dokłada wyłącznie literał 'event'); czyta się go jawnym `kind: 'journal'` albo `list_journal`.
 const DEFAULT_SEARCH_KINDS: MemoryKindFilter[] = ['fact', 'document'];
 // Fragment chunku dopasowanego wektorowo, dołączany do wyniku search dla kind=document (FR-M1).
 const EXCERPT_MAX_LEN = 280;
@@ -118,7 +124,17 @@ export class MemoryService {
           'event_time) jest human-only, w dashboardzie.',
       );
     }
-    const eventTime = validateEventTime(input.eventTime, kind); // null dla fact/document
+    // Dziennik (roadmap v1.8) jest append-only dla agenta: korekta = nowy wpis (edycja w dashboardzie).
+    // Guard PRZED dalszą walidacją — komunikat ma nazwać prawdziwy problem. Drugi kierunek (cel
+    // supersedes = journal) pilnuje `saveAsSupersede`.
+    if (kind === 'journal' && input.supersedes) {
+      throw new ToolError(
+        'validation_error',
+        'Nie można poprawić wpisu kind=journal przez narzędzie — dziennik jest append-only; ' +
+          'korekta = nowy wpis (edycja w dashboardzie).',
+      );
+    }
+    const eventTime = validateEventTime(input.eventTime, kind); // null dla fact/document/journal
 
     // Skaner sekretów (§10, FR-S1): agent-save → blokada, materiał nigdy nie dotyka bazy.
     const hit = scanForSecrets(`${header}\n${body}`);
@@ -251,10 +267,13 @@ export class MemoryService {
     const budgetMs = this.config.get('EMBEDDING_SAVE_TIMEOUT_MS');
     const deadline = Date.now() + budgetMs;
     const staged = await this.embedding.embedMemoryBestEffort(kind, header, body, tags, budgetMs);
-    // Detekcja prawie-duplikatów (A1): tylko fact/document (event = zawsze NULL, G4); `null` = nie
-    // policzono (brak wektora / deadline / błąd bazy), `[]` = policzono, brak podobnych.
+    // Detekcja prawie-duplikatów (A1): tylko fact/document (event/journal = zawsze NULL, G4 — kolejne
+    // wpisy dziennika z natury są do siebie podobne); `null` = nie policzono (brak wektora / deadline /
+    // błąd bazy), `[]` = policzono, brak podobnych.
     const similar =
-      staged && kind !== 'event' ? await this.detectNearDuplicates(staged, kind, ctx.projectId, deadline) : null;
+      staged && (kind === 'fact' || kind === 'document')
+        ? await this.detectNearDuplicates(staged, kind, ctx.projectId, deadline)
+        : null;
     if (staged) {
       await this.db.insert(stagingEmbeddings).values(
         staged.chunks.map((c) => ({
@@ -387,6 +406,15 @@ export class MemoryService {
       throw new ToolError(
         'validation_error',
         'Nie można poprawić pamięci kind=event przez narzędzie — event jest human-only.',
+      );
+    }
+    // Dziennik (v1.8): append-only dla agenta. Bramka PO not_found/IDOR/global — nic o kind celu nie
+    // wycieka przed nimi.
+    if (row.kind === 'journal') {
+      throw new ToolError(
+        'validation_error',
+        'Nie można poprawić wpisu kind=journal przez narzędzie — dziennik jest append-only; ' +
+          'korekta = nowy wpis (edycja w dashboardzie).',
       );
     }
     if (row.kind !== kind) {
@@ -775,7 +803,8 @@ export class MemoryService {
         .filter((f) => byId.has(f.id))
         .map((f) => {
           const row = byId.get(f.id)!;
-          // decayFactor=1 dla fact/document (zero wpływu na ranking) — tylko event decayuje.
+          // decayFactor=1 dla fact/document/journal (zero wpływu na ranking) — tylko event decayuje
+          // (journal bez decay, roadmap v1.8 #21: kolejność niesie `list_journal`, nie wiek w rankingu).
           const decayFactor = row.kind === 'event' ? eventDecayFactor(row.eventTime, now, halflifeDays) : 1;
           const boostFactor = graphBoostFactor(boosted.has(f.id), graphBoostWeight);
           return { row, effectiveScore: f.score * decayFactor * boostFactor };
@@ -998,6 +1027,48 @@ export class MemoryService {
       updatedAt: row.updatedAt.toISOString(),
       eventTime: row.eventTime ? row.eventTime.toISOString() : null,
     };
+  }
+
+  /**
+   * list_journal (roadmap v1.8): najnowsze wpisy dziennika BIEŻĄCEGO projektu, tylko nagłówki.
+   * Wyłącznie `approved` + `scope='project'` + `project_id = ctx.projectId` — nigdy global ani inny
+   * projekt, także dla tokenu konta (brak `ReadScope`, #19). Sort po `created_at` malejąco (czas
+   * zapisu wpisu, patrz `materializeMemory`). Read-only: bez bumpu `access_count`/`last_accessed_at`,
+   * bez `search_events` i bez audytu — to przegląd nagłówków, nie "przeczytanie" wpisów.
+   * Zakres `limit` sprawdzany tu (nie w zodzie fabryki MCP), żeby błąd szedł kopertą `{code}`.
+   */
+  async listJournal(input: ListJournalInput, ctx: ProjectContext): Promise<JournalListItem[]> {
+    const limit = input.limit ?? LIST_JOURNAL_DEFAULT_LIMIT;
+    if (!Number.isInteger(limit) || limit < 1 || limit > LIST_JOURNAL_MAX_LIMIT) {
+      throw new ToolError(
+        'validation_error',
+        `limit musi być liczbą całkowitą z zakresu 1..${LIST_JOURNAL_MAX_LIMIT} (jest ${String(limit)})`,
+      );
+    }
+    const rows = await this.db
+      .select({
+        id: memories.id,
+        header: memories.header,
+        tags: memories.tags,
+        createdAt: memories.createdAt,
+      })
+      .from(memories)
+      .where(
+        and(
+          eq(memories.kind, 'journal'),
+          eq(memories.status, 'approved'),
+          eq(memories.scope, 'project'),
+          eq(memories.projectId, ctx.projectId),
+        ),
+      )
+      .orderBy(desc(memories.createdAt), desc(memories.id))
+      .limit(limit);
+    return rows.map((r) => ({
+      id: r.id,
+      header: r.header,
+      tags: r.tags,
+      createdAt: r.createdAt.toISOString(),
+    }));
   }
 
   /**

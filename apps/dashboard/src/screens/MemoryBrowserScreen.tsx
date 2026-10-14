@@ -48,11 +48,15 @@ import type {
   RevisionRowApi,
   WithWarnings,
 } from '../types/api';
-import type { MemoryKind, MemoryStatus, RelationType } from '../types/domain';
+import { MEMORY_KINDS, type MemoryKind, type MemoryStatus, type RelationType } from '../types/domain';
 import { AutoModeUndoDialog } from './AutoModeUndoDialog';
 import { PurgeMemoryDialog } from './PurgeMemoryDialog';
 
 type KindFilter = 'all' | MemoryKind;
+/** §9.2: dziennik jest per projekt (roadmap v1.8) — serwer odrzuca promote `journal`, a przycisk mówi dlaczego. */
+const PROMOTE_JOURNAL_REASON =
+  'Wpisu dziennika nie promuje się do global — dziennik jest per projekt. ' +
+  'Wiedzę wartą global zapisz jako nowy fakt („Nowa pamięć") i zarchiwizuj ten wpis.';
 type StatusFilter = 'all' | MemoryStatus;
 /** A2 (G6): `auto` = tylko pamięci, których bieżąca treść weszła przez auto mode. */
 type ApprovalFilter = 'all' | 'auto';
@@ -377,9 +381,11 @@ export function MemoryBrowserScreen() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">kind: wszystkie</SelectItem>
-              <SelectItem value="fact">fact</SelectItem>
-              <SelectItem value="document">document</SelectItem>
-              <SelectItem value="event">event</SelectItem>
+              {MEMORY_KINDS.map((k) => (
+                <SelectItem key={k} value={k}>
+                  {k}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <Select value={status} onValueChange={(v) => setStatus(v as StatusFilter)}>
@@ -676,13 +682,18 @@ export function MemoryBrowserScreen() {
                       Archiwizuj
                     </Button>
                     {detail.scope === 'project' && (
-                      <Button
-                        variant="secondary"
-                        onClick={() => promoteMutation.mutate(detail.id)}
-                        disabled={detail.status !== 'approved' || promoteMutation.isPending}
-                      >
-                        Promuj do global
-                      </Button>
+                      // `title` na wrapperze: wyłączony przycisk ma pointer-events-none, więc sam nie pokaże tooltipa.
+                      <span title={detail.kind === 'journal' ? PROMOTE_JOURNAL_REASON : undefined}>
+                        <Button
+                          variant="secondary"
+                          onClick={() => promoteMutation.mutate(detail.id)}
+                          disabled={
+                            detail.kind === 'journal' || detail.status !== 'approved' || promoteMutation.isPending
+                          }
+                        >
+                          Promuj do global
+                        </Button>
+                      </span>
                     )}
                     <Button
                       variant="ghost-danger"

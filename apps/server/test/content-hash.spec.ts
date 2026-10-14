@@ -56,3 +56,14 @@ describe('computeContentHash — event_time jako szóste pole hasha, WYŁĄCZNIE
     expect(withEventTime).toBe(withoutEventTime);
   });
 });
+
+describe('computeContentHash — kind=journal (roadmap v1.8, journal-kind)', () => {
+  it('journal vs fact przy tej samej treści -> różne hashe; journal z eventTime -> TEN SAM hash co bez (brak szóstego pola)', () => {
+    const journal = computeContentHash({ ...BASE, kind: 'journal' });
+    const fact = computeContentHash({ ...BASE, kind: 'fact' });
+    expect(journal).not.toBe(fact);
+
+    const withEventTime = computeContentHash({ ...BASE, kind: 'journal', eventTime: new Date('2026-03-01T09:00:00Z') });
+    expect(withEventTime).toBe(journal);
+  });
+});

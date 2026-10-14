@@ -1,4 +1,4 @@
-import { Clock, FileText, Notebook } from 'lucide-react';
+import { Clock, FileText, Notebook, ScrollText } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { MemoryKind } from '../types/domain';
 
@@ -7,26 +7,31 @@ import type { MemoryKind } from '../types/domain';
  * kształt (gutter przy krawędzi wiersza), ikonę i kolor. Kolor jest tu kanałem TRZECIM — wyłączenie
  * go zostawia działające rozróżnienie, co jest wymogiem P2 (kolor nigdy nie jest jedynym sygnałem).
  *
- * Hue (`--kind-*` w `globals.css`) leżą świadomie w martwych strefach koła — petrol ~198° i wrzos
- * ~312° nie sąsiadują z żadnym znaczeniem z §2.2 (zieleń 142° (status) i ~150° (akcent), bursztyn 35°, czerwień 5°),
- * więc nie da się ich odczytać jako status. Niska chroma jest częścią kontraktu: te kolory mają
+ * Hue (`--kind-*` w `globals.css`) leżą świadomie w martwych strefach koła — petrol ~198°, wrzos
+ * ~312° i oliwka ~90° (`journal`, v1.8) nie sąsiadują z żadnym znaczeniem z §2.2 (zieleń 142°
+ * (status) i ~150° (akcent), bursztyn 35°, czerwień 5°), więc nie da się ich odczytać jako status.
+ * Oliwka jest najbliżej zieleni — dlatego `journal` ma też najmocniej odmienny kształt (podwójna
+ * linia) i ikonę (`ScrollText`). Niska chroma jest częścią kontraktu: te kolory mają
  * czytać się jak barwiony papier, nie jak sygnał. `fact` NIE ma koloru — jako najczęstszy kind
- * zostaje neutralną bazą, od której odcinają się dwa pozostałe.
+ * zostaje neutralną bazą, od której odcinają się pozostałe.
  */
 
 const ICON: Record<MemoryKind, typeof FileText> = {
   fact: Notebook,
   document: FileText,
   event: Clock,
+  journal: ScrollText,
 };
 
-/** Pasek przy lewej krawędzi wiersza — nośnik KSZTAŁTU: brak / pełny / kropkowany.
+/** Pasek przy lewej krawędzi wiersza — nośnik KSZTAŁTU: brak / pełny / kropkowany / podwójna linia.
  * Nieeksportowany celowo: `react-refresh/only-export-components` wymaga, żeby plik komponentu
  * eksportował wyłącznie komponenty — konsumenci biorą `<KindGutter/>`, nie samą mapę klas. */
 const KIND_GUTTER: Record<MemoryKind, string> = {
   fact: 'bg-transparent',
   document: 'bg-[var(--kind-document)]',
   event: 'bg-[repeating-linear-gradient(180deg,var(--kind-event)_0_3px,transparent_3px_6px)]',
+  // Podwójna linia 1px + 1px + 1px ("Ruled ledger"): 1px kreska, 1px przerwa, 1px kreska.
+  journal: 'bg-[linear-gradient(90deg,var(--kind-journal)_0_1px,transparent_1px_2px,var(--kind-journal)_2px_3px)]',
 };
 
 // Modyfikator opacity (`/45`) NIE działa na kolor podany jako `var()` — Tailwind potrzebuje kanałów
@@ -37,6 +42,8 @@ const MARKER: Record<MemoryKind, string> = {
     'border-[color-mix(in_srgb,var(--kind-document)_45%,transparent)] bg-[var(--kind-document-subtle)] text-[var(--kind-document-foreground)]',
   event:
     'border-[color-mix(in_srgb,var(--kind-event)_45%,transparent)] bg-[var(--kind-event-subtle)] text-[var(--kind-event-foreground)]',
+  journal:
+    'border-[color-mix(in_srgb,var(--kind-journal)_45%,transparent)] bg-[var(--kind-journal-subtle)] text-[var(--kind-journal-foreground)]',
 };
 
 /** Gutter renderowany jako absolutnie pozycjonowany pasek — wiersz musi mieć `relative` i lewy padding. */

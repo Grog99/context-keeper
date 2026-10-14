@@ -148,6 +148,13 @@
       "when": 1791460161659,
       "tag": "0020_auto_mode_oversight",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1791919491049,
+      "tag": "0021_journal_kind",
+      "breakpoints": true
     }
   ]
 }

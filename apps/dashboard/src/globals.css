@@ -55,12 +55,13 @@
   --neutral: #78716C;  --neutral-subtle: #E8E4DF;  --neutral-foreground: #44403C;
 
   /* kind — TOŻSAMOŚĆ, nie status (§2.3; konsument: `components/KindMarker.tsx`).
-     Hue dobrane celowo w martwych strefach koła: petrol ~198° i wrzos ~312° nie sąsiadują z
+     Hue dobrane celowo w martwych strefach koła: petrol ~198°, wrzos ~312° i oliwka ~90° (journal, v1.8) nie sąsiadują z
      żadnym znaczeniem z §2.2 (zieleń statusu 142° i akcentu ~150°, bursztyn 35°, czerwień 5°). Niska chroma
      jest częścią kontraktu — te kolory mają czytać się jak barwiony papier, nie jak sygnał.
      `fact` świadomie NIE ma tokenu: to najczęstszy kind, zostaje neutralną bazą. */
   --kind-document: #4C7788;  --kind-document-subtle: #E3EDF1;  --kind-document-foreground: #2B5464;
   --kind-event:    #955F8B;  --kind-event-subtle:    #F2E9F0;  --kind-event-foreground:    #63365A;
+  --kind-journal:  #64794E;  --kind-journal-subtle:  #EBF0E6;  --kind-journal-foreground:  #465A30;
 
   --shadow-sm: 0 1px 2px rgb(0 0 0 / .06);
   --shadow-md: 0 8px 24px -6px rgb(28 25 23 / .18);
@@ -98,6 +99,7 @@
 
     --kind-document: #79ADC3;  --kind-document-subtle: #1D2D34;  --kind-document-foreground: #BAD3DE;
     --kind-event:    #C695BC;  --kind-event-subtle:    #352231;  --kind-event-foreground:    #DEC4D9;
+    --kind-journal:  #95B276;  --kind-journal-subtle:  #29331F;  --kind-journal-foreground:  #CFDCC1;
 
     --shadow-md: 0 10px 28px -8px rgb(0 0 0 / .5);
   }
@@ -130,6 +132,7 @@
   --neutral: #78716C;  --neutral-subtle: #E8E4DF;  --neutral-foreground: #44403C;
   --kind-document: #4C7788;  --kind-document-subtle: #E3EDF1;  --kind-document-foreground: #2B5464;
   --kind-event:    #955F8B;  --kind-event-subtle:    #F2E9F0;  --kind-event-foreground:    #63365A;
+  --kind-journal:  #64794E;  --kind-journal-subtle:  #EBF0E6;  --kind-journal-foreground:  #465A30;
   --shadow-md: 0 8px 24px -6px rgb(28 25 23 / .18);
 }
 
@@ -158,6 +161,7 @@
   --neutral: #A8A29E;  --neutral-subtle: #2A2724;  --neutral-foreground: #E7E5E4;
   --kind-document: #79ADC3;  --kind-document-subtle: #1D2D34;  --kind-document-foreground: #BAD3DE;
   --kind-event:    #C695BC;  --kind-event-subtle:    #352231;  --kind-event-foreground:    #DEC4D9;
+  --kind-journal:  #95B276;  --kind-journal-subtle:  #29331F;  --kind-journal-foreground:  #CFDCC1;
   --shadow-md: 0 10px 28px -8px rgb(0 0 0 / .5);
 }
 

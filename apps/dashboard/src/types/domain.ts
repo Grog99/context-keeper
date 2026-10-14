@@ -1,7 +1,13 @@
 /** Typy domenowe SPA — lustro kontraktu `apps/server` (enumy `db/schema/enums.ts` + kody błędów),
  * NIE import cross-package (§Approach planu: toolchainy Vite/ESM i Nest/CommonJS celowo rozdzielone). */
 
-export type MemoryKind = 'fact' | 'document' | 'event';
+/** Lustro enuma `memory_kind` serwera (`journal` — roadmap v1.8). Jedno źródło dla filtra Przeglądarki i map
+ * `Record<MemoryKind, …>` (`KindMarker`): dopisanie wartości bez obsługi nie skompiluje się. */
+export const MEMORY_KINDS = ['fact', 'document', 'event', 'journal'] as const;
+export type MemoryKind = (typeof MEMORY_KINDS)[number];
+/** Co człowiek może utworzyć w "Nowa pamięć" — dziennik (`journal`) pisze wyłącznie agent (v1.8, #28);
+ * lustro `HumanCreateKind` serwera. */
+export type HumanCreateKind = Exclude<MemoryKind, 'journal'>;
 export type MemoryScope = 'global' | 'project';
 export type MemoryStatus = 'approved' | 'archived' | 'purged';
 export type MemorySource = 'agent' | 'human' | 'nightly';

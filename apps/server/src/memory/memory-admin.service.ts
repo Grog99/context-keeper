@@ -92,8 +92,12 @@ export interface MemoryDetail extends MemoryListItem {
   approvedAt: string | null;
 }
 
+/** `journal` (roadmap v1.8) pisze wyłącznie agent (#28) — człowiek go nie tworzy, więc typ wejścia
+ * human-create wyklucza tę wartość. Granicę trzyma schemat REST (`humanCreateBody`), nie runtime guard. */
+export type HumanCreateKind = Exclude<MemoryKind, 'journal'>;
+
 export interface HumanCreateInput {
-  kind: MemoryKind;
+  kind: HumanCreateKind;
   header: string;
   body: string;
   tags?: string[];
@@ -606,6 +610,14 @@ export class MemoryAdminService {
   async promoteToGlobal(id: string): Promise<void> {
     const [current] = await this.db.select().from(memories).where(eq(memories.id, id)).limit(1);
     if (!current) throw new ToolError('not_found', `Pamięć nie istnieje: ${id}`);
+    // Dziennik jest per projekt (roadmap v1.8) — nic się nie zapisuje (brak rewizji i audytu).
+    if (current.kind === 'journal') {
+      throw new ToolError(
+        'validation_error',
+        'Wpisu kind=journal nie można promować do global — dziennik jest per projekt. ' +
+          'Wiedzę wartą global zapisz jako nowy fakt i zarchiwizuj wpis.',
+      );
+    }
     if (current.scope === 'global') {
       throw new ToolError('validation_error', `Pamięć ${id} jest już scope=global`);
     }

@@ -818,4 +818,31 @@ describe('NightlyService (integration, testcontainers) — Faza 6 nocny job', ()
       expect(merge).toBeDefined();
     });
   });
+
+  describe('kind=journal (roadmap v1.8, journal-kind) — nocny job pomija dziennik', () => {
+    it('dwa journal o tym samym wektorze + stary (100 dni) nieodczytany journal -> run() nie tworzy propozycji z tymi id', async () => {
+      const created = await projects.createProject('nightly-journal-test');
+      const projectId = created.project.id;
+      const j1 = await seedFactWithVector(projectId, { header: 'Wpis 1', body: 'Zrobione: A.', kind: 'journal' }, NEAR);
+      const j2 = await seedFactWithVector(projectId, { header: 'Wpis 2', body: 'Zrobione: A, ale dłużej.', kind: 'journal' }, NEAR);
+      const old = await seedFact(projectId, {
+        header: 'Stary wpis',
+        body: 'Nikt go nie czyta.',
+        kind: 'journal',
+        createdAt: daysAgo(100),
+        lastAccessedAt: null,
+        accessCount: 0,
+      });
+
+      const { nightly } = buildServices();
+      const result = await nightly.run({ actor: 'tester' });
+      expect(result.status).toBe('success');
+
+      const journalIds = [j1.id, j2.id, old.id];
+      const touching = (await db.select().from(proposals).where(eq(proposals.origin, 'nightly'))).filter((p) =>
+        p.affectedIds.some((id) => journalIds.includes(id)),
+      );
+      expect(touching).toEqual([]);
+    });
+  });
 });

@@ -115,6 +115,9 @@ export const envSchema = z
     // `event` (roadmap v1.2, "kind=event episodic") — symetryczny z BODY_MAX_FACT (krótkie notatki,
     // nie dokumenty).
     BODY_MAX_EVENT: z.coerce.number().int().positive().default(8192),
+    // `journal` (roadmap v1.8, "typ pamięci journal") — krótki handoff agenta; osobny knob od
+    // BODY_MAX_FACT, żeby limit dziennika dało się stroić niezależnie.
+    BODY_MAX_JOURNAL: z.coerce.number().int().positive().default(8192),
     TAGS_MAX: z.coerce.number().int().positive().default(10),
     TAG_MAX_LEN: z.coerce.number().int().positive().default(40),
 

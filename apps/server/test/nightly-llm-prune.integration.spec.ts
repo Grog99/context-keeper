@@ -625,4 +625,19 @@ describe('Detektor LLM prune w nocnym jobie (integration, testcontainers) — ro
     expect([...fake.headers].sort()).toEqual(['Najstarszy', 'Środkowy']);
     expect(result.counters).toMatchObject({ llmCalls: 2, llmSkippedCap: 1, llmPruneCandidates: 3 });
   });
+
+  // ---- roadmap v1.8 (journal-kind): dziennik poza nocnym LLM ---------------------------------
+
+  it('journal-kind: świeże wpisy journal w oknie -> llmCalls = 0, brak propozycji', async () => {
+    await seedFact({ header: '[EPHEMERAL] Wpis dziennika: poprawiam testy', kind: 'journal' });
+    await seedFact({ header: '[VERBOSE] Wpis dziennika: bardzo długi i przegadany', kind: 'journal' });
+    await enableLlm();
+    const fake = new FakeLlmProvider(defaultRespond);
+
+    const result = await build(fake).nightly.run({ actor: 'tester' });
+
+    expect(result.counters.llmCalls).toBe(0);
+    expect(fake.calls).toBe(0);
+    expect(await pendingNightly()).toHaveLength(0);
+  });
 });

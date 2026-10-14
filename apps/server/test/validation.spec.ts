@@ -58,6 +58,15 @@ describe('validateBody', () => {
     expect(validateBody('a'.repeat(5), 'event', config)).toBe('a'.repeat(5));
   });
 
+  it('journal (roadmap v1.8) używa BODY_MAX_JOURNAL, nie limitu document', () => {
+    const config = testConfig({ BODY_MAX_JOURNAL: 5, BODY_MAX_DOCUMENT: 100 });
+    expect(validateBody('a'.repeat(50), 'document', config)).toBe('a'.repeat(50));
+    expect(() => validateBody('a'.repeat(50), 'journal', config)).toThrow(
+      expect.objectContaining({ code: 'validation_error' }),
+    );
+    expect(validateBody('a'.repeat(5), 'journal', config)).toBe('a'.repeat(5));
+  });
+
   it('liczy limit w bajtach UTF-8, nie w znakach (wielobajtowe znaki)', () => {
     const config = testConfig({ BODY_MAX_FACT: 4 });
     // 'ą' to 2 bajty w UTF-8 — 2 znaki 'ą' to już 4 bajty (limit), 3. znak przekracza.

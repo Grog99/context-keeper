@@ -1,9 +1,10 @@
 import type { MemoryKind, MemoryScope, RelationType } from '../db/schema/enums';
 
 /** `kind` dopuszczalny w `save_memory` (agent) — roadmap v1.3 "kind=event przez agenta" znosi
- * ograniczenie human-only: `event` dołączył do `fact`/`document`. `Extract` zostaje (nie zwykły
- * alias `MemoryKind`), żeby typ dalej mówił "to podzbiór dopuszczalny dla agenta", nie "cały enum". */
-export type SaveMemoryKind = Extract<MemoryKind, 'fact' | 'document' | 'event'>;
+ * ograniczenie human-only: `event` dołączył do `fact`/`document`; roadmap v1.8 dokłada `journal`
+ * (dziennik pisze wyłącznie agent). `Extract` zostaje (nie zwykły alias `MemoryKind`), żeby typ
+ * dalej mówił "to podzbiór dopuszczalny dla agenta", nie "cały enum". */
+export type SaveMemoryKind = Extract<MemoryKind, 'fact' | 'document' | 'event' | 'journal'>;
 
 /** Jeden wpis `relations[]` w `save_memory` (roadmap v1.2, "memory-relations + 1-hop graph boost",
  * ATTACH-ON-SAVE — locked decision planu). Krawędź kierunkowa OD zapisywanej/poprawianej pamięci DO
@@ -27,7 +28,8 @@ export interface SaveMemoryInput {
   /** Opcjonalne — id istniejącej `fact`/`document` pamięci WŁASNEGO projektu, którą `header`+`body`
    * mają POPRAWIĆ w miejscu (zamiast tworzyć nową, luźną pamięć). Mapowane na proposal
    * `type='update'`, `origin='agent'` (reużywa istniejący update approve-branch), patrz
-   * `MemoryService.saveAsSupersede`. `event`/`global`/inny projekt/nieznane id → błąd. */
+   * `MemoryService.saveAsSupersede`. `event`/`journal`/`global`/inny projekt/nieznane id → błąd
+   * (nie dla event/journal: korekta dziennika = nowy wpis). */
   supersedes?: string;
   /** Opcjonalne — typowane krawędzie OD tej pamięci DO istniejących pamięci WŁASNEGO projektu
    * (max `MAX_RELATIONS_PER_SAVE`). Rider na TYM SAMYM proposalu (create/update) —
@@ -44,10 +46,29 @@ export interface SaveMemoryResult {
   status: SaveStatus;
 }
 
-/** Filtr `kind` w search_memory — fact|document|event; brak = domyślnie fact+document (FR-M1),
+/** Filtr `kind` w search_memory — fact|document|event|journal; brak = domyślnie fact+document (FR-M1),
  * `event` dokłada się do domyślnego zestawu tylko gdy projekt ma włączony
- * `includeEventsInDefaultSearch` (roadmap v1.2, "kind=event episodic"). */
-export type MemoryKindFilter = Extract<MemoryKind, 'fact' | 'document' | 'event'>;
+ * `includeEventsInDefaultSearch` (roadmap v1.2, "kind=event episodic"). `journal` NIGDY nie jest w
+ * domyślnym zestawie (roadmap v1.8) — tylko jawne `kind: 'journal'` albo `list_journal`. */
+export type MemoryKindFilter = Extract<MemoryKind, 'fact' | 'document' | 'event' | 'journal'>;
+
+/** `list_journal` (roadmap v1.8) — domyślna i maksymalna liczba zwracanych wpisów. Stałe, bez env
+ * (duch ustalenia #31: nie mnożymy knobów dla narzędzia, które i tak zwraca same nagłówki). */
+export const LIST_JOURNAL_DEFAULT_LIMIT = 10;
+export const LIST_JOURNAL_MAX_LIMIT = 50;
+
+export interface ListJournalInput {
+  limit?: number;
+}
+
+/** Element wyniku `list_journal` — wyłącznie nagłówek; treść przez `get_memory(id)`. `createdAt` =
+ * moment zapisu wpisu przez agenta (także przy human-gate, patrz `materializeMemory`). */
+export interface JournalListItem {
+  id: string;
+  header: string;
+  tags: string[];
+  createdAt: string;
+}
 
 export interface SearchMemoryInput {
   query: string;

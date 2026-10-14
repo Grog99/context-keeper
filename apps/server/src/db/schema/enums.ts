@@ -3,7 +3,9 @@ import { pgEnum } from 'drizzle-orm/pg-core';
 // `kind` opisuje czym pamięć JEST. `event` (roadmap v1.2, "kind=event episodic") — zdarzenie z
 // osobnym backdatable `event_time`, tworzone przez człowieka (dashboard) ORAZ przez agenta
 // (roadmap v1.3, "kind=event przez agenta (MCP)" — `save_memory` z wymaganym `event_time`).
-export const memoryKind = pgEnum('memory_kind', ['fact', 'document', 'event']);
+// `journal` (roadmap v1.8, ticket `journal-kind`) — wpis dziennika agenta (krótki handoff: zrobione /
+// na czym skończono / otwarte); dopisany NA KOŃCU enuma (migracja = tylko `ADD VALUE`).
+export const memoryKind = pgEnum('memory_kind', ['fact', 'document', 'event', 'journal']);
 export const memoryScope = pgEnum('memory_scope', ['global', 'project']);
 // `purged` = hard-purge (FR-S3, §10 tech-stack) — treść wymazana we wszystkich content-bearing
 // tabelach, wiersz zostaje jako tombstone (audit `purge_tombstone`). Nieodwracalne, wyłącznie CLI.

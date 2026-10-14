@@ -3,7 +3,7 @@ import { AppConfigService } from '../config/config.service';
 import { sweepStaleBuckets, TokenBucket } from './token-bucket';
 
 /** Narzędzia pamięci — klucz limitu `tokenId:projectId` (osobny budżet per projekt, v1.5 #17). */
-export const MEMORY_TOOLS = ['search_memory', 'get_memory', 'save_memory'] as const;
+export const MEMORY_TOOLS = ['search_memory', 'get_memory', 'save_memory', 'list_journal'] as const;
 /** Narzędzia tokenu konta (scope B) — klucz `tokenId:account`, bez projektu. */
 export const ACCOUNT_TOOLS = ['list_projects', 'create_project'] as const;
 
@@ -62,6 +62,9 @@ export class RateLimiterService {
       case 'get_memory':
         return this.config.get('RATE_LIMIT_GET_PER_MIN');
       case 'list_projects':
+        return this.config.get('RATE_LIMIT_SEARCH_PER_MIN');
+      case 'list_journal':
+        // v1.8 (#31): odczyt nagłówków — ten sam knob co search_memory/list_projects, kubełek osobny per narzędzie.
         return this.config.get('RATE_LIMIT_SEARCH_PER_MIN');
       case 'create_project':
         return this.config.get('RATE_LIMIT_CREATE_PROJECT_PER_MIN');

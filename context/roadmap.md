@@ -165,13 +165,16 @@ projektach dało się je odróżnić na pierwszy rzut oka. Zmiany UI zaczynają 
   kolejki tylko przy N > 0), na logowaniu „Logowanie · Context Keeper". Spec w §2.1, §2.5, §8.2, §9.0.
   **Odchylenie:** w Pomiarach zieleń akcentu leży obok zieleni `success` — zostaje w
   [`backlog.md`](backlog.md), do rozwiązania razem z paletą `ProjectAvatar`.
-- **Typ pamięci `journal`** ⬜ — wpis dodawany przez agenta po każdym zrobionym zadaniu (co zrobiono,
-  na czym skończono, co zostało otwarte). **Do rozstrzygnięcia przed implementacją** (ticket przez
-  `prepare-ticket`): relacja do istniejącego `kind: event` (osobny `kind` czy `event` z
-  konwencją/tagiem), czy wpisy idą przez kolejkę akceptacji czy omijają human-gate, jak nie zalać
-  retrievalu dziennikiem (osobny filtr / niższa waga w rankingu, retencja), oraz jak wymusić zapis
-  „po zadaniu" (opis narzędzia MCP, `AGENTS.md`; hook Stop w pluginie Claude Code zostaje w
-  backlogu razem z pluginem).
+- **Typ pamięci `journal`** ✅ — czwarty `kind` (migracja 0021): wpis dziennika zapisywany przez
+  agenta po zadaniu (co zrobiono, na czym skończono, co zostało otwarte). Idzie przez kolejkę
+  akceptacji i auto mode jak każdy zapis agenta (bez bezpiecznika prawie-duplikatu, ale z wektorem i
+  wspólnym dziennym limitem); bez `event_time` (czas wpisu = moment zapisu), append-only dla agenta
+  (`supersedes` w obie strony zakazane), body do `BODY_MAX_JOURNAL`. Poza domyślnym `search_memory`
+  (bez toggla); nowe narzędzie `list_journal` zwraca nagłówki najnowszych wpisów bieżącego projektu.
+  Rytuał „na starcie `list_journal`, po zadaniu zapis" w opisach narzędzi, `AGENTS_MD_BLOCK` i
+  `AGENTS.md`. Dashboard: marker, gutter i kolor `journal` oraz filtr w Przeglądarce pamięci;
+  „Nowa pamięć" go nie oferuje, promote do global zablokowany; podtytuł Osi czasu poprawiony. Hook
+  Stop w pluginie Claude Code zostaje w backlogu razem z pluginem.
 - **OAuth 2.1 + PKCE dla MCP** ⬜ — dla klientów Desktop / web-connector. Projektować od razu pod
   wymagania nowej specyfikacji MCP (2026-07-28): walidacja issuera, `application_type` w Dynamic
   Client Registration, scope accumulation, credential binding — nie pod stary model. Na obecnym SDK

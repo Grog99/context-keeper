@@ -1,6 +1,6 @@
 # Context Keeper — kontrakt narzędzi MCP (warstwa 1)
 
-**Status:** v1.5 · **Źródło prawdy tekstu:** `apps/server/src/mcp/tool-contract.ts` (opisy narzędzi),
+**Status:** v1.8 · **Źródło prawdy tekstu:** `apps/server/src/mcp/tool-contract.ts` (opisy narzędzi),
 `apps/server/src/onboarding/onboarding-templates.ts` (prompt `onboard`, kroki zapisu) · **Kontekst:**
 [`prd.md`](prd.md) §6.1, [`tech-stack.md`](tech-stack.md) §5, §10, §14
 
@@ -12,7 +12,7 @@
 >
 > **Ten dokument nie zawiera tekstu opisów** (od v1.5). Jedynym źródłem jest kod: opisy jadą do
 > agentów przez `tools/list`, są składane z kawałków (np. wspólny akapit `PROJECT_SCOPE_ERRORS`
-> doklejany do trzech narzędzi pamięci) i pokryte testami e2e — kopia w markdownie tylko by się
+> doklejany do czterech narzędzi pamięci) i pokryte testami e2e — kopia w markdownie tylko by się
 > rozjeżdżała (w v1.5 rozjechała się trzykrotnie). Tu zostają zasady i ich uzasadnienia; przy
 > każdym narzędziu jest odsyłacz do stałej. Opisy są po angielsku — adresowane do dowolnego agenta
 > LLM, nie tylko polskojęzycznego operatora.
@@ -27,9 +27,9 @@ zapytań do bazy.
 
 | Token | Nagłówek `X-Context-Keeper-Project` | `tools/list` | Prompt `onboard` (capability `prompts`) | Narzędzia pamięci działają w |
 |---|---|---|---|---|
-| projektowy | brak albo slug własnego projektu | `search_memory`, `get_memory`, `save_memory` | nie | projekcie tokena |
+| projektowy | brak albo slug własnego projektu | `search_memory`, `get_memory`, `save_memory`, `list_journal` | nie | projekcie tokena |
 | projektowy | inny slug | j.w. | nie | — → `project_forbidden` |
-| konta | brak | 3 narzędzia pamięci + `list_projects`, `create_project` | tak | — → `project_required` |
+| konta | brak | 4 narzędzia pamięci + `list_projects`, `create_project` | tak | — → `project_required` |
 | konta | slug istniejącego projektu | j.w. | tak | projekcie z nagłówka |
 | konta | slug oczekującej propozycji `create_project` | j.w. | tak | — → `project_pending` |
 | konta | slug nieznany albo w złym formacie | j.w. | tak | — → `project_not_found` |
@@ -61,7 +61,7 @@ jest przycinana i sprowadzana do lowercase (`normalizeProjectSlugInput`); pusta 
 - `details.projects` jest pobierane leniwie, dopiero przy budowie błędu (`mcp/scope-errors.ts`,
   `buildScopeError`); `message` wymienia najwyżej 20 slugów (`MESSAGE_SLUG_CAP`), pełna lista zawsze jest
   w `details.projects`.
-- Wszystkie trzy opisy narzędzi pamięci kończą się wspólnym akapitem `PROJECT_SCOPE_ERRORS`
+- Wszystkie cztery opisy narzędzi pamięci kończą się wspólnym akapitem `PROJECT_SCOPE_ERRORS`
   (`tool-contract.ts`): jak wybierany jest projekt, 4 kody i akcja dla każdego, oraz „konfiguracja, nie
   błąd przejściowy — nie ponawiaj w pętli”.
 
@@ -87,6 +87,11 @@ liczy jedno miejsce: `memory/read-scope.ts` (`readScopeCondition` / `isReadable`
     nieznanego lub niezatwierdzonego id. Dlaczego: token konta i tak czyta każdy projekt przez zmianę
     nagłówka, więc anty-IDOR niczego tu nie chronił.
   - Liczniki dostępu (`access_count`/`last_accessed_at`) rosną w obu trybach.
+- **`list_journal`** (v1.8): zawsze tylko projekt z nagłówka/tokena, także dla tokenu konta — bez
+  `global`, bez `all_projects`. Dziennik jest z natury per repo, a `save_memory` zapisuje wyłącznie do
+  projektu; cudzy dziennik nie odpowiada na „gdzie ja skończyłem”. Tokenem konta wpisy `journal`
+  innych projektów da się za to odczytać istniejącymi ścieżkami (`search_memory` z `kind: "journal"`
+  i `all_projects: true`, `get_memory(id)`) — to ta sama reguła odczytu co dla każdego `kind`.
 - **`save_memory`** (także gate'y `supersedes`/`relations`): zawsze tylko projekt z nagłówka/tokena.
   Szerszy odczyt nigdy nie otwiera zapisu na obce id — gate'y dzielą `MemoryService.inScope`.
 
@@ -104,6 +109,10 @@ liczy jedno miejsce: `memory/read-scope.ts` (`readScopeCondition` / `isReadable`
   fragmentu).
 - Domyślny `kind` = fact + document, plus event, gdy włączył to operator na projekcie; przy
   `all_projects` rozstrzyga toggle bieżącego projektu.
+- `journal` (v1.8) **nigdy** nie jest w domyślnym `kind` — ani przez toggle eventów (ten dokłada
+  wyłącznie `event`), ani przy `all_projects`; czyta się go jawnym `kind: "journal"` (wtedy bez
+  age-decay — świeżość niesie `list_journal`) albo `list_journal`. Dlaczego: wpis po każdym zadaniu to
+  wysoki wolumen, który wypychałby fakty z top-k dokładnie wtedy, gdy agent szuka kontekstu na starcie.
 - `tags` = dopasowanie any-of.
 - Degradacja (brak embeddingu) → ciche FTS-only, bez sygnału dla agenta.
 - Pusta lista to nie błąd.
@@ -120,6 +129,35 @@ liczy jedno miejsce: `memory/read-scope.ts` (`readScopeCondition` / `isReadable`
 - Nieznane id i id poza zakresem tokena projektowego dają ten sam `not_found` — świadomie, żeby nie
   wyciekać informacji o cudzych projektach.
 - Tokenem konta `supersedes`/`relations` w `save_memory` nadal przyjmują tylko id z projektu z nagłówka.
+
+### `list_journal` (v1.8)
+
+**Źródło tekstu:** `LIST_JOURNAL_DESCRIPTION` + `PROJECT_SCOPE_ERRORS`
+(`apps/server/src/mcp/tool-contract.ts`); schemat wejścia w `mcp/mcp-server.factory.ts`, logika w
+`MemoryService.listJournal`.
+
+**Zasady:**
+
+- Odpowiada na „gdzie skończyliśmy?”: N najnowszych wpisów `kind=journal` **bieżącego projektu**,
+  malejąco po `created_at`, bez query. Rytuał: wołać na starcie sesji/zadania, potem `search_memory`
+  po kontekst tematyczny. Hybrydowy ranking po query nie zwraca „ostatnich”, stąd osobne narzędzie.
+- Wynik to same nagłówki — `[{id, header, tags, createdAt}]` (camelCase); pełna treść przez
+  `get_memory(id)`. `createdAt` = moment zapisu przez agenta (także przy human-gate — przy akceptacji
+  `created_at` jest przepisywane z propozycji), więc kolejność to kolejność zapisów, nie akceptacji.
+  Pusta lista to nie błąd.
+- Tylko `status=approved`, `scope=project` i `project_id` bieżącego projektu — nie `global`, nie inny
+  projekt, nie `pending`, nie `archived`. Przy human-gate wpis jest niewidoczny dla następnej sesji aż
+  do akceptacji (świadomy koszt).
+- `limit`: opcjonalny, domyślnie 10, maksymalnie 50 (stałe w kodzie, bez env). Wartość spoza 1..50 albo
+  niecałkowita → `validation_error` (bez clampu). Zakres sprawdza `MemoryService.listJournal`, nie zod w
+  fabryce — surowy błąd SDK nie miałby koperty `{code}`.
+- Read-only: nie bumpuje `access_count`/`last_accessed_at`, nie zapisuje `search_events`, bez audytu —
+  przegląd nagłówków to nie „przeczytanie” wpisów (to robi dopiero `get_memory`).
+- Widoczne dla obu typów tokena; wymaga rozwiązanego projektu (`requireProject()` jako pierwsze).
+- Rate limit: ten sam knob co `search_memory` (`RATE_LIMIT_SEARCH_PER_MIN`), osobny kubełek per
+  narzędzie, klucz `tokenId:projectId` (narzędzie pamięci — w odróżnieniu od `list_projects`, które
+  jest narzędziem konta i ma klucz `tokenId:account`); z `list_projects` łączy go tylko ponowne użycie
+  knoba `RATE_LIMIT_SEARCH_PER_MIN`, bez nowej zmiennej env.
 
 ### `save_memory` (load-bearing — pełny kontrakt)
 
@@ -143,11 +181,28 @@ liczy jedno miejsce: `memory/read-scope.ts` (`readScopeCondition` / `isReadable`
   żeby uzyskać `approved`.
 - Zapis zawsze trafia do projektu z nagłówka/tokena, nigdy do `global` (promocja do global to akcja
   człowieka).
-- `supersedes`: tylko `fact`/`document` własnego projektu, ten sam `kind` co cel; nigdy `event` ani
-  `global`; korekta jest wyłączona z dedupu, bo ma z natury przypominać to, co zastępuje.
+- `supersedes`: tylko `fact`/`document` własnego projektu, ten sam `kind` co cel; nigdy `event`,
+  `journal` ani `global`; korekta jest wyłączona z dedupu, bo ma z natury przypominać to, co zastępuje.
 - `relations`: do 16 krawędzi `caused_by` | `follows` | `context_for`; celem może być `event`; cel
   `global` i self-loop są odrzucane.
 - `event` wymaga `event_time` (czas ZDARZENIA, nie zapisu; brak domyślnego „teraz”).
+- `journal` (v1.8) — wpis dziennika pracy agenta:
+  - zwykłe `header` (jednolinijkowe podsumowanie zadania) + `body` w markdownie z sekcjami `## Done` /
+    `## Where I stopped` / `## Open` — struktura jest konwencją z opisu narzędzia, bez nowych parametrów
+    i bez walidacji nagłówków (kruche: język, literówki);
+  - bez `event_time` (czasem wpisu jest moment zapisu); `event_time` przy `journal` →
+    `validation_error`;
+  - **append-only dla agenta:** `supersedes` w obie strony (`kind: "journal"` + `supersedes`, albo cel
+    `supersedes` o `kind=journal`) → `validation_error`; korekta = nowy wpis, edycja zostaje człowiekowi
+    w dashboardzie. Bramka na cel jest PO sprawdzeniu `not_found`/zakresu, więc nic o `kind` cudzej
+    pamięci nie wycieka;
+  - limit body `BODY_MAX_JOURNAL` (domyślnie ~8 KB);
+  - w auto mode zwolniony ze strażnika `near_duplicate` (jak `event` — kolejne wpisy dziennika są do
+    siebie z natury podobne; `similar_memories` zawsze NULL), ale wymaga wektora (`not_computed`) i wlicza
+    się do wspólnego dziennego limitu (`daily_limit`) — bez osobnego limitu per `kind`;
+  - moment zapisu definiuje opis: po zakończonym zadaniu, które **zmieniło repo albo stan** (kod, docs,
+    deploy, decyzja), oraz przy przerwaniu pracy z otwartymi wątkami; czyste Q&A bez zmian — bez wpisu
+    (bez tego wyjątku dziennik wypełniłby się szumem i zjadł wspólny limit dzienny).
 - Sekrety → `secret_blocked`, bez redakcji w miejscu — agent przepisuje treść, odwołując się do
   sekretu po nazwie.
 - Limit 429 jest per token × narzędzie, a przy tokenie konta osobno dla każdego projektu.
@@ -218,16 +273,18 @@ liczy jedno miejsce: `memory/read-scope.ts` (`readScopeCondition` / `isReadable`
 | | `search_memory` z `all_projects: true` tokenem projektowym | `validation_error` |
 | | `get_memory` — token projektowy: poza scope (projekt + `global`) lub nieistniejące; token konta: nieistniejące / niezatwierdzone (odczyt dowolnego projektu jest dozwolony) | `not_found` (nieodróżnialne — anty-probing) |
 | | `save_memory` z `supersedes` — target nieznany lub poza scope (IDOR-safe, jak `get_memory`) | `not_found` |
-| | `save_memory` z `supersedes` — target `kind=event`, `kind` korekty ≠ `kind` targetu, lub target `scope=global` | `validation_error` |
+| | `save_memory` z `supersedes` — target `kind=event` albo `kind=journal`, `kind` korekty ≠ `kind` targetu, lub target `scope=global` | `validation_error` |
 | | `save_memory` z `relations` — target nieznany lub poza scope (IDOR-safe, jak `get_memory`; `kind=event` jako target JEST dozwolony, świadome odstępstwo od `supersedes`) | `not_found` |
 | | `save_memory` z `relations` — target `scope=global`, self-loop, albo ponad limit (max 16) | `validation_error` |
 | | `save_memory` z `kind="event"` bez `event_time` albo z niepoprawnym ISO | `validation_error` |
-| | `save_memory` z `event_time` przy `kind` innym niż `event` | `validation_error` |
+| | `save_memory` z `event_time` przy `kind` innym niż `event` (także `journal`) | `validation_error` |
 | | `save_memory` z `kind="event"` + `supersedes` (korekta zdarzenia human-only) | `validation_error` |
+| | `save_memory` z `kind="journal"` + `supersedes` (dziennik append-only) | `validation_error` |
+| | `list_journal` z `limit` spoza 1..50 albo niecałkowitym | `validation_error` |
 | | `create_project` — slug w złym formacie, projekt o tym slugu już istnieje, propozycja tego slugu już oczekuje, nazwa pusta po normalizacji | `validation_error` |
 | | `create_project` — nazwa wygląda jak sekret | `secret_blocked` |
 | Transport (HTTP) | zły/brak/nieusable bearer (projektowy lub konta — ten sam komunikat) | `401` |
-| | rate limit — per token × projekt × narzędzie (klucz `tokenId:projectId`); narzędzia konta per token (`tokenId:account`), `create_project` z własnym niskim limitem; przed auth throttle per IP | `429` + `Retry-After` |
+| | rate limit — per token × projekt × narzędzie (klucz `tokenId:projectId`, także `list_journal` — limit `RATE_LIMIT_SEARCH_PER_MIN`); narzędzia konta per token (`tokenId:account`), `create_project` z własnym niskim limitem; przed auth throttle per IP | `429` + `Retry-After` |
 | Nie-błąd (status w wyniku `save_memory`) | — | `pending` / `duplicate_pending` / `already_exists` / `approved` (v1.6, tylko auto mode) |
 
 Błędy scope'u projektu sprawdzane są na początku handlera narzędzia (`requireProject()`) — przed naszą
@@ -244,7 +301,10 @@ kodów: `apps/server/src/common/errors.ts` (`ToolErrorCode`, `ProjectScopeErrorC
 - **Warstwa 2** — snippet do `AGENTS.md` (+ `@AGENTS.md` w `CLAUDE.md`), serwowany przez **serwer**:
   stałe `AGENTS_MD_BLOCK`, `CLAUDE_MD_BLOCK` i funkcja `renderMcpJson` w
   `onboarding/onboarding-templates.ts`. Jedno źródło dla narzędzi MCP (`agentsMd`/`claudeMd`/`mcpJson` w
-  `list_projects`/`create_project`) i dla dashboardu (`GET /api/onboarding`, ekran „Onboarding”). Forma
+  `list_projects`/`create_project`) i dla dashboardu (`GET /api/onboarding`, ekran „Onboarding”).
+  Niesie rytuał dziennika (v1.8): na starcie zadania `list_journal`, po zadaniu zmieniającym repo/stan
+  albo przy przerwaniu pracy wpis `save_memory(kind: "journal")` z sekcjami Done / Where I stopped /
+  Open (po angielsku, jak opisy narzędzi; polska wersja żyje w root `AGENTS.md` tego repo). Forma
   połączenia: `Authorization: Bearer ${CONTEXT_KEEPER_TOKEN}`, dla tokena konta dodatkowo nagłówek
   `X-Context-Keeper-Project`.
 - **Prompt `onboard`** — dodatek do warstwy 2, nie nowa warstwa; nic load-bearing (patrz wyżej).

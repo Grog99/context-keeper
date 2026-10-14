@@ -15,7 +15,9 @@ Specyfikacja: [`context/prd.md`](context/prd.md) · [`context/tech-stack.md`](co
 
 - **Human-gate** — każdy zapis (agenta i nocnego joba) ląduje w kolejce akceptacji; do pamięci
   trafia dopiero po zatwierdzeniu przez człowieka. To główna obrona przed memory-poisoning, nie tylko proces.
-- **Remote MCP** — narzędzia pamięci `search_memory` / `get_memory` / `save_memory`; podłączasz
+- **Remote MCP** — narzędzia pamięci `search_memory` / `get_memory` / `save_memory` oraz
+  `list_journal` (najnowsze wpisy **dziennika** pracy agenta: co zrobiono, na czym skończono, co
+  zostało otwarte — zapisywane jako `kind: "journal"`, poza domyślnym wyszukiwaniem); podłączasz
   dowolnego klienta MCP przez `.mcp.json` + bearer token. Jeden **token konta** obsługuje wszystkie
   repo (projekt wskazuje nagłówek `X-Context-Keeper-Project`), a z nim agent dostaje też
   `list_projects` / `create_project` i prompt `onboard` do podpięcia nowego repo.
@@ -157,13 +159,17 @@ lub w *Projekty* → *Tokeny*; blok `.mcp.json` jest w *Onboarding* → „Token
 Istniejące repo z takim `.mcp.json` działają bez zmian.
 
 Od tej chwili agent szuka w pamięci i proponuje zapisy — każda propozycja czeka w dashboardzie
-(*Kolejka*) na Twoją akceptację.
+(*Kolejka*) na Twoją akceptację. Wpisy dziennika (`journal`) też: dopóki ich nie zatwierdzisz,
+`list_journal` ich nie zwróci. Wyjątek: przy włączonym auto mode wpis, który przejdzie guardy
+(policzony wektor, niewyczerpany dzienny limit), zatwierdza się od razu i jest widoczny natychmiast;
+w przeciwnym razie też czeka w kolejce.
 
 ## Pamięć projektu (dogfooding)
 
 Dotyczy pracy nad **tym** repo. Repo używa **własnej wdrożonej instancji** jako trwałej pamięci projektu, wystawionej jako serwer
 MCP `context-keeper` (config w commitowanym [`.mcp.json`](.mcp.json)). Jak agenci mają z niej
-korzystać (proaktywne `search_memory`, human-gated `save_memory`, higiena zapisów) opisuje
+korzystać (proaktywne `list_journal` i `search_memory` na starcie zadania, wpis dziennika po zadaniu,
+human-gated `save_memory`, higiena zapisów) opisuje
 [`AGENTS.md`](AGENTS.md) — Claude Code zaciąga go przez [`CLAUDE.md`](CLAUDE.md) (`@AGENTS.md`).
 
 Żeby włączyć pamięć na swojej maszynie: `.mcp.json` jedzie z repo i wskazuje projekt nagłówkiem
