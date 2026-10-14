@@ -222,6 +222,17 @@ zaczynają się od specu w [`design-system.md`](design-system.md) (§12).
 - **Zepsute polskie znaki w danych** ⬜ — w danych dev jest „za�o�ony" (najpewniej zapis testowy z
   PowerShella w złym kodowaniu); serwer przyjmuje U+FFFD bez ostrzeżenia. Do zbadania: czy
   `save_memory` / create powinny ostrzegać albo odrzucać.
+- **Pomiary: zieleń na zieleni** ⬜ — po zmianie akcentu na zieleń znaku (v1.8, „Ikona aplikacji")
+  `--info` jest tą samą zielenią co `--primary`, więc w `components/UsageChart.tsx:187-188` seria
+  „Zaakceptowane z edycją" (`var(--info)`) stoi stackowana na „Zaakceptowane" (`var(--success)`) —
+  dwie zielenie jedna na drugiej. To samo w `lib/usage-chart.ts` (`PROJECT_PALETTE`): `var(--primary)`
+  tuż obok `var(--success)`, a `var(--primary-hover)` (szósty) ≈ `var(--primary)`. Rozwiązać razem z
+  paletą `ProjectAvatar` (v1.8, [`roadmap.md`](roadmap.md)), która też musi ominąć zielony akcent.
+- **Dryf neutrali: `design-system.md` §2.1 / §7.1 vs `globals.css`** ⬜ — kod ma rozciągniętą rampę
+  neutralnych (rewizja kontrastu z v1.3, komentarz w `globals.css`), spec dalej stare wartości: kanwa
+  `#FAFAF9` / `#141312` w specu vs `#F2F0ED` / `#121110` w kodzie, a poza nią m.in. `surface` (dark
+  `#1B1A18` vs `#1E1C1A`), `surface-muted`/`muted`, `border`, `border-strong`, `text-faint`,
+  `neutral-subtle`. Przepisać §2.1 i §7.1 z `globals.css` (kod jest źródłem prawdy).
 
 ## Dług techniczny / architektura
 

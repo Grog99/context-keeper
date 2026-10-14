@@ -124,22 +124,26 @@ rzeczy — dziennik pracy i auth dla klientów bez stałego tokena — oraz spra
 projektach dało się je odróżnić na pierwszy rzut oka. Zmiany UI zaczynają się od specu w
 [`design-system.md`](design-system.md) (§12).
 
-- **Bugi z przeglądu UX** ⬜ — najpierw, każdy od testu regresji (ścieżki względem
+- **Bugi z przeglądu UX** ✅ — każdy z logiką od testu regresji (ścieżki względem
   `apps/dashboard/src/`):
-  - **akord `g ‹litera›` odpala akcje kolejki** — `g a` (skok do Audytu) **zatwierdza** zaznaczoną
-    propozycję, `g s` klika „Zatwierdź jako zamiennik", `g k` przesuwa zaznaczenie; oba handlery
-    słuchają na `document`, `useQueueKeyboard` nie wie o uzbrojonym akordzie
-    (`hooks/useKeyboard.ts`). Odtworzone w przeglądarce. Omija human-gate bez potwierdzenia;
-  - skrót `A` na nieaktualnej propozycji wysyła request (toast 409) — `handleApprove` nie sprawdza
-    `detail.stale` (`screens/QueueScreen.tsx`);
-  - klik w podpis „Tagi" w „Nowa pamięć" usuwa pierwszy tag — pole jest `<label>`
-    (`screens/HumanCreateDialog.tsx`);
-  - Audyt nigdy nie pokazuje ładowania — `isLoading && !isFetching` w React Query v5 jest zawsze
-    fałszem (`screens/AuditScreen.tsx`);
-  - slug projektu niewidoczny — `MonoId label="slug"` renderuje słowo „slug"
+  - **akord `g ‹litera›` nie odpala już akcji kolejki** — `g a` szło do Audytu **i** zatwierdzało
+    zaznaczoną propozycję (human-gate), bo dwa niezależne listenery na `document` łapały ten sam
+    klawisz. Teraz jeden listener w `hooks/useKeyboard.ts`, a o trasie klawisza (ekran / paleta /
+    komenda kolejki / nic) decyduje wyłącznie czysta `routeKey` w `lib/keyboard.ts`: po `g` każdy
+    drugi klawisz w oknie 900 ms należy do akordu (zmapowany → ekran, inny → nic). Szczegóły:
+    [`design-system.md`](design-system.md) §10;
+  - skrót `A` na nieaktualnej (`stale`) propozycji nie wysyła requestu, tylko pokazuje toast, że
+    zatwierdzenie jest zablokowane (`approveBlockReason` w `lib/proposals.ts`, wołana z
+    `handleApprove` w `screens/QueueScreen.tsx`);
+  - klik w podpis „Tagi" w „Nowa pamięć" nie usuwa już tagu — podpis to `<label htmlFor>` na polu
+    wpisywania (`screens/HumanCreateDialog.tsx`);
+  - Audyt pokazuje skeleton przy pierwszym ładowaniu — `isPending && allRows.length === 0`
+    (`screens/AuditScreen.tsx`);
+  - slug projektu jest widoczny jako wartość — `MonoId` bez `label="slug"`
     (`screens/ProjectsScreen.tsx`, `screens/ProjectSettingsDialog.tsx`);
-  - globalny `:focus-visible` w `globals.css` przebija `outline-none` (poza warstwą, później w
-    pliku) — przenieść do `@layer base` i przejść ekrany, czy fokus nigdzie nie zniknął.
+  - globalny `:focus-visible` w `globals.css` stoi w `@layer base` i nie przebija już `outline-none`
+    ani `rounded-*`; input palety ⌘K zamiast ramki wokół pola ma dolny keyline w kolorze akcentu
+    (`focus-within:border-ring` na wrapperze w `components/ui/command.tsx`).
 - **Przełącznik projektów od nowa** ⬜ — dziś nieczytelny: nagłówek grupy „Projekty" wygląda jak
   pozycja (styl nagłówków jest tylko w palecie ⌘K), brak ✓ przy aktywnym kontekście, brak separatora
   „Wszystkie/Global" ↔ projekty, brak sluga, input 44 px z ramką fokusu wokół samego pola, „global"
@@ -148,12 +152,19 @@ projektach dało się je odróżnić na pierwszy rzut oka. Zmiany UI zaczynają 
   wyliczony ze sluga (działa bez klikania, także dla projektów od agentów przez `create_project`);
   **opcjonalnie ręczny**: ikona z kuratorowanego zestawu (~24 z lucide) i kolor w ustawieniach
   projektu. **Osobna paleta** (~8 przytłumionych odcieni, tokeny light/dark) spoza statusów (§2.2) i
-  `kind` (§2.3). Wszędzie, gdzie pojawia się projekt: przełącznik, wiersze Kolejki i Pamięci,
-  Projekty, Audyt. Migracja: nullowalne `projects.icon` / `projects.color`. Spec w §8.2 + §9.3.
+  `kind` (§2.3) **i zielonego akcentu** (§2.1, od ikony aplikacji). Wszędzie, gdzie pojawia się
+  projekt: przełącznik, wiersze Kolejki i Pamięci, Projekty, Audyt. Migracja: nullowalne `projects.icon` / `projects.color`. Spec w §8.2 + §9.3.
   Decyzja 2026-10-12 (pamięć projektu `mem_ymwfih1jboy9`).
-- **Ikona aplikacji** ⬜ — dziś SPA nie ma żadnej. Znak spójny z design systemem: favicon (SVG +
-  fallback PNG/ICO), `apple-touch-icon`, wersja do README / GitHuba; przy okazji `document.title` per
-  ekran (dziś kilka kart wygląda tak samo).
+- **Ikona aplikacji** ✅ — własny znak „zapieczętowana księga z dziurką od klucza" (metafora
+  human-gate) zamiast lucide `Diamond`: `public/favicon.svg` z wariantem dark przez
+  `@media (prefers-color-scheme)`, rastry `favicon.ico` (16+32) i `apple-touch-icon.png` (180)
+  generowane jednorazowo i commitowane, komponent `BrandMark` w railu i na logowaniu (wariant za `data-theme`,
+  tokeny `--brand-*`), znak przy tytule README. **Akcent UI i `info` zmieniły się z irysu na
+  butelkową zieleń znaku** (§2.1, P3; kontrast AA zmierzony w obu motywach, strażnik
+  `theme-tokens.spec.ts`). `document.title` per ekran: „(N) ‹Ekran› · Context Keeper" (licznik
+  kolejki tylko przy N > 0), na logowaniu „Logowanie · Context Keeper". Spec w §2.1, §2.5, §8.2, §9.0.
+  **Odchylenie:** w Pomiarach zieleń akcentu leży obok zieleni `success` — zostaje w
+  [`backlog.md`](backlog.md), do rozwiązania razem z paletą `ProjectAvatar`.
 - **Typ pamięci `journal`** ✅ — czwarty `kind` (migracja 0021): wpis dziennika zapisywany przez
   agenta po zadaniu (co zrobiono, na czym skończono, co zostało otwarte). Idzie przez kolejkę
   akceptacji i auto mode jak każdy zapis agenta (bez bezpiecznika prawie-duplikatu, ale z wektorem i

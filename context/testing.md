@@ -115,8 +115,10 @@ Reguły §1–§7 obowiązują tak samo; tu tylko to, co dashboard robi inaczej.
   `apps/dashboard/vitest.config.ts`. Jeden przebieg: `pnpm --filter @context-keeper/dashboard test`;
   wchodzi do `pnpm verify` i CI przez `pnpm -r test`.
 - **Co testować:** tylko czystą logikę, która wpływa na decyzję recenzenta — `lib/text-diff.ts`
-  (`computeInlineWordDiff`: `ok` i progi fallbacku) oraz `lib/proposals.ts` (kolejność wieku w
-  sprzecznościach, etykieta kierunku zamiany, procenty sumujące się do 100). Mapowań i formatowania
+  (`computeInlineWordDiff`: `ok` i progi fallbacku), `lib/proposals.ts` (kolejność wieku w
+  sprzecznościach, etykieta kierunku zamiany, procenty sumujące się do 100, blokada zatwierdzenia
+  `stale` — `approveBlockReason`) oraz `lib/keyboard.ts` (`routeKey`: routing klawisza między akordem
+  `g` a skrótami kolejki — ścieżka human-gate; jedyne miejsce, które o tym decyduje). Mapowań i formatowania
   wyświetlania nie testujemy (`format.ts`, `errors.ts`, `query-string.ts`, `usage-chart.ts` — §3).
   Ścieżki `aborted` (timeout jsdiffa) też nie — to test timingu (§3).
 - **Bez jsdom, bez `@testing-library`, bez testów komponentów i hooków.** Logikę wartą przybicia w

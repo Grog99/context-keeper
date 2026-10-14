@@ -1,4 +1,7 @@
 import { useEffect, useRef } from 'react';
+import { type ChordState, IDLE_CHORD, type QueueCommand, routeKey, type ScreenKey } from '../lib/keyboard';
+
+export type { ScreenKey } from '../lib/keyboard';
 
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -24,76 +27,6 @@ export interface QueueKeyboardHandlers {
   enabled?: boolean;
 }
 
-/** §10 design-systemu — nawigacja kolejki: `j/k` góra/dół, `Enter` otwiera, `A/R/E/S` akcje, `x`
- * toggle zaznaczenia (bulk, roadmap v1.3). Nieaktywne gdy fokus jest w polu edytowalnym albo z
- * modyfikatorem (Cmd/Ctrl/Alt) — nie kolidować z skrótami przeglądarki/OS ani z wpisywaniem tekstu. */
-export function useQueueKeyboard(handlers: QueueKeyboardHandlers): void {
-  const ref = useRef(handlers);
-  // Aktualizacja "latest ref" MUSI żyć w efekcie, nie w ciele render (react-hooks/refs, React
-  // Compiler) — commituje się po każdym renderze, przed jakąkolwiek następną interakcją klawiatury.
-  useEffect(() => {
-    ref.current = handlers;
-  });
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent): void {
-      if (ref.current.enabled === false) return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (isEditableTarget(event.target)) return;
-
-      switch (event.key) {
-        case 'j':
-          event.preventDefault();
-          ref.current.onNext();
-          return;
-        case 'k':
-          event.preventDefault();
-          ref.current.onPrev();
-          return;
-        case 'Enter':
-          ref.current.onOpen();
-          return;
-        case 'a':
-        case 'A':
-          ref.current.onApprove();
-          return;
-        case 'r':
-        case 'R':
-          ref.current.onReject();
-          return;
-        case 'e':
-        case 'E':
-          ref.current.onEdit();
-          return;
-        case 's':
-        case 'S':
-          ref.current.onSupersede();
-          return;
-        case 'x':
-        case 'X':
-          ref.current.onToggleSelect();
-          return;
-        default:
-          return;
-      }
-    }
-
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, []);
-}
-
-export type ScreenKey =
-  | 'kolejka'
-  | 'pamiec'
-  | 'os-czasu'
-  | 'projekty'
-  | 'audyt'
-  | 'pomiary'
-  | 'operacje'
-  | 'onboarding'
-  | 'ustawienia';
-
 export interface GlobalKeyboardHandlers {
   onNavigate: (screen: ScreenKey) => void;
   onOpenPalette: () => void;
@@ -103,79 +36,134 @@ export interface GlobalKeyboardHandlers {
   enabled?: boolean;
 }
 
-const SCREEN_CHORD_KEYS: Record<string, ScreenKey> = {
-  k: 'kolejka',
-  p: 'pamiec',
-  c: 'os-czasu', // "c" jak w "oś Czasu" — "o" jest już zajęte przez "operacje", "t"(imeline) nie po polsku
-  t: 'projekty',
-  a: 'audyt',
-  m: 'pomiary', // "m" jak w "poMiary" — "p" jest już zajęte przez "pamiec"
-  o: 'operacje',
-  w: 'onboarding', // "w" jak w "onboardinW"/"welcome" — "o" jest już zajęte przez "operacje"
-  s: 'ustawienia', // "s" jak "Settings" — "u" też wolne, ale "s" pasuje do skrótu `g s` z design-systemu (§9.9)
+const QUEUE_COMMAND_HANDLERS: Record<QueueCommand, (handlers: QueueKeyboardHandlers) => void> = {
+  next: (h) => h.onNext(),
+  prev: (h) => h.onPrev(),
+  open: (h) => h.onOpen(),
+  approve: (h) => h.onApprove(),
+  reject: (h) => h.onReject(),
+  edit: (h) => h.onEdit(),
+  supersede: (h) => h.onSupersede(),
+  toggleSelect: (h) => h.onToggleSelect(),
 };
-const CHORD_TIMEOUT_MS = 900;
+
+// --- Router: jeden listener `keydown` na `document` dla obu hooków -------------------------------
+// Dwa niezależne listenery (kolejka + globalny) łapały ten sam keydown: `g a` nawigowało do audytu
+// ORAZ zatwierdzało propozycję (roadmap v1.8, "Bugi z przeglądu UX"). Teraz oba hooki tylko
+// rejestrują swoje "latest handlers" w slocie, a decyzję, dokąd trafia klawisz, podejmuje
+// `routeKey` (`lib/keyboard.ts`) — kolejność rejestracji efektów nie ma znaczenia. Stan modułu
+// zmieniamy wyłącznie z efektów / handlerów zdarzeń przez helpery poniżej, nigdy w trakcie render.
+
+type Slot<T> = { current: T } | null;
+
+let chord: ChordState = IDLE_CHORD;
+let globalSlot: Slot<GlobalKeyboardHandlers> = null;
+let queueSlot: Slot<QueueKeyboardHandlers> = null;
+let subscribers = 0;
+
+function onDocumentKeyDown(event: KeyboardEvent): void {
+  const global = globalSlot?.current;
+  const queue = queueSlot?.current;
+  const routing = routeKey(
+    chord,
+    {
+      key: event.key,
+      metaKey: event.metaKey,
+      ctrlKey: event.ctrlKey,
+      altKey: event.altKey,
+      repeat: event.repeat,
+      editableTarget: isEditableTarget(event.target),
+    },
+    {
+      now: performance.now(),
+      globalEnabled: global !== undefined && global.enabled !== false,
+      queueEnabled: queue !== undefined && queue.enabled !== false,
+    },
+  );
+  chord = routing.chord;
+  if (routing.preventDefault) event.preventDefault();
+
+  const { route } = routing;
+  switch (route.kind) {
+    case 'navigate':
+      global?.onNavigate(route.screen);
+      return;
+    case 'openPalette':
+      global?.onOpenPalette();
+      return;
+    case 'openCheatsheet':
+      global?.onOpenCheatsheet();
+      return;
+    case 'queue':
+      if (queue) QUEUE_COMMAND_HANDLERS[route.command](queue);
+      return;
+    case 'none':
+      return;
+  }
+}
+
+function resetChord(): void {
+  chord = IDLE_CHORD;
+}
+
+/** Dodaje listener przy pierwszym subskrybencie, zdejmuje przy ostatnim (licznik przeżywa StrictMode). */
+function subscribe(): () => void {
+  if (subscribers === 0) document.addEventListener('keydown', onDocumentKeyDown);
+  subscribers += 1;
+  return () => {
+    subscribers -= 1;
+    if (subscribers === 0) {
+      document.removeEventListener('keydown', onDocumentKeyDown);
+      resetChord();
+    }
+  };
+}
+
+/** §10 design-systemu — nawigacja kolejki: `j/k` góra/dół, `Enter` otwiera, `A/R/E/S` akcje, `x`
+ * toggle zaznaczenia (bulk, roadmap v1.3). Nieaktywne gdy fokus jest w polu edytowalnym albo z
+ * modyfikatorem (Cmd/Ctrl/Alt) — nie kolidować z skrótami przeglądarki/OS ani z wpisywaniem tekstu.
+ * Nie nasłuchuje sam: rejestruje handlery w routerze (jeden listener, decyzja w `routeKey`), a skrót
+ * po `g` należy do akordu nawigacji — nigdy nie dociera tu (`g a` ≠ zatwierdzenie). */
+export function useQueueKeyboard(handlers: QueueKeyboardHandlers): void {
+  const ref = useRef(handlers);
+  // Aktualizacja "latest ref" MUSI żyć w efekcie, nie w ciele render (react-hooks/refs, React
+  // Compiler) — commituje się po każdym renderze, przed jakąkolwiek następną interakcją klawiatury.
+  useEffect(() => {
+    ref.current = handlers;
+  });
+
+  useEffect(() => {
+    queueSlot = ref;
+    const unsubscribe = subscribe();
+    return () => {
+      if (queueSlot === ref) queueSlot = null;
+      unsubscribe();
+    };
+  }, []);
+}
 
 /** §9.0/§10 — skróty globalne (rail + top bar): `⌘K`/`Ctrl+K` paleta poleceń, `/` (deleguje do
  * palety — jeden punkt wejścia do wyszukiwania, jak w makiecie), `g` potem `k/p/c/t/a/m/o/w/s` skok do
- * ekranu, `?` ściągawka skrótów. */
+ * ekranu, `?` ściągawka skrótów. Jak `useQueueKeyboard` — tylko rejestracja w routerze. */
 export function useGlobalKeyboard(handlers: GlobalKeyboardHandlers): void {
   const ref = useRef(handlers);
   useEffect(() => {
     ref.current = handlers;
   });
-  const chordArmedRef = useRef(false);
-  const chordTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
-    function disarm(): void {
-      chordArmedRef.current = false;
-      if (chordTimerRef.current) clearTimeout(chordTimerRef.current);
-    }
-
-    function onKeyDown(event: KeyboardEvent): void {
-      if (ref.current.enabled === false) return;
-
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        disarm();
-        ref.current.onOpenPalette();
-        return;
-      }
-
-      if (isEditableTarget(event.target)) return;
-
-      if (chordArmedRef.current) {
-        disarm();
-        const screen = SCREEN_CHORD_KEYS[event.key.toLowerCase()];
-        if (screen) {
-          event.preventDefault();
-          ref.current.onNavigate(screen);
-        }
-        return;
-      }
-
-      if (event.key === 'g') {
-        chordArmedRef.current = true;
-        chordTimerRef.current = setTimeout(disarm, CHORD_TIMEOUT_MS);
-        return;
-      }
-      if (event.key === '/') {
-        event.preventDefault();
-        ref.current.onOpenPalette();
-        return;
-      }
-      if (event.key === '?') {
-        event.preventDefault();
-        ref.current.onOpenCheatsheet();
-        return;
-      }
-    }
-
-    document.addEventListener('keydown', onKeyDown);
+    globalSlot = ref;
+    const unsubscribe = subscribe();
     return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      disarm();
+      if (globalSlot === ref) globalSlot = null;
+      resetChord();
+      unsubscribe();
     };
   }, []);
+
+  // Dialog otwarty myszą w trakcie uzbrojonego akordu: po zamknięciu nie wolno trzymać `g`.
+  const enabled = handlers.enabled !== false;
+  useEffect(() => {
+    if (!enabled) resetChord();
+  }, [enabled]);
 }

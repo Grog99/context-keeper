@@ -171,7 +171,7 @@ function SlugRow({ project }: { project: ProjectListItem }) {
           </div>
         ) : (
           <span className="inline-flex items-center gap-2">
-            <MonoId value={project.slug} label="slug" />
+            <MonoId value={project.slug} />
             <Button variant="secondary" size="sm" onClick={startEditing}>
               Edytuj
             </Button>

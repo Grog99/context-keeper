@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileUp, X } from 'lucide-react';
-import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import { toast } from 'sonner';
 import { DedupHint } from '../components/DedupHint';
 import { Button } from '../components/ui/button';
@@ -86,6 +86,7 @@ function HumanCreateForm({ onOpenChange, scope, projectId, projectName }: HumanC
   const [eventTime, setEventTime] = useState(() => toDatetimeLocalValue(new Date()));
   const [tags, setTags] = useState<string[]>([]);
   const [tagDraft, setTagDraft] = useState('');
+  const tagInputId = useId();
   const [importTab, setImportTab] = useState<'paste' | 'upload'>('paste');
   const [fileName, setFileName] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
@@ -304,8 +305,10 @@ function HumanCreateForm({ onOpenChange, scope, projectId, projectName }: HumanC
           </TabsContent>
         </Tabs>
 
-        <label className="flex flex-col gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Tagi</span>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor={tagInputId} className="text-xs font-medium text-muted-foreground">
+            Tagi
+          </label>
           <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-input bg-background px-2 py-1.5 focus-within:ring-2 focus-within:ring-ring">
             {tags.map((tag) => (
               <span
@@ -321,13 +324,14 @@ function HumanCreateForm({ onOpenChange, scope, projectId, projectName }: HumanC
             <input
               value={tagDraft}
               onChange={(e) => setTagDraft(e.target.value)}
+              id={tagInputId}
               onKeyDown={handleTagKeyDown}
               onBlur={addTagFromDraft}
               placeholder={tags.length === 0 ? 'np. infra, database' : ''}
               className="min-w-[80px] flex-1 bg-transparent text-sm outline-none placeholder:text-faint"
             />
           </div>
-        </label>
+        </div>
 
         <DedupHint similarIds={similarIds} />
 

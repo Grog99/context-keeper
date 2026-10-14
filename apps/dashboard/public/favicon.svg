@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!--
+    Znak aplikacji (design-system.md §8.2). Geometria jest zdublowana w src/components/BrandMark.tsx;
+    favicon.ico i apple-touch-icon.png są generowane z wariantu jasnego (zmiana znaku = trzy miejsca).
+  -->
+  <style>
+    .tile{fill:#1E4D3A}.paper{fill:#F3EBD8}.seal{fill:#C9643A}
+    @media (prefers-color-scheme: dark){.tile{fill:#26604A}.seal{fill:#D6744A}}
+  </style>
+  <rect class="tile" x="2" y="2" width="60" height="60" rx="14"/>
+  <rect class="paper" x="15" y="11" width="34" height="42" rx="3"/>
+  <rect class="tile" x="20" y="11" width="5" height="42"/>
+  <rect class="seal" x="25" y="28" width="24" height="8"/>
+  <circle class="seal" cx="37.5" cy="32" r="11"/>
+  <circle class="paper" cx="37.5" cy="29.792" r="2.76"/>
+  <path class="paper" d="M35.936 31.08h3.128l1.104 5.98h-5.336z"/>
+</svg>

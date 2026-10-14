@@ -8,10 +8,10 @@ import type { MemoryKind } from '../types/domain';
  * go zostawia działające rozróżnienie, co jest wymogiem P2 (kolor nigdy nie jest jedynym sygnałem).
  *
  * Hue (`--kind-*` w `globals.css`) leżą świadomie w martwych strefach koła — petrol ~198°, wrzos
- * ~312° i oliwka ~90° (`journal`, v1.8) nie sąsiadują z żadnym znaczeniem z §2.2 (zieleń 145°,
- * bursztyn 35°, czerwień 5°, iris 250°), więc nie da się ich odczytać jako status. Oliwka jest
- * najbliżej zieleni sukcesu — dlatego `journal` ma też najmocniej odmienny kształt (podwójna linia)
- * i ikonę (`ScrollText`). Niska chroma jest częścią kontraktu: te kolory mają
+ * ~312° i oliwka ~90° (`journal`, v1.8) nie sąsiadują z żadnym znaczeniem z §2.2 (zieleń 142°
+ * (status) i ~150° (akcent), bursztyn 35°, czerwień 5°), więc nie da się ich odczytać jako status.
+ * Oliwka jest najbliżej zieleni — dlatego `journal` ma też najmocniej odmienny kształt (podwójna
+ * linia) i ikonę (`ScrollText`). Niska chroma jest częścią kontraktu: te kolory mają
  * czytać się jak barwiony papier, nie jak sygnał. `fact` NIE ma koloru — jako najczęstszy kind
  * zostaje neutralną bazą, od której odcinają się pozostałe.
  */

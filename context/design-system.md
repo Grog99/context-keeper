@@ -1,6 +1,6 @@
 # Context Keeper — Design System & UI
 
-**Wersja:** v1.7 (reguła „spec przed kodem" — §12; ekrany Operacje i Logowanie — §9.11, §9.12) · **Data:** 2026-10-12 (pierwsza wersja: v1, Faza 1, 2026-07-22)
+**Wersja:** v1.8 (znak aplikacji i zielony akcent — §2.1, §2.5, §8.2) · **Data:** 2026-10-13 (pierwsza wersja: v1, Faza 1, 2026-07-22)
 **Źródła:** [`prd.md`](prd.md) (co/dlaczego), [`tech-stack.md`](tech-stack.md) (jak) · **Stack UI:** React SPA + **Tailwind CSS + shadcn/ui** (Radix) + **lucide-react**
 
 > Ten dokument opisuje **jak wygląda i jak się zachowuje** dashboard recenzenta — jedyna powierzchnia dla człowieka.
@@ -16,7 +16,7 @@ Charakter — przy zachowaniu minimalizmu — niosą **trzy sygnatury**, nie dek
 
 1. **Monospace dla danych maszynowych.** Każdy identyfikator (`mem_a1b2c3`), token (`ck_…`), tag, `score`, znacznik czasu i **origin path** (`agent · project:acme`) idzie krojem monospace. To robi z interfejsu *rejestr / księgę pamięci* — tematycznie trafne dla memory-store — i natychmiast odróżnia go od generycznego dashboardu. Proza (nagłówki, body pamięci, UI chrome) idzie sans.
 2. **Keyline zamiast kart.** Separacja przez cienkie linie i rytm typografii, nie przez ciężkie, zaokrąglone „karty z cieniem". Gęsto, ale spokojnie. Cień rezerwujemy dla elementów unoszących się (popover, dialog, toast).
-3. **Jeden akcent marki, reszta koloru = semantyka.** Akcent **iris/fiolet** służy tylko marce i interakcji (focus, primary, aktywna nawigacja). Każdy inny kolor **coś znaczy** (status/provenance). Dyscyplina koloru jest tu tożsamością.
+3. **Jeden akcent marki, reszta koloru = semantyka.** Akcent — **butelkowa zieleń znaku aplikacji** (`BrandMark`, §8.2) — służy tylko marce i interakcji (focus, primary, aktywna nawigacja). Każdy inny kolor **coś znaczy** (status/provenance). Dyscyplina koloru jest tu tożsamością.
 
 **Czego unikamy:** wielkiego „hero", gradientów, emoji jako znaczników sekcji, `rounded-lg` wszędzie, dekoracyjnej numeracji. Elegancja = precyzja odstępów, typografii i stanów.
 
@@ -28,7 +28,7 @@ Charakter — przy zachowaniu minimalizmu — niosą **trzy sygnatury**, nie dek
 |---|---|---|
 | P1 | **Summary before detail** | Nad każdą listą — pasek stanu (głębokość kolejki, zdrowie embeddingu, wynik nocnego jobu, blokady sekretów/24h). Szczegół dopiero po wejściu w pozycję. |
 | P2 | **Stan kodowany formą, nie tylko liczbą** | `pending`/`stale`/`approved`/`secret_blocked` mają **chip + ikonę + label** — czytelne na pierwszy rzut oka, nie tylko kolorem. |
-| P3 | **Kolor semantyczny ≠ akcent** | Iris to marka. Zielony/bursztyn/czerwony niosą znaczenie stanu i nigdy nie są „ozdobą". |
+| P3 | **Kolor semantyczny ≠ akcent** | Butelkowa zieleń akcentu to marka i interakcja. Zieleń `success`, bursztyn i czerwień niosą znaczenie stanu i nigdy nie są „ozdobą”. Akcent i `success` dzielą strefę hue (~150° vs 142°): rozdziela je jasność i nasycenie (ciemna, przygaszona zieleń akcentu vs jaskrawa zieleń `success`), a stan i tak zawsze niesie ikona + label (P2) — akcent nigdy nie jest sygnałem „OK”. |
 | P4 | **Klawiatura first-class** | Cała kolejka obsługiwalna bez myszy (§10). Widoczny `focus-visible`. |
 | P5 | **Gęstość z rytmu** | Stałe wysokości wierszy, keyline, tabular-nums — nie ramki wokół wszystkiego. |
 | P6 | **Nieodwracalne = tarcie celowe** | `reject`/`archive`/`promote`/`purge`/rotacja tokena → dialog potwierdzenia. Reszta = jeden klik/skrót. |
@@ -39,7 +39,7 @@ Charakter — przy zachowaniu minimalizmu — niosą **trzy sygnatury**, nie dek
 
 ## 2. Kolor
 
-Neutralne **biasowane ciepło** (rodzina „stone", nie czysty szary) — dobrane, nie odziedziczone. Kanwa: ciepła prawie-biel (light) / ciepły „ink" prawie-czerń (dark, nie pure black). Akcent: **iris**.
+Neutralne **biasowane ciepło** (rodzina „stone", nie czysty szary) — dobrane, nie odziedziczone. Kanwa: ciepła prawie-biel (light) / ciepły „ink" prawie-czerń (dark, nie pure black). Akcent: **butelkowa zieleń** — kolor kafla znaku aplikacji (`BrandMark`, §8.2); w trybie ciemnym jaśniejszy, przygaszony wariant.
 
 ### 2.1 Role semantyczne (hex, light → dark)
 
@@ -53,10 +53,12 @@ Neutralne **biasowane ciepło** (rodzina „stone", nie czysty szary) — dobran
 | `text` | `#1C1917` | `#F5F3F0` | tekst główny |
 | `text-muted` | `#57534E` | `#A8A29E` | tekst drugorzędny, etykiety |
 | `text-faint` | `#A8A29E` | `#78716C` | placeholdery, metadane mniej ważne |
-| **`accent` (iris)** | `#5B4BD6` | `#8B7CF6` | primary, focus ring, aktywna nawigacja, marka |
-| `accent-hover` | `#4E3FC0` | `#9E90F8` | hover primary |
-| `accent-subtle` | `#EEEBFB` | `#221E3A` | tło zaznaczenia/aktywnej pozycji, tint marki |
-| `accent-fg` | `#FFFFFF` | `#15131F` | tekst na `accent` |
+| **`accent` (butelkowa zieleń)** | `#1E4D3A` | `#7FB79A` | primary, focus ring, aktywna nawigacja, badge kolejki |
+| `accent-hover` | `#173D2E` | `#93C5AA` | hover primary |
+| `accent-subtle` | `#E2EBE6` | `#17261F` | tło zaznaczenia/aktywnej pozycji |
+| `accent-fg` | `#FFFFFF` | `#0D1A14` | tekst na `accent` |
+
+> **Akcent a `success` (v1.8).** Obie zielenie leżą w tej samej strefie koła (akcent ~150–156°, `success` 142°). Rozdziela je jasność i nasycenie — w jasnym motywie akcent jest ciemny i przygaszony (L≈21%, S≈44%), w ciemnym jasny, ale szarawy (S≈28%); `success` jest jaskrawy (S≈70–76%) — oraz forma: stan zawsze niesie ikona + label (P2), akcent nigdy nie stoi sam jako „OK”. Tła `accent-subtle` i `success-subtle` są prawie nieodróżnialne (zwłaszcza w dark), więc zaznaczenie wiersza niesie też pasek 2px i nigdy nie polega na samym tincie. Miejsca, gdzie stoją obok siebie (zaznaczony `ProposalRow` przy chipie `APPROVED`, health strip, toast sukcesu przy przycisku `primary`), sprawdza się przy każdej zmianie tych tokenów. Akcent wziął kolor ze znaku aplikacji; do v1.7 był to iris (`#5B4BD6` / `#8B7CF6`).
 
 ### 2.2 Paleta statusów (load-bearing)
 
@@ -67,7 +69,7 @@ Pięć znaczeń. Każde ma: `solid` (ikona/kropka/akcja), `subtle` (tło chipa),
 | **success** (approved, healthy, promote) | `check` / `circle-check` | `#16A34A` / `#4ADE80` | `#DCFCE7` / `#0F2A18` | zatwierdzone, zdrowy embedding, sukces nocnego jobu |
 | **attention** (pending, degraded) | `clock` / `loader` | `#B45309` / `#FBBF24` | `#FEF3C7` / `#2A2008` | oczekuje na recenzję, tryb degraded |
 | **danger** (secret_blocked, stale-block, destrukcja) | `shield-alert` / `lock` / `triangle-alert` | `#DC2626` / `#F87171` | `#FEE2E2` / `#2A1414` | blokada sekretu, stale (blokada approve), reject/purge |
-| **info / hint** (dedup „similar", nightly origin) | `sparkles` / `moon` | `#5B4BD6` / `#8B7CF6` | `accent-subtle` | podpowiedź „similar to […]", znacznik nocnego jobu |
+| **info / hint** (dedup „similar", nightly origin) | `sparkles` / `moon` | `#1E4D3A` / `#7FB79A` (= `accent`) | `accent-subtle` | podpowiedź „similar to […]", znacznik nocnego jobu; `info-foreground` `#143327` / `#CFE6DA` |
 | **neutral** (archived, rejected, resolved) | `archive` / `x` | `#78716C` / `#A8A29E` | `surface-muted` | zarchiwizowane, odrzucone, stany zamknięte |
 
 > **Uwaga o `stale` vs `secret_blocked`:** oba to „stop, potrzebny człowiek, zablokowane" → **wspólna rodzina danger**, różnicowane **ikoną + labelem** (`lock` „stale — bazowa rewizja się zmieniła" vs `shield-alert` „secret_blocked — rotuj credential"), nie odcieniem. Minimalizm zamiast dwóch czerwieni.
@@ -82,13 +84,11 @@ znaczy**. Tożsamość rekordu to prawomocne znaczenie; nielegalne jest dopiero 
 
 Trzy zasady, które trzymają te rodziny osobno:
 
-1. **Hue z martwych stref koła.** Statusy zajmują 145° (zieleń), 35° (bursztyn), 5° (czerwień),
-   250° (iris). `kind` bierze **petrol ~198°**, **wrzos ~312°** i **oliwkę ~90°** (v1.8, `journal`) —
-   pasma, w których nie ma żadnego znaczenia z §2.2, więc pomyłka „to chyba ostrzeżenie" jest
-   strukturalnie niemożliwa. Oliwka leży w największej luce między bursztynem (26° light / 43° dark)
-   a zielenią (142°), ≥ 47° od obu; niska chroma odróżnia ją od nasyconej zieleni sukcesu (świadomie:
-   najbliższy sąsiad statusowy w rodzinie `kind`, dlatego kształt i ikona `journal` są najmocniej
-   odmienne).
+1. **Hue z martwych stref koła.** Statusy zajmują 142° (zieleń — w tej samej strefie co akcent marki ~150°, §2.1), 35° (bursztyn) i 5° (czerwień). `kind` bierze **petrol ~198°**, **wrzos ~312°** i **oliwkę ~90°** (v1.8, `journal`) — pasma, w których nie ma żadnego
+   znaczenia z §2.2, więc pomyłka „to chyba ostrzeżenie" jest strukturalnie niemożliwa. Oliwka leży w
+   największej luce między bursztynem (26° light / 43° dark) a zielenią statusu (142°) i akcentu (~150°),
+   ≥ 47° od nich; niska chroma odróżnia ją od nasyconej zieleni sukcesu (świadomie: najbliższy sąsiad
+   w rodzinie `kind`, dlatego kształt i ikona `journal` są najmocniej odmienne).
 2. **Niska chroma jako część kontraktu** (~22–30% nasycenia). Nasycony kolor czyta się jako sygnał;
    przygaszony czyta się jako barwiony papier. Podbicie nasycenia tych tokenów łamie regułę,
    nawet jeśli hue zostaje.
@@ -136,6 +136,16 @@ agent   · project:acme     ○ text-muted   (ikona: bot)
 human   · global           ○ text-muted   (ikona: user)
 nightly · project:acme     ◆ info tint     (ikona: moon)
 ```
+
+### 2.5 Znak marki (`brand-*`) — tylko dla `BrandMark`
+
+| Rola | Light | Dark | Użycie |
+|---|---|---|---|
+| `brand-tile` | `#1E4D3A` | `#26604A` | kafel i grzbiet księgi |
+| `brand-paper` | `#F3EBD8` | `#F3EBD8` | księga i dziurka od klucza |
+| `brand-seal` | `#C9643A` | `#D6744A` | pasek i pieczęć |
+
+Tokenów `brand-*` nie używa nic poza `BrandMark` — to nie są kolory interfejsu. Terakota pieczęci żyje tylko w znaku (w UI czytałaby się jak błąd obok `danger`). W jasnym motywie `brand-tile` równa się `accent`; w ciemnym nie — kafel zostaje ciemny, akcent się rozjaśnia. Te same wartości są świadomie powtórzone w `public/favicon.svg`, który nie widzi CSS aplikacji.
 
 ---
 
@@ -198,6 +208,7 @@ Szybko i dyskretnie — ruch służy orientacji, nie efektowi.
 - **lucide-react**, stroke 1.5–1.75px, rozmiary **16 / 18 / 20**. Line, nie fill (spójne z minimalizmem).
 - Kluczowe: `clock` (pending), `circle-check` (approved), `archive`, `lock` (stale), `shield-alert` (secret_blocked), `sparkles` (dedup hint), `moon` (nightly), `bot`/`user` (origin), `git-merge` (merge), `trash-2` (delete/purge), `arrow-left-right` (update diff), `replace` („zatwierdź jako zamiennik"), `key-round` (token), `folder` (projekt), `search`, `filter`, `pencil` (edit).
 - **Emoji: nie** (poza ewentualnym pustym stanem, i to z umiarem).
+- Znak marki nie jest ikoną lucide: to `BrandMark` (§8.2) — wypełniony logotyp, nie ikona interfejsu.
 
 ---
 
@@ -220,18 +231,23 @@ shadcn/ui czyta tokeny jako CSS variables. Poniżej gotowy fundament — semanty
   --border-strong: #D6D3D1;
   --input: #E7E5E4;
 
-  /* brand accent — iris */
-  --primary: #5B4BD6;
-  --primary-hover: #4E3FC0;
+  /* akcent marki — butelkowa zieleń znaku (G3) */
+  --primary: #1E4D3A;
+  --primary-hover: #173D2E;
   --primary-foreground: #FFFFFF;
-  --accent-subtle: #EEEBFB;
-  --ring: #5B4BD6;
+  --accent-subtle: #E2EBE6;
+  --ring: #1E4D3A;
+
+  /* znak marki — tylko dla BrandMark (§2.5) */
+  --brand-tile: #1E4D3A;
+  --brand-paper: #F3EBD8;
+  --brand-seal: #C9643A;
 
   /* status — semantyka (para: solid + subtle + foreground-on-subtle) */
   --success: #16A34A;  --success-subtle: #DCFCE7;  --success-foreground: #14532D;
   --warning: #B45309;  --warning-subtle: #FEF3C7;  --warning-foreground: #78350F;
   --danger:  #DC2626;  --danger-subtle:  #FEE2E2;  --danger-foreground:  #7F1D1D;
-  --info:    #5B4BD6;  --info-subtle:    #EEEBFB;  --info-foreground:    #372F8C;
+  --info:    #1E4D3A;  --info-subtle:    #E2EBE6;  --info-foreground:    #143327;
   --neutral: #78716C;  --neutral-subtle: #F5F5F4;  --neutral-foreground: #44403C;
 
   --radius: 6px;
@@ -249,16 +265,20 @@ shadcn/ui czyta tokeny jako CSS variables. Poniżej gotowy fundament — semanty
     --border-strong: #3A3633;
     --input: #2C2A27;
 
-    --primary: #8B7CF6;
-    --primary-hover: #9E90F8;
-    --primary-foreground: #15131F;
-    --accent-subtle: #221E3A;
-    --ring: #8B7CF6;
+    --primary: #7FB79A;
+    --primary-hover: #93C5AA;
+    --primary-foreground: #0D1A14;
+    --accent-subtle: #17261F;
+    --ring: #7FB79A;
+
+    --brand-tile: #26604A;
+    --brand-paper: #F3EBD8;
+    --brand-seal: #D6744A;
 
     --success: #4ADE80;  --success-subtle: #0F2A18;  --success-foreground: #BBF7D0;
     --warning: #FBBF24;  --warning-subtle: #2A2008;  --warning-foreground: #FDE68A;
     --danger:  #F87171;  --danger-subtle:  #2A1414;  --danger-foreground:  #FECACA;
-    --info:    #8B7CF6;  --info-subtle:    #221E3A;  --info-foreground:    #DDD6FE;
+    --info:    #7FB79A;  --info-subtle:    #17261F;  --info-foreground:    #CFE6DA;
     --neutral: #A8A29E;  --neutral-subtle: #232120;  --neutral-foreground: #E7E5E4;
   }
 }
@@ -314,14 +334,14 @@ Bazujemy na shadcn (kopiowane do repo → pełna kontrola). Poniżej — bazowe 
 
 | Komponent | Uwagi tematyzacji |
 |---|---|
-| `Button` | warianty: `primary` (iris solid), `secondary` (obrys `border-strong`), `ghost`, `destructive` (danger). Rozmiary `sm/md`. Radius `md`. |
+| `Button` | warianty: `primary` (akcent solid), `secondary` (obrys `border-strong`), `ghost`, `destructive` (danger). Rozmiary `sm/md`. Radius `md`. |
 | `Badge` | patrz **StatusChip** (własny wariant). |
 | `Select` / `Command` | context switcher + filtry. `Command` (⌘K palette) do szybkiej nawigacji. |
 | `Tabs` | w detalu proposala/pamięci: `Diff` / `Metadane` / `Rewizje`. |
 | `Dialog` / `AlertDialog` | potwierdzenia destrukcyjne (P6), token reveal, human-create. |
 | `Toast` (sonner) | wynik akcji: „Zatwierdzono", „Odrzucono", „Token skopiowany". |
 | `Tooltip` | absolutny czas przy relatywnym, pełny origin, wyjaśnienie badge. |
-| `Input` / `Textarea` | obrys `input`, focus ring iris. Textarea body = mono? nie — sans, `text-md`. |
+| `Input` / `Textarea` | obrys `input`, focus ring `ring` (akcent). Textarea body = mono? nie — sans, `text-md`. |
 | `Skeleton` | ładowanie list; shimmer subtelny (§5). |
 | `Separator` | keyline. |
 
@@ -337,7 +357,7 @@ Bazujemy na shadcn (kopiowane do repo → pełna kontrola). Poniżej — bazowe 
 
 **`MonoId`** — `mem_…`/`ck_…`/`rev_…` w mono `text-xs`, klik = kopiuj (toast). Token zawsze maskowany poza jednorazowym reveal.
 
-**`ProposalRow`** — wiersz kolejki `h-12`: `[StatusChip] [KindMarker] [type ikona] Header (truncate) … [OriginPath] [tagi ≤2 + „+N"] [czas rel.]`. Stale → dodatkowy `danger` badge po prawej. Hover `surface-muted`, aktywny `accent-subtle` + lewy pasek `2px` iris. `kind` (v1.4) tymi samymi kanałami co wiersz pamięci (§2.3): `KindGutter` przy lewej krawędzi (ustępuje paskowi zaznaczenia) + `KindMarker`; propozycja bez `kind` w payloadzie (patch `update` bez zmiany kind, `delete`) dostaje pusty slot 22px, żeby tytuły się nie rozjeżdżały. `journal` (v1.8) — ten sam `KindGutter`/`KindMarker`, bez dodatkowych znaczników; propozycja `journal` nie ma podpowiedzi „podobne do istniejących" (`similar_memories` zawsze NULL, jak `event`). Podpowiedź „podobne do istniejących" (v1.6, A1) → ikona `sparkles` w kolorze `info` tuż za tytułem (`similarHint`; tooltip + `aria-label`) — sygnał dla recenzenta zatwierdzającego bez otwierania detalu. Propozycja `delete` z detektora sprzeczności (v1.6, B3) ma tytuł „Sprzeczność: archiwizacja ‹id› (sprzeczne z ‹id›)” (z `summary.memoryId`/`summary.counterpartId` — serwerowo z efektywnego payloadu, więc po zamianie kierunku tytuł się odwraca), żeby recenzent odróżnił ją od zwykłej archiwizacji bez otwierania detalu; ikona wiersza bez zmian (`trash-2`).
+**`ProposalRow`** — wiersz kolejki `h-12`: `[StatusChip] [KindMarker] [type ikona] Header (truncate) … [OriginPath] [tagi ≤2 + „+N"] [czas rel.]`. Stale → dodatkowy `danger` badge po prawej. Hover `surface-muted`, aktywny `accent-subtle` + lewy pasek `2px` `primary`. `kind` (v1.4) tymi samymi kanałami co wiersz pamięci (§2.3): `KindGutter` przy lewej krawędzi (ustępuje paskowi zaznaczenia) + `KindMarker`; propozycja bez `kind` w payloadzie (patch `update` bez zmiany kind, `delete`) dostaje pusty slot 22px, żeby tytuły się nie rozjeżdżały. `journal` (v1.8) — ten sam `KindGutter`/`KindMarker`, bez dodatkowych znaczników; propozycja `journal` nie ma podpowiedzi „podobne do istniejących" (`similar_memories` zawsze NULL, jak `event`). Podpowiedź „podobne do istniejących" (v1.6, A1) → ikona `sparkles` w kolorze `info` tuż za tytułem (`similarHint`; tooltip + `aria-label`) — sygnał dla recenzenta zatwierdzającego bez otwierania detalu. Propozycja `delete` z detektora sprzeczności (v1.6, B3) ma tytuł „Sprzeczność: archiwizacja ‹id› (sprzeczne z ‹id›)” (z `summary.memoryId`/`summary.counterpartId` — serwerowo z efektywnego payloadu, więc po zamianie kierunku tytuł się odwraca), żeby recenzent odróżnił ją od zwykłej archiwizacji bez otwierania detalu; ikona wiersza bez zmian (`trash-2`).
 
 **`ProposalRow` — znacznik zawrócenia z auto mode (v1.6, A2, G5)** — gdy `autoHoldReasons` niepuste, za tytułem (obok `sparkles` podpowiedzi A1) stoi ikona `undo-2` w kolorze `warning` (rodzina `attention`); tooltip i `aria-label`: „Zawrócone z auto mode: ‹powody›". Brak powodów (projekt bez auto mode, zapisy sprzed A2) → brak znacznika.
 
@@ -375,6 +395,16 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 
 **`TokenStatusBadge`** (v1.3) — badge `effectiveStatus` tokena, ikona+kolor+label (P2): `active`→success „aktywny", `grace`→pending „karencja", `expired`→neutral „wygasły", `revoked`→danger „unieważniony". `effectiveStatus` liczony WYŁĄCZNIE server-side (`effectiveTokenStatus`, jedna reguła dzielona z auth) — SPA nigdy nie wyprowadza tego sama z `status`+`expiresAt`.
 
+**`BrandMark`** (v1.8) — znak aplikacji „zapieczętowana księga z dziurką od klucza”: zaokrąglony kafel w butelkowej zieleni, księga w kremie z zielonym grzbietem, terakotowy pasek i pieczęć z wyciętą dziurką od klucza. Metafora human-gate: księgę wiedzy projektu otwiera tylko człowiek. Dziurka zamiast kłódki, bo `lock` znaczy `stale` (§6); bez ✓, bo ✓ znaczy `approved`. Inline SVG na siatce 64×64, kolory wyłącznie z tokenów `brand-*` (§2.5) — wariant jasny/ciemny idzie za motywem aplikacji (`data-theme`, a bez niego za `prefers-color-scheme`), tak jak reszta UI. Dekoracyjny (`aria-hidden`): zawsze stoi obok tekstu „Context Keeper”, nie ma własnego labela, focusu ani akcji. Rozmiar podaje konsument (`className`) — dziś 22px w obu miejscach: marka w railu (§9.0) i nagłówek karty logowania (§9.12).
+
+Ten sam znak w wersji statycznej:
+
+- favicon `public/favicon.svg` z wewnętrznym `@media (prefers-color-scheme: dark)` — działa przed załadowaniem SPA i na logowaniu, nie zna przełącznika motywu;
+- rastry `favicon.ico` (16+32) i `apple-touch-icon.png` (180, nieprzezroczysty kwadrat) — tylko wariant jasny, generowane jednorazowo z SVG i commitowane;
+- znak przy tytule `README.md` (ten sam `favicon.svg`).
+
+Geometria jest zdublowana w `BrandMark.tsx` i `favicon.svg` — zmiana znaku zmienia oba pliki i regeneruje rastry. To nie jest znak projektu (`ProjectAvatar`). **Odstępstwo:** §6 mówi „line, nie fill” — znak jest wypełniony, bo to logotyp, nie ikona interfejsu.
+
 **`ContextSwitcher`** — w railu (pod marką, nad nawigacją): `Wszystkie` / `Global` / `‹projekty…›` (Command-search po nazwie). Aktywny kontekst dziedziczy cała aplikacja (FR-D6). `Wszystkie` → tryb read/inbox (human-create **wyłączony**, widoczna adnotacja dlaczego).
 
 **`EmptyState`** — np. kolejka pusta: spokojny „Inbox zero — brak propozycji do przeglądu", ikona line, bez clip-artu.
@@ -389,7 +419,7 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 ┌──────────┬──────────────────────────────────────────────────────────────┐
 │  RAIL     │  TOP BAR: [🔍 search]                             [health strip]│
 │ (240px)   ├──────────────────────────────────────────────────────────────┤
-│ ◆ Keeper  │                                                                │
+│ ▣ Keeper  │                                                                │
 │ [Kontekst▾]│                    GŁÓWNY OBSZAR EKRANU                       │
 │ NAWIGACJA │                                                                │
 │ ▸ Kolejka⁷│                                                                │
@@ -410,13 +440,14 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 └──────────┴──────────────────────────────────────────────────────────────┘
 ```
 
-- **Rail (240px):** marka („◆ Context Keeper"), pod nią `ContextSwitcher` (pełna szerokość railu),
+- **Rail (240px):** marka (`BrandMark` 22px + „Context Keeper”, §8.2), pod nią `ContextSwitcher` (pełna szerokość railu),
   nawigacja 7 ekranów kontekstowych (Kolejka z badge liczby pending), separator, przycisk
   `＋ Nowa pamięć` (aktywny tylko gdy kontekst = konkretny/Global), a na samym dole — wizualnie
   odcięta `border-t` — sekcja konta/ustawień: wejście do **Projekty** (ustawienia całego projektu,
   poza kontekstem — §9.3), **Ustawienia** (ustawienia instancji, poza kontekstem — §9.9), toggle motywu, Wyloguj.
 - **Top bar (52px):** search (`⌘K`) (lewo) · **health strip** (MetricStat ×4, `ml-auto`).
 - **Health strip** jest wszechobecny (P1) — recenzent zawsze widzi głębokość kolejki, zdrowie embeddingu, wynik nocnego jobu, `secret_blocked`/24h.
+- **Tytuł karty** (`document.title`): „(N) ‹Ekran› · Context Keeper”. ‹Ekran› to label pozycji railu dla bieżącej ścieżki (7 ekranów nawigacji + Projekty + Ustawienia; pasuje też ścieżka zagnieżdżona pod pozycją). N to liczba pending z tego samego `GET /api/metrics` co badge Kolejki, na każdym ekranie, tylko przy N > 0 (ta sama reguła co badge). Ścieżka bez pozycji railu → „(N) Context Keeper”. Przed załadowaniem SPA i na „Ładowanie…” obowiązuje statyczne „Context Keeper” z `index.html`. Nazwa ekranu stoi przed nazwą aplikacji, bo na wąskiej karcie widać tylko początek.
 
 ### 9.1 Kolejka akceptacji (FR-D1) — ekran-bohater, layout list/detail
 
@@ -476,7 +507,7 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
     (min. 56px); to świadome odstępstwo od P5 na rzecz skanowalności listy.
   - `event` dokłada `event_time` jako mono stempel w pasku metadanych, w kolorze
     `kind-event-foreground`.
-  - Gutter ustępuje miejsca pasKowi zaznaczenia: wiersz wybrany pokazuje 2px iris (jak w kolejce),
+  - Gutter ustępuje miejsca pasKowi zaznaczenia: wiersz wybrany pokazuje 2px `primary` (jak w kolejce),
     nie gutter kind — zaznaczenie ma pierwszeństwo przed tożsamością.
   - **Znane ograniczenie:** `MemoryListItem` nie niesie `body`, więc `document` nie ma dwuliniowego
     excerptu (byłby mocniejszym nośnikiem rytmu niż zawinięty nagłówek). Wymaga pola `excerpt`
@@ -702,7 +733,7 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 ┌ cały viewport · bg-background · bez AppShell (rail, top bar, skróty) ────────┐
 │                                                                              │
 │               ┌ karta max-w-sm · p-8 ────────────────────────┐               │
-│               │ ◆ Context Keeper                             │               │
+│               │ ▣ Context Keeper                             │               │
 │               │                                              │               │
 │               │ Hasło dashboardu                             │               │
 │               │ [••••••••••••                   ] autoFocus  │               │
@@ -719,10 +750,9 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
   „Ładowanie…" (muted). Bez potwierdzonej sesji (`authenticated: false` albo błąd zapytania) zamiast
   całego routera renderuje się ekran logowania — pod dowolnym URL-em, bez railu, top baru, health stripu i
   skrótów klawiszowych (te żyją w `AppShell`). Z aplikacji wraca się tu przez „Wyloguj" w dolnej sekcji
-  railu (§9.0): `POST /api/auth/logout` i odświeżenie sesji.
+  railu (§9.0): `POST /api/auth/logout` i odświeżenie sesji. Tytuł karty: „Logowanie · Context Keeper” — bez licznika, bo bez sesji nie ma metryk.
 - **Układ:** pełny viewport `bg-background`, wyśrodkowana karta `max-w-sm` (`bg-surface`, obrys
-  `border-strong`, `rounded-lg`, `p-8`, `shadow-md`). Na górze marka jak w railu: ikona `diamond`
-  wypełniona iris + „Context Keeper" (`font-semibold`). Pod nią formularz w kolumnie: label „Hasło
+  `border-strong`, `rounded-lg`, `p-8`, `shadow-md`). Na górze marka jak w railu: `BrandMark` (22px) + „Context Keeper" (`font-semibold`). Pod nią formularz w kolumnie: label „Hasło
   dashboardu" (`text-xs`, muted), `Input type="password"` (`autoFocus`, `autoComplete="current-password"`),
   komunikat błędu (gdy jest) i przycisk `primary` „Zaloguj" na pełną szerokość karty. Motyw jasny/ciemny
   obowiązuje także tutaj (`useTheme` w `Gate`), ale przełącznika na ekranie nie ma.
@@ -749,10 +779,10 @@ Zależność `diff@^9.0.0` (BSD-3-Clause) jest dodana WYŁĄCZNIE do `apps/dashb
 
 ## 10. Stany, dostępność, klawiatura
 
-- **Focus:** zawsze widoczny `focus-visible` — ring 2px iris + offset 2px. Nawigacja Tab przez wszystkie interaktywne.
-- **Kontrast:** cel **WCAG AA** (tekst ≥4.5:1, UI/ikony ≥3:1). Palety §2 dobrane pod to w obu motywach; status-fg na status-subtle spełnia AA.
+- **Focus:** zawsze widoczny `focus-visible` — ring 2px `ring` (akcent) + offset 2px. Nawigacja Tab przez wszystkie interaktywne. Globalny `:focus-visible` stoi w `@layer base` (`globals.css`), więc `outline-none` i `rounded-*` na elemencie go przebijają — element z `outline-none` musi nieść własny wskaźnik fokusu. Pole wyszukiwania `Command` (⌘K, przełączniki, popovery) zamiast ringu zmienia dolny keyline wrappera na kolor `ring` (`focus-within:border-ring`).
+- **Kontrast:** cel **WCAG AA** (tekst ≥4.5:1, UI/ikony ≥3:1). Palety §2 dobrane pod to w obu motywach; status-fg na status-subtle spełnia AA. Akcent zmierzony (v1.8, light / dark): tekst na `primary` 9.6 / 7.8:1, na `primary-hover` 12.1 / 9.2:1; `info-foreground` na `info-subtle` 11.3 / 12.0:1; `ring` na `background` 8.5 / 8.2:1, na `surface` 9.6 / 7.4:1.
 - **Kolor nie jest jedynym sygnałem** (P2): każdy status = kolor **+ ikona + label**.
-- **Klawiatura (kolejka):** `j/k` góra/dół, `Enter` detal, `A` approve, `R` reject, `E` edit, `S` zamiennik, `x` zaznacz/odznacz (bulk approve/reject, roadmap v1.3), `/` search, `⌘K` paleta poleceń, `g` potem `k/p/c/t/a/m/o/w/s` — skok do ekranu (Kolejka/Pamięć/Oś czasu/Projekty/Audyt/Pomiary/Operacje/Onboarding/Ustawienia). Skróty widoczne w tooltipach i „?" cheatsheet.
+- **Klawiatura (kolejka):** `j/k` góra/dół, `Enter` detal, `A` approve, `R` reject, `E` edit, `S` zamiennik, `x` zaznacz/odznacz (bulk approve/reject, roadmap v1.3), `/` search, `⌘K` paleta poleceń, `g` potem `k/p/c/t/a/m/o/w/s` — skok do ekranu (Kolejka/Pamięć/Oś czasu/Projekty/Audyt/Pomiary/Operacje/Onboarding/Ustawienia). Po `g` **każdy** następny klawisz w ~900 ms należy do akordu: zmapowany → ekran, niezmapowany → nic, do skrótów kolejki nie trafia żaden (`g a` = Audyt, nie approve; `g r` nic nie odrzuca). Sam modyfikator (Shift…) akordu nie przerywa, przytrzymane `g` (auto-repeat) go podtrzymuje (odświeża okno), a `g` z Ctrl/Meta/Alt go nie uzbraja. `A` na propozycji `stale` nie wysyła requestu — pokazuje toast, że zatwierdzenie jest zablokowane. Skróty widoczne w tooltipach i „?" cheatsheet.
 - **Reduced motion:** `prefers-reduced-motion` → bez translate/shimmer.
 - **Empty / loading / error:** każdy list ma `EmptyState`, `Skeleton`, i inline error (nie modal) z akcją „Ponów".
 - **Live vs polling:** v1 kolejka odświeżana pollingiem — pokaż „ostatnia aktualizacja Xs temu" + ręczny refresh; bez fałszywego „real-time".
@@ -791,7 +821,7 @@ leży w kanonie, da się go przejrzeć w diffie PR i nie dubluje tokenów. Świa
 (§0–§8) spec nazywa wprost, jak §9.2 (wysokość wiersza vs P5) czy §9.11/§9.12.
 
 **Istniejące ekrany:** makiet nie dorabiamy — źródłem prawdy jest kod + sekcja w §9. Klikalna
-[`design-system-mockup.html`](design-system-mockup.html) to stan z Fazy 0 i nie jest rozbudowywana.
+[`design-system-mockup.html`](design-system-mockup.html) to stan z Fazy 0 i nie jest rozbudowywana; pokazuje jeszcze dawny akcent iris i znak ◆ — od v1.8 nieaktualne (kolor: §2.1, znak: §8.2).
 
 **Egzekwowanie:** skill [`plan-implement`](../.claude/skills/plan-implement/SKILL.md). Plan (Stage 1) ma
 obowiązkową sekcję „Design": projekt sekcji §9 (opis + szkic ASCII) jako pierwszy krok planu albo jawne
@@ -806,4 +836,4 @@ Ustawienia, toggle motywu, Wyloguj — §9.0) już istnieje i ją rozszerzy.
 
 ---
 
-*Makieta klikalna z Fazy 0: [`design-system-mockup.html`](design-system-mockup.html) — stan z Fazy 0 (ostatnia zmiana 2026-07-28), niedokładany i nieaktualizowany; obecny układ opisują kod i §9, nowe ekrany dostają szkic ASCII (§12).*
+*Makieta klikalna z Fazy 0: [`design-system-mockup.html`](design-system-mockup.html) — stan z Fazy 0 (ostatnia zmiana 2026-07-28), niedokładany i nieaktualizowany (pokazuje jeszcze dawny akcent iris i znak ◆ — od v1.8 nieaktualne, kolor: §2.1, znak: §8.2); obecny układ opisują kod i §9, nowe ekrany dostają szkic ASCII (§12).*
