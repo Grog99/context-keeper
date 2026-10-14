@@ -1,4 +1,4 @@
-# Context Keeper
+# <img src="apps/dashboard/public/favicon.svg" alt="" width="32" height="32" align="top"> Context Keeper
 
 Współdzielona, trwała, **human-gated** pamięć dla agentów AI, wystawiona jako remote MCP server.
 

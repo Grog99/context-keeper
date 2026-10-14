@@ -4,7 +4,7 @@ import { cn } from '../../lib/utils';
 
 /** shadcn/radix (§8.1 design-system.md — bazowe komponenty, przetematyzowane tokenami). Nowy
  * prymityw (roadmap v1.2, "kind=event episodic") — `ProjectSettingsDialog` "Dołączaj zdarzenia do
- * domyślnego wyszukiwania". Checked = `bg-primary` (iris, jak primary button); focus ring jak reszta
+ * domyślnego wyszukiwania". Checked = `bg-primary` (akcent, jak primary button); focus ring jak reszta
  * interaktywnych (§10 — focus-visible zawsze widoczny). */
 const Switch = React.forwardRef<
   React.ElementRef<typeof SwitchPrimitive.Root>,
