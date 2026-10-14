@@ -136,6 +136,15 @@ działa dokładnie jak dotąd). Konfiguracja LLM **nie jest w env**, tylko w baz
 3. **Sprawdź połączenie** w Ustawieniach albo w kontenerze `app`: `node dist/cli.js check-llm` — jedno
    testowe wywołanie, na wyjściu model i latencja albo czytelny błąd (bez klucza).
 
+> **Zalecany model (OpenRouter, pomiar 2026-10-14):** endpoint `https://openrouter.ai/api/v1/chat/completions`,
+> model `openai/gpt-6-luna` — zero błędów formatu odpowiedzi (ponad 780 wywołań), precision i recall ok. 98–99%
+> na trudnym zestawie `conflict-pairs-hard.json`, p95 ok. 3–4 s, koszt rzędu 0,01 USD na 100 wywołań. Zapasowy:
+> `google/gemini-3.5-flash-lite` (najszybszy, ale uzasadnienia bywają po angielsku przy polskich wpisach). Unikaj
+> modeli z błędami formatu albo 429 na OpenRouter — 3 błędy z rzędu wyłączają krok LLM do końca przebiegu. Trzymaj
+> saldo konta OpenRouter z zapasem (ok. 1 USD): klient nie wysyła `max_tokens`, więc OpenRouter może rezerwować
+> koszt maksymalnej odpowiedzi modelu i przy niskim saldzie zwracać 402. Inny model sprawdzisz skryptem
+> `apps/server/scripts/eval-conflict-llm.mjs` (detektor sprzeczności na syntetycznych fixture'ach).
+
 > **Uwaga — egress:** po włączeniu treść pamięci jest wysyłana do wskazanego endpointu (poza maszynę, jeśli to
 > zewnętrzne API). Wpisy, w których skaner sekretów znajdzie sekret, nie są wysyłane (audyt
 > `llm_secret_skipped` + lista w Ustawieniach).

@@ -1,0 +1,2885 @@
+{
+  "_comment": "Trudny zestaw par faktów (PL + EN) do porównywania modeli czatowych w detektorze sprzeczności nocnego joba (apps/server/scripts/eval-conflict-llm.mjs --pairs ... --unrelated 0). Treści WYMYŚLONE — nie pochodzą z realnej pamięci. Uzupełnia conflict-pairs.json (na którym jest skalibrowany NIGHTLY_CONFLICT_DISTANCE i który dla modeli LLM okazał się za łatwy): trudne pozytywy (subtelne wartości, negacja, sprzeczność ukryta w treści, jeden krok wnioskowania, synonimy, pary międzyjęzykowe) i trudne negatywy wg reguł promptu (różne środowiska, zmiana opisana we wpisie, wpis bardziej szczegółowy, inny atrybut, inny podmiot, plan kontra fakt, opinia, te same wartości w innych jednostkach, reguły rozłączne, parafrazy PL-EN). label: contradiction | compatible | paraphrase; category: podkategoria; lang: pl | en | pl-en.",
+  "pairs": [
+    {
+      "id": "hv01",
+      "label": "contradiction",
+      "category": "value",
+      "lang": "pl",
+      "a": {
+        "header": "Retencja logów aplikacyjnych w Loki",
+        "body": "Logi aplikacyjne w Loki trzymamy przez 30 dni, potem usuwa je compactor.",
+        "tags": ["logging", "loki"]
+      },
+      "b": {
+        "header": "Konfiguracja przechowywania logów w Loki",
+        "body": "Compactor Loki kasuje logi aplikacyjne po 45 dniach (`retention_period: 1080h`).",
+        "tags": ["logging", "loki", "retention"]
+      }
+    },
+    {
+      "id": "hv02",
+      "label": "contradiction",
+      "category": "value",
+      "lang": "en",
+      "a": {
+        "header": "Timeout for outbound calls to the payment provider",
+        "body": "The HTTP client used for the payment provider has a 25-second timeout; a timed-out request is retried once.",
+        "tags": ["payments", "http-client"]
+      },
+      "b": {
+        "header": "Payment provider HTTP client settings",
+        "body": "Outbound requests to the payment provider abort after 30 seconds, after which the client retries once.",
+        "tags": ["payments", "timeouts"]
+      }
+    },
+    {
+      "id": "hv03",
+      "label": "contradiction",
+      "category": "value",
+      "lang": "pl",
+      "a": {
+        "header": "Wersja Node przypięta w repo",
+        "body": "Plik `.nvmrc` w korzeniu monorepo przypina Node 22.11.0; tej samej wersji używa obraz bazowy w Dockerfile.",
+        "tags": ["node", "tooling"]
+      },
+      "b": {
+        "header": "Środowisko uruchomieniowe Node dla monorepo",
+        "body": "W `.nvmrc` i w obrazie bazowym Dockerfile jest przypięty Node 22.4.1.",
+        "tags": ["node", "docker"]
+      }
+    },
+    {
+      "id": "hv04",
+      "label": "contradiction",
+      "category": "value",
+      "lang": "pl",
+      "a": {
+        "header": "Godzina nocnego backupu bazy",
+        "body": "Nocny pg_dump bazy produkcyjnej (zadanie `backup-db`) startuje o 02:00 UTC, cron `0 2 * * *`.",
+        "tags": ["backup", "cron"]
+      },
+      "b": {
+        "header": "Harmonogram zadania backup-db",
+        "body": "Zadanie `backup-db`, czyli nocny pg_dump bazy produkcyjnej, ma cron `30 3 * * *` i rusza o 03:30 UTC.",
+        "tags": ["backup", "database", "cron"]
+      }
+    },
+    {
+      "id": "hv05",
+      "label": "contradiction",
+      "category": "value",
+      "lang": "en",
+      "a": {
+        "header": "Rate limit on POST /auth/login",
+        "body": "Login is limited to 5 attempts per minute per IP; the sixth attempt gets a 429.",
+        "tags": ["auth", "rate-limit"]
+      },
+      "b": {
+        "header": "Brute-force protection for the login endpoint",
+        "body": "POST /auth/login allows 10 attempts per IP per minute before it starts returning 429 Too Many Requests.",
+        "tags": ["auth", "security"]
+      }
+    },
+    {
+      "id": "hv06",
+      "label": "contradiction",
+      "category": "value",
+      "lang": "pl",
+      "a": {
+        "header": "Pula połączeń do bazy w API",
+        "body": "Każda instancja API łączy się z bazą z `connection_limit=10` ustawionym w DATABASE_URL.",
+        "tags": ["database", "prisma"]
+      },
+      "b": {
+        "header": "Ustawienia DATABASE_URL dla API",
+        "body": "Na każdą instancję API pula połączeń Prisma liczy 20 połączeń (`connection_limit=20`).",
+        "tags": ["database", "config"]
+      }
+    },
+    {
+      "id": "hv07",
+      "label": "contradiction",
+      "category": "value",
+      "lang": "en",
+      "a": {
+        "header": "Access token TTL",
+        "body": "Access tokens are signed with a 15-minute expiry (`expiresIn: '15m'`).",
+        "tags": ["auth", "jwt"]
+      },
+      "b": {
+        "header": "JWT configuration in the auth module",
+        "body": "The auth module issues access tokens with `expiresIn: '10m'`; refresh tokens take care of renewal.",
+        "tags": ["auth", "jwt", "config"]
+      }
+    },
+    {
+      "id": "hv08",
+      "label": "contradiction",
+      "category": "value",
+      "lang": "pl",
+      "a": {
+        "header": "Gdzie leżą migracje bazy",
+        "body": "Pliki migracji SQL trzymamy w `packages/db/migrations`; tylko ten katalog czyta skrypt migrate w CI.",
+        "tags": ["database", "migrations"]
+      },
+      "b": {
+        "header": "Katalog migracji w pakiecie db",
+        "body": "Migracje bazy znajdują się w `packages/db/prisma/migrations` i właśnie stamtąd uruchamia je CI.",
+        "tags": ["migrations", "monorepo"]
+      }
+    },
+    {
+      "id": "hv09",
+      "label": "contradiction",
+      "category": "value",
+      "lang": "pl",
+      "a": {
+        "header": "Paginacja w publicznym API",
+        "body": "Parametr `limit` w publicznym API przyjmuje maksymalnie 100 elementów; większe wartości są przycinane do 100.",
+        "tags": ["api", "pagination"]
+      },
+      "b": {
+        "header": "Maksymalny limit na stronę w publicznym API",
+        "body": "Publiczne API przycina parametr `limit` do 50 elementów na stronę.",
+        "tags": ["api", "pagination", "limits"]
+      }
+    },
+    {
+      "id": "hv10",
+      "label": "contradiction",
+      "category": "value",
+      "lang": "en",
+      "a": {
+        "header": "Email worker concurrency",
+        "body": "The email queue worker processes 5 jobs concurrently per pod.",
+        "tags": ["queues", "email"]
+      },
+      "b": {
+        "header": "BullMQ settings for the email queue",
+        "body": "The email worker is started with `concurrency: 8` in every pod.",
+        "tags": ["bullmq", "email", "workers"]
+      }
+    },
+    {
+      "id": "hv11",
+      "label": "contradiction",
+      "category": "value",
+      "lang": "pl",
+      "a": {
+        "header": "Cache katalogu produktów: TTL 5 minut",
+        "body": "Odpowiedzi endpointu `/catalog` są cache'owane w Redisie z TTL 300 s.",
+        "tags": ["caching", "redis"]
+      },
+      "b": {
+        "header": "Cache endpointu /catalog",
+        "body": "Klucze cache dla `/catalog` w Redisie mają TTL równy 600 sekund.",
+        "tags": ["caching", "api"]
+      }
+    },
+    {
+      "id": "hv12",
+      "label": "contradiction",
+      "category": "value",
+      "lang": "en",
+      "a": {
+        "header": "Playwright retries in CI: 2",
+        "body": "In CI, Playwright E2E tests run with `retries: 2`; locally retries are 0.",
+        "tags": ["testing", "e2e", "ci"]
+      },
+      "b": {
+        "header": "E2E flakiness policy",
+        "body": "Playwright is configured with `retries: 1` in CI, so a flaky test gets exactly one rerun; locally there are no retries.",
+        "tags": ["testing", "playwright"]
+      }
+    },
+    {
+      "id": "hv13",
+      "label": "contradiction",
+      "category": "value",
+      "lang": "pl",
+      "a": {
+        "header": "Wersja TypeScriptu w monorepo",
+        "body": "Root `package.json` przypina `typescript` na dokładnie 5.6.3 (bez `^`); wszystkie pakiety używają tej wersji.",
+        "tags": ["typescript", "tooling"]
+      },
+      "b": {
+        "header": "Przypięta wersja kompilatora TS",
+        "body": "W root `package.json` pakiet `typescript` ma wersję 5.5.4 bez zakresu, a pakiety dziedziczą ją z korzenia.",
+        "tags": ["typescript", "dependencies"]
+      }
+    },
+    {
+      "id": "hv14",
+      "label": "contradiction",
+      "category": "value",
+      "lang": "en",
+      "a": {
+        "header": "Sentry tracing sample rate in production",
+        "body": "The API uses `tracesSampleRate: 0.2` in production.",
+        "tags": ["sentry", "observability"]
+      },
+      "b": {
+        "header": "Performance monitoring config for the API",
+        "body": "The API's Sentry init sets `tracesSampleRate` to 0.1 in production to keep the quota in check.",
+        "tags": ["sentry", "monitoring", "api"]
+      }
+    },
+    {
+      "id": "hv15",
+      "label": "contradiction",
+      "category": "value",
+      "lang": "pl",
+      "a": {
+        "header": "Limit rozmiaru awatara",
+        "body": "Awatar użytkownika może mieć maksymalnie 2 MB; większe pliki API odrzuca z kodem 413.",
+        "tags": ["uploads", "users"]
+      },
+      "b": {
+        "header": "Walidacja uploadu awatarów",
+        "body": "Endpoint uploadu awatara akceptuje pliki do 3 MB w formatach PNG, JPEG i WebP.",
+        "tags": ["uploads", "validation"]
+      }
+    },
+    {
+      "id": "hn01",
+      "label": "contradiction",
+      "category": "negation",
+      "lang": "en",
+      "a": {
+        "header": "Feature flags via Unleash",
+        "body": "Runtime feature flags are evaluated through a self-hosted Unleash instance; the web app polls it every 15 seconds.",
+        "tags": ["feature-flags", "infra"]
+      },
+      "b": {
+        "header": "How feature toggles work",
+        "body": "There is no feature-flag service in the stack; toggles are plain environment variables read at boot.",
+        "tags": ["feature-flags", "config"]
+      }
+    },
+    {
+      "id": "hn02",
+      "label": "contradiction",
+      "category": "negation",
+      "lang": "pl",
+      "a": {
+        "header": "Zakres logu audytu",
+        "body": "Log audytu zapisuje każdą operację na dokumentach, łącznie z odczytami (GET).",
+        "tags": ["audit", "security"]
+      },
+      "b": {
+        "header": "Co trafia do audit_log",
+        "body": "Do tabeli `audit_log` trafiają wyłącznie operacje zapisu; odczyty dokumentów nie są audytowane.",
+        "tags": ["audit", "database"]
+      }
+    },
+    {
+      "id": "hn03",
+      "label": "contradiction",
+      "category": "negation",
+      "lang": "en",
+      "a": {
+        "header": "Response compression in the API",
+        "body": "The API compresses responses itself using the `compression` middleware registered in `main.ts`.",
+        "tags": ["api", "performance"]
+      },
+      "b": {
+        "header": "Where HTTP compression happens",
+        "body": "The `compression` middleware is not used in the API; responses are compressed by Traefik.",
+        "tags": ["api", "traefik"]
+      }
+    },
+    {
+      "id": "hn04",
+      "label": "contradiction",
+      "category": "negation",
+      "lang": "pl",
+      "a": {
+        "header": "E2E w pipeline PR",
+        "body": "Testy E2E w Playwright odpalają się na każdym pull requeście jako wymagany check.",
+        "tags": ["ci", "e2e"]
+      },
+      "b": {
+        "header": "Kiedy chodzą testy E2E",
+        "body": "Testy E2E nie są uruchamiane na pull requestach — wyłącznie w nocnym jobie na gałęzi main.",
+        "tags": ["ci", "testing"]
+      }
+    },
+    {
+      "id": "hn05",
+      "label": "contradiction",
+      "category": "negation",
+      "lang": "pl",
+      "a": {
+        "header": "Usuwanie kont użytkowników",
+        "body": "Użytkowników usuwamy miękko: ustawiamy kolumnę `deleted_at`, a rekord zostaje w tabeli `users`.",
+        "tags": ["users", "database"]
+      },
+      "b": {
+        "header": "Tabela users — schemat",
+        "body": "Tabela `users` nie ma kolumny `deleted_at`; usunięcie konta kasuje rekord fizycznie.",
+        "tags": ["users", "schema"]
+      }
+    },
+    {
+      "id": "hn06",
+      "label": "contradiction",
+      "category": "negation",
+      "lang": "en",
+      "a": {
+        "header": "Rendering mode of apps/web",
+        "body": "apps/web renders pages on the server with the Next.js App Router; only the editor component is client-only.",
+        "tags": ["frontend", "ssr"]
+      },
+      "b": {
+        "header": "apps/web architecture",
+        "body": "apps/web is a client-side Vite SPA; there is no server-side rendering anywhere in the frontend.",
+        "tags": ["frontend", "architecture"]
+      }
+    },
+    {
+      "id": "hn07",
+      "label": "contradiction",
+      "category": "negation",
+      "lang": "pl",
+      "a": {
+        "header": "Przechowywanie sesji w Redisie",
+        "body": "Sesje użytkowników trzymamy w Redisie przez connect-redis, klucze mają prefiks `sess:`.",
+        "tags": ["sessions", "redis"]
+      },
+      "b": {
+        "header": "Redis w infrastrukturze",
+        "body": "Projekt nie korzysta już z Redisa w żadnym miejscu; sesje i cache są trzymane w Postgresie.",
+        "tags": ["infra", "redis"]
+      }
+    },
+    {
+      "id": "hn08",
+      "label": "contradiction",
+      "category": "negation",
+      "lang": "en",
+      "a": {
+        "header": "Automated dependency updates",
+        "body": "Dependabot opens weekly PRs for npm and Docker base image updates.",
+        "tags": ["dependencies", "automation"]
+      },
+      "b": {
+        "header": "Dependency upgrade process",
+        "body": "Automated dependency PRs are disabled in this repo; upgrades are done manually by the person on maintenance duty.",
+        "tags": ["dependencies", "process"]
+      }
+    },
+    {
+      "id": "hn09",
+      "label": "contradiction",
+      "category": "negation",
+      "lang": "pl",
+      "a": {
+        "header": "Wersjonowanie publicznego API",
+        "body": "Wszystkie endpointy publicznego API mają w ścieżce prefiks `/v1`.",
+        "tags": ["api", "versioning"]
+      },
+      "b": {
+        "header": "Adresy endpointów publicznego API",
+        "body": "Publiczne API nie używa prefiksów wersji w URL-ach; wersję klient wybiera nagłówkiem `Accept-Version`.",
+        "tags": ["api", "conventions"]
+      }
+    },
+    {
+      "id": "hn10",
+      "label": "contradiction",
+      "category": "negation",
+      "lang": "en",
+      "a": {
+        "header": "Migrations on container start",
+        "body": "The API container runs `prisma migrate deploy` in its entrypoint before starting the server.",
+        "tags": ["migrations", "deploy"]
+      },
+      "b": {
+        "header": "How production migrations are applied",
+        "body": "Migrations are never run on app startup; they are a separate manual step executed before the rollout.",
+        "tags": ["migrations", "process"]
+      }
+    },
+    {
+      "id": "hn11",
+      "label": "contradiction",
+      "category": "negation",
+      "lang": "pl",
+      "a": {
+        "header": "Ochrona gałęzi main",
+        "body": "Ochrona gałęzi `main` wymaga podpisanych commitów (GPG lub SSH); niepodpisanego commita nie da się zmerge'ować.",
+        "tags": ["git", "security"]
+      },
+      "b": {
+        "header": "Reguły dla main na GitHubie",
+        "body": "Podpisywanie commitów nie jest wymagane na `main`; reguły gałęzi sprawdzają tylko zielone CI i review.",
+        "tags": ["git", "github"]
+      }
+    },
+    {
+      "id": "hn12",
+      "label": "contradiction",
+      "category": "negation",
+      "lang": "pl",
+      "a": {
+        "header": "Orkiestracja buildów w monorepo",
+        "body": "Buildy i testy pakietów orkiestruje Turborepo z cache'em zdalnym.",
+        "tags": ["monorepo", "build"]
+      },
+      "b": {
+        "header": "Jak budujemy pakiety",
+        "body": "W repo nie ma Turborepo; pakiety budujemy zwykłym `pnpm -r build`.",
+        "tags": ["monorepo", "tooling"]
+      }
+    },
+    {
+      "id": "hb01",
+      "label": "contradiction",
+      "category": "buried",
+      "lang": "pl",
+      "a": {
+        "header": "Proces deployu na staging",
+        "body": "Staging jest budowany z gałęzi `develop` przy każdym merge'u. Obraz trafia do rejestru z tagiem `staging-<sha>`. Baza stagingu jest odświeżana z zanonimizowanego zrzutu produkcji raz w tygodniu, w niedzielę w nocy. Po każdym deployu odpalają się smoke testy.",
+        "tags": ["staging", "deploy"]
+      },
+      "b": {
+        "header": "Jak działa środowisko staging",
+        "body": "Staging stoi na osobnym VPS-ie i jest budowany z `develop`. Obrazy dostają tag `staging-<sha>`. Bazę stagingu odtwarzamy z zanonimizowanego zrzutu produkcji codziennie o 05:00. Dostęp do stagingu jest ograniczony do VPN-a firmowego.",
+        "tags": ["staging", "infra", "database"]
+      }
+    },
+    {
+      "id": "hb02",
+      "label": "contradiction",
+      "category": "buried",
+      "lang": "en",
+      "a": {
+        "header": "Onboarding notes for the API service",
+        "body": "The API is a NestJS app in apps/api. It listens on port 4000 behind Traefik. Request validation uses class-validator DTOs with `whitelist: true`. Health checks hit /healthz every 10 seconds.",
+        "tags": ["api", "onboarding"]
+      },
+      "b": {
+        "header": "API service overview",
+        "body": "apps/api is a NestJS application reached through Traefik. Request validation is done with Zod schemas via a custom pipe; class-validator is not installed. The health endpoint is /healthz.",
+        "tags": ["api", "validation"]
+      }
+    },
+    {
+      "id": "hb03",
+      "label": "contradiction",
+      "category": "buried",
+      "lang": "pl",
+      "a": {
+        "header": "Konwencje w pakiecie ui",
+        "body": "Komponenty w `packages/ui` piszemy w TSX i eksportujemy z `src/index.ts`. Style robimy w Tailwindzie, bez CSS-in-JS. Każdy komponent ma story w Storybooku. Ikony bierzemy z lucide-react.",
+        "tags": ["frontend", "ui", "conventions"]
+      },
+      "b": {
+        "header": "Pakiet packages/ui — jak go rozwijać",
+        "body": "Pakiet ui eksportuje komponenty przez `src/index.ts`. Ikony pochodzą z lucide-react, a każdy komponent ma swoje story. Stylujemy przez styled-components, Tailwind nie jest skonfigurowany w tym pakiecie. Pakiet buduje tsup.",
+        "tags": ["frontend", "ui"]
+      }
+    },
+    {
+      "id": "hb04",
+      "label": "contradiction",
+      "category": "buried",
+      "lang": "pl",
+      "a": {
+        "header": "Kolejka importu CSV — przebieg",
+        "body": "Import CSV idzie przez kolejkę `import-csv` w BullMQ. Każdy job dostaje do 3 prób z wykładniczym backoffem. Po wyczerpaniu prób job ląduje w DLQ, a użytkownik dostaje mail z raportem. Pliki źródłowe leżą w S3 przez 7 dni.",
+        "tags": ["queues", "import"]
+      },
+      "b": {
+        "header": "Worker import-csv",
+        "body": "Worker `import-csv` pobiera plik z S3 i parsuje go strumieniowo. Job nie jest ponawiany — przy pierwszym błędzie od razu trafia do DLQ. Użytkownik dostaje wtedy mail z raportem błędów. Parser odrzuca pliki bez wiersza nagłówka.",
+        "tags": ["queues", "workers", "import"]
+      }
+    },
+    {
+      "id": "hb05",
+      "label": "contradiction",
+      "category": "buried",
+      "lang": "en",
+      "a": {
+        "header": "Frontend build pipeline",
+        "body": "apps/web is built with Vite in CI. Static assets are uploaded to the CDN bucket with hashed filenames. Source maps are uploaded to Sentry and then deleted from the bundle before publishing. The HTML entry is served with no-cache.",
+        "tags": ["frontend", "ci", "cdn"]
+      },
+      "b": {
+        "header": "How apps/web is shipped",
+        "body": "CI runs the Vite build for apps/web. Hashed assets go to the CDN bucket. Source maps are published alongside the bundle so browser devtools can use them in production. index.html is served with `Cache-Control: no-cache`.",
+        "tags": ["frontend", "deploy"]
+      }
+    },
+    {
+      "id": "hb06",
+      "label": "contradiction",
+      "category": "buried",
+      "lang": "pl",
+      "a": {
+        "header": "Zasady code review",
+        "body": "Każdy PR musi przejść `pnpm verify` w CI. Do merge'a wystarcza jedno zatwierdzenie od osoby spoza autorów. Merge robimy przez squash. Gałąź jest kasowana automatycznie po merge'u.",
+        "tags": ["process", "code-review"]
+      },
+      "b": {
+        "header": "Proces merge'owania PR",
+        "body": "PR-y merge'ujemy wyłącznie przez squash. Do merge'a potrzebne są dwa zatwierdzenia, w tym jedno od code ownera. CI musi być zielone. Gałęzie są usuwane po merge'u.",
+        "tags": ["process", "git"]
+      }
+    },
+    {
+      "id": "hb07",
+      "label": "contradiction",
+      "category": "buried",
+      "lang": "en",
+      "a": {
+        "header": "Observability stack",
+        "body": "Logs are shipped to Loki by Promtail. Prometheus scrapes all targets, including the API, every 30 seconds. Dashboards live in Grafana under the App folder. Alerts go to the #alerts Slack channel.",
+        "tags": ["observability", "monitoring"]
+      },
+      "b": {
+        "header": "Where metrics and logs live",
+        "body": "We use Grafana for dashboards and Loki for logs. Prometheus scrapes the API's /metrics endpoint every 15 seconds. Alertmanager routes alerts to Slack #alerts.",
+        "tags": ["observability", "prometheus"]
+      }
+    },
+    {
+      "id": "hb08",
+      "label": "contradiction",
+      "category": "buried",
+      "lang": "pl",
+      "a": {
+        "header": "Lokalne środowisko developerskie",
+        "body": "Lokalnie odpalamy `docker compose -f docker-compose.dev.yml up`. Postgres z compose jest wystawiony na hoście na porcie 5433, żeby nie kolidować z lokalną instalacją. Seed ładuje się komendą `pnpm db:seed`. Aplikację startuje `pnpm dev`.",
+        "tags": ["dev-env", "docker"]
+      },
+      "b": {
+        "header": "Jak postawić projekt lokalnie",
+        "body": "Zależności lokalne stawia `docker-compose.dev.yml`. Postgres z tego compose słucha na hoście na standardowym porcie 5432. Dane testowe wgrywa `pnpm db:seed`. Całość uruchamia `pnpm dev` z korzenia repo.",
+        "tags": ["dev-env", "onboarding"]
+      }
+    },
+    {
+      "id": "hb09",
+      "label": "contradiction",
+      "category": "buried",
+      "lang": "pl",
+      "a": {
+        "header": "Polityka backupów",
+        "body": "Backupy bazy są szyfrowane i wysyłane do bucketu w innym regionie. Trzymamy 14 dziennych kopii. Odtworzenie testujemy raz w miesiącu na osobnej maszynie. RPO wynosi 24 godziny.",
+        "tags": ["backup", "disaster-recovery"]
+      },
+      "b": {
+        "header": "Odtwarzanie bazy po awarii",
+        "body": "W razie awarii bazę odtwarzamy z backupu w zapasowym regionie. Przechowujemy 30 dziennych kopii, więc można cofnąć się o miesiąc. Procedura odtworzenia jest testowana co miesiąc. Zakładane RPO to jedna doba.",
+        "tags": ["backup", "database"]
+      }
+    },
+    {
+      "id": "hb10",
+      "label": "contradiction",
+      "category": "buried",
+      "lang": "en",
+      "a": {
+        "header": "Auth module overview",
+        "body": "Users sign in with email and password, hashed with argon2id. After sign-in the server sets an httpOnly session cookie. TOTP two-factor auth is optional and can be enabled in account settings. Password reset links expire after one hour.",
+        "tags": ["auth", "security"]
+      },
+      "b": {
+        "header": "Sign-in flow",
+        "body": "The sign-in form posts email and password to /auth/login, where the hash is verified with argon2id. TOTP two-factor auth is mandatory for every account and cannot be turned off. On success an httpOnly cookie is set.",
+        "tags": ["auth", "2fa"]
+      }
+    },
+    {
+      "id": "hb11",
+      "label": "contradiction",
+      "category": "buried",
+      "lang": "pl",
+      "a": {
+        "header": "Struktura monorepo",
+        "body": "Aplikacje są w `apps/`, biblioteki współdzielone w `packages/`. Wspólna konfiguracja ESLinta to osobny pakiet `packages/eslint-config`. Klienta API generujemy z OpenAPI do `packages/api-client`. Skrypty narzędziowe trzymamy w `tools/`.",
+        "tags": ["monorepo", "structure"]
+      },
+      "b": {
+        "header": "Gdzie co leży w repo",
+        "body": "W `apps/` są aplikacje, w `packages/` biblioteki. Konfiguracja ESLinta nie jest pakietem — to jeden `eslint.config.js` w korzeniu, z którego korzystają wszystkie pakiety. Klient API generowany z OpenAPI ląduje w `packages/api-client`. Skrypty są w `tools/`.",
+        "tags": ["monorepo", "lint"]
+      }
+    },
+    {
+      "id": "hb12",
+      "label": "contradiction",
+      "category": "buried",
+      "lang": "en",
+      "a": {
+        "header": "Email delivery setup",
+        "body": "Transactional emails are sent through Postmark. Templates are MJML files in packages/emails. Sending always happens in a BullMQ worker, never inline in a request. Bounces are recorded via a webhook.",
+        "tags": ["email", "queues"]
+      },
+      "b": {
+        "header": "Transactional emails",
+        "body": "Templates for transactional mail are MJML files in packages/emails. Emails are sent synchronously inside the request handler, so the user sees an error immediately if sending fails. Postmark is the provider and its bounce webhook updates the user record.",
+        "tags": ["email", "api"]
+      }
+    },
+    {
+      "id": "hi01",
+      "label": "contradiction",
+      "category": "inference",
+      "lang": "pl",
+      "a": {
+        "header": "Dzień wydań produkcyjnych",
+        "body": "Wydania na produkcję robimy wyłącznie we wtorki, w oknie 10:00–12:00.",
+        "tags": ["deploy", "process"]
+      },
+      "b": {
+        "header": "Okna zamrożenia zmian",
+        "body": "Wtorek jest dniem zamrożenia zmian — w ten dzień nic nie trafia na produkcję.",
+        "tags": ["deploy", "freeze"]
+      }
+    },
+    {
+      "id": "hi02",
+      "label": "contradiction",
+      "category": "inference",
+      "lang": "en",
+      "a": {
+        "header": "Ticket attachment size limit",
+        "body": "The API rejects any ticket attachment above 10 MB with a 413.",
+        "tags": ["uploads", "api"]
+      },
+      "b": {
+        "header": "Supporting large scans in tickets",
+        "body": "Ticket attachments up to 25 MB are accepted so customers can upload full-resolution scanned documents.",
+        "tags": ["uploads", "tickets"]
+      }
+    },
+    {
+      "id": "hi03",
+      "label": "contradiction",
+      "category": "inference",
+      "lang": "en",
+      "a": {
+        "header": "Runtime requirement of packages/cli",
+        "body": "packages/cli declares `engines.node: >=24` and refuses to start on any older Node version.",
+        "tags": ["cli", "node"]
+      },
+      "b": {
+        "header": "Where the CLI runs in CI",
+        "body": "packages/cli runs successfully in CI on Node 20, the only Node version available in our CI image.",
+        "tags": ["cli", "ci"]
+      }
+    },
+    {
+      "id": "hi04",
+      "label": "contradiction",
+      "category": "inference",
+      "lang": "pl",
+      "a": {
+        "header": "Strefa czasowa znaczników w bazie",
+        "body": "Wszystkie znaczniki czasu w bazie przechowujemy w UTC, bez wyjątków.",
+        "tags": ["database", "time"]
+      },
+      "b": {
+        "header": "Kolumna created_at w zamówieniach",
+        "body": "`orders.created_at` zapisujemy w strefie Europe/Warsaw, żeby raporty księgowe zgadzały się z polskim czasem.",
+        "tags": ["database", "orders"]
+      }
+    },
+    {
+      "id": "hi05",
+      "label": "contradiction",
+      "category": "inference",
+      "lang": "pl",
+      "a": {
+        "header": "Skala produkcyjnego API",
+        "body": "Produkcja działa na jednej instancji API, bez żadnych replik.",
+        "tags": ["infra", "scaling"]
+      },
+      "b": {
+        "header": "Load balancing ruchu produkcyjnego",
+        "body": "Load balancer rozkłada ruch produkcyjny round-robin między trzy repliki API.",
+        "tags": ["infra", "load-balancer"]
+      }
+    },
+    {
+      "id": "hi06",
+      "label": "contradiction",
+      "category": "inference",
+      "lang": "en",
+      "a": {
+        "header": "Authentication on API routes",
+        "body": "Every API route requires authentication; there are no public endpoints.",
+        "tags": ["api", "auth"]
+      },
+      "b": {
+        "header": "Uptime monitoring endpoint",
+        "body": "GET /status is reachable without credentials so external uptime monitors can poll it.",
+        "tags": ["api", "monitoring"]
+      }
+    },
+    {
+      "id": "hi07",
+      "label": "contradiction",
+      "category": "inference",
+      "lang": "pl",
+      "a": {
+        "header": "Język kodu w repo",
+        "body": "W całym repo nie ma plików JavaScript — wszystko, łącznie ze skryptami narzędziowymi, piszemy w TypeScripcie.",
+        "tags": ["typescript", "conventions"]
+      },
+      "b": {
+        "header": "Skrypty migracji danych",
+        "body": "Jednorazowe skrypty migracji danych w `scripts/` piszemy jako pliki `.mjs`, żeby odpalać je bez kompilacji.",
+        "tags": ["scripts", "conventions"]
+      }
+    },
+    {
+      "id": "hi08",
+      "label": "contradiction",
+      "category": "inference",
+      "lang": "pl",
+      "a": {
+        "header": "Schemat numeracji wydań",
+        "body": "Wydania numerujemy według SemVer: MAJOR przy zmianach łamiących API.",
+        "tags": ["release", "versioning"]
+      },
+      "b": {
+        "header": "Format numeru wersji aplikacji",
+        "body": "Numer wersji to data wydania w formacie `RRRR.MM.NN`, np. kolejne wydanie w danym miesiącu zwiększa NN.",
+        "tags": ["release", "conventions"]
+      }
+    },
+    {
+      "id": "hi09",
+      "label": "contradiction",
+      "category": "inference",
+      "lang": "en",
+      "a": {
+        "header": "Browser support policy",
+        "body": "The frontend targets evergreen browsers only and ships no polyfills.",
+        "tags": ["frontend", "browsers"]
+      },
+      "b": {
+        "header": "Enterprise client requirements",
+        "body": "The web app must work in Internet Explorer 11 for our largest client, so core-js polyfills are bundled.",
+        "tags": ["frontend", "compatibility"]
+      }
+    },
+    {
+      "id": "hi10",
+      "label": "contradiction",
+      "category": "inference",
+      "lang": "pl",
+      "a": {
+        "header": "Continuous deployment na produkcję",
+        "body": "Każdy merge do main trafia automatycznie na produkcję, bez żadnego ręcznego kroku.",
+        "tags": ["deploy", "ci"]
+      },
+      "b": {
+        "header": "Zatwierdzanie wdrożeń",
+        "body": "Deploy na produkcję czeka w pipeline na ręczne zatwierdzenie przez tech leada.",
+        "tags": ["deploy", "process"]
+      }
+    },
+    {
+      "id": "hi11",
+      "label": "contradiction",
+      "category": "inference",
+      "lang": "en",
+      "a": {
+        "header": "Production database hosting",
+        "body": "Production Postgres runs in a Docker container on the same VM as the API.",
+        "tags": ["database", "infra"]
+      },
+      "b": {
+        "header": "Managed database",
+        "body": "The production database is Amazon RDS for PostgreSQL; we don't run Postgres on our own machines.",
+        "tags": ["database", "aws"]
+      }
+    },
+    {
+      "id": "hi12",
+      "label": "contradiction",
+      "category": "inference",
+      "lang": "pl",
+      "a": {
+        "header": "Klucze główne tabel",
+        "body": "Wszystkie tabele mają klucz główny `id` typu bigint, autoinkrementowany przez bazę.",
+        "tags": ["database", "schema"]
+      },
+      "b": {
+        "header": "Generowanie identyfikatorów encji",
+        "body": "Klucze główne wszystkich tabel to UUIDv7 generowane po stronie aplikacji przed insertem.",
+        "tags": ["database", "ids"]
+      }
+    },
+    {
+      "id": "hs01",
+      "label": "contradiction",
+      "category": "synonym",
+      "lang": "pl",
+      "a": {
+        "header": "Menedżer pakietów w monorepo",
+        "body": "Menedżerem pakietów jest pnpm; lockfile to `pnpm-lock.yaml`.",
+        "tags": ["tooling", "dependencies"]
+      },
+      "b": {
+        "header": "Instalacja zależności w CI i lokalnie",
+        "body": "Zależności instalujemy przez `npm ci` na podstawie `package-lock.json`, zarówno lokalnie, jak i w CI.",
+        "tags": ["ci", "dependencies"]
+      }
+    },
+    {
+      "id": "hs02",
+      "label": "contradiction",
+      "category": "synonym",
+      "lang": "en",
+      "a": {
+        "header": "Session lifetime",
+        "body": "User sessions end 12 hours after sign-in.",
+        "tags": ["auth", "sessions"]
+      },
+      "b": {
+        "header": "Auth cookie attributes",
+        "body": "Session duration is governed solely by the auth cookie, whose Max-Age is 86400; there is no separate server-side expiry.",
+        "tags": ["auth", "cookies"]
+      }
+    },
+    {
+      "id": "hs03",
+      "label": "contradiction",
+      "category": "synonym",
+      "lang": "pl",
+      "a": {
+        "header": "Formatowanie kodu",
+        "body": "Kod formatuje Prettier z konfiguracją w `.prettierrc` w korzeniu repo.",
+        "tags": ["tooling", "formatting"]
+      },
+      "b": {
+        "header": "Styl kodu w hooku pre-commit",
+        "body": "Za styl kodu odpowiada `biome format --write` w pre-commit; innego narzędzia do formatowania w repo nie ma.",
+        "tags": ["tooling", "git-hooks"]
+      }
+    },
+    {
+      "id": "hs04",
+      "label": "contradiction",
+      "category": "synonym",
+      "lang": "pl",
+      "a": {
+        "header": "Domyślny język interfejsu",
+        "body": "Domyślnym językiem interfejsu jest polski; nowy użytkownik widzi aplikację po polsku.",
+        "tags": ["i18n", "frontend"]
+      },
+      "b": {
+        "header": "Locale przy pierwszym wejściu",
+        "body": "Przy pierwszym uruchomieniu aplikacja ustawia locale `en-US`, niezależnie od ustawień przeglądarki.",
+        "tags": ["i18n", "config"]
+      }
+    },
+    {
+      "id": "hs05",
+      "label": "contradiction",
+      "category": "synonym",
+      "lang": "pl",
+      "a": {
+        "header": "Hashowanie haseł użytkowników",
+        "body": "Hasła użytkowników są hashowane bcryptem z cost factor 12.",
+        "tags": ["auth", "security"]
+      },
+      "b": {
+        "header": "Przechowywanie danych logowania",
+        "body": "Do tabeli `users` trafia wyłącznie skrót argon2id; żaden inny algorytm nie jest używany.",
+        "tags": ["auth", "database"]
+      }
+    },
+    {
+      "id": "hs06",
+      "label": "contradiction",
+      "category": "synonym",
+      "lang": "pl",
+      "a": {
+        "header": "Format logów API na produkcji",
+        "body": "Na produkcji API loguje strukturalnie: jedna linia JSON na zdarzenie.",
+        "tags": ["logging", "api"]
+      },
+      "b": {
+        "header": "Logger produkcyjny",
+        "body": "Produkcyjny logger API wypisuje czytelny, kolorowany tekst przez pino-pretty, a nie obiekty.",
+        "tags": ["logging", "pino"]
+      }
+    },
+    {
+      "id": "hs07",
+      "label": "contradiction",
+      "category": "synonym",
+      "lang": "pl",
+      "a": {
+        "header": "Główna gałąź repo",
+        "body": "Główna gałąź repozytorium nazywa się `main`.",
+        "tags": ["git", "conventions"]
+      },
+      "b": {
+        "header": "Gałąź docelowa pull requestów",
+        "body": "Domyślną gałęzią repo, do której kierujemy PR-y i z której tniemy release'y, jest `trunk`.",
+        "tags": ["git", "process"]
+      }
+    },
+    {
+      "id": "hs08",
+      "label": "contradiction",
+      "category": "synonym",
+      "lang": "pl",
+      "a": {
+        "header": "Lokalizacja serwerów produkcyjnych",
+        "body": "Wszystkie serwery produkcyjne fizycznie znajdują się w Niemczech.",
+        "tags": ["infra", "compliance"]
+      },
+      "b": {
+        "header": "Region chmury dla produkcji",
+        "body": "Produkcja działa w całości w regionie AWS eu-west-1.",
+        "tags": ["infra", "aws"]
+      }
+    },
+    {
+      "id": "hs09",
+      "label": "contradiction",
+      "category": "synonym",
+      "lang": "en",
+      "a": {
+        "header": "Coverage threshold in CI",
+        "body": "CI enforces a minimum of 80% line coverage; below that the test job fails.",
+        "tags": ["testing", "ci"]
+      },
+      "b": {
+        "header": "Test quality gate for PRs",
+        "body": "The quality gate lets a PR through as long as at least 70% of lines are exercised by tests.",
+        "tags": ["testing", "quality"]
+      }
+    },
+    {
+      "id": "hs10",
+      "label": "contradiction",
+      "category": "synonym",
+      "lang": "en",
+      "a": {
+        "header": "API error format",
+        "body": "All API errors are returned as RFC 9457 problem details with `application/problem+json`.",
+        "tags": ["api", "errors"]
+      },
+      "b": {
+        "header": "Error responses",
+        "body": "Every failed request returns an `{ error: { code, message } }` envelope with content type `application/json`.",
+        "tags": ["api", "conventions"]
+      }
+    },
+    {
+      "id": "hs11",
+      "label": "contradiction",
+      "category": "synonym",
+      "lang": "pl",
+      "a": {
+        "header": "Kolejka zadań w tle",
+        "body": "Zadania asynchroniczne obsługuje BullMQ na Redisie.",
+        "tags": ["queues", "backend"]
+      },
+      "b": {
+        "header": "Przetwarzanie pracy w tle",
+        "body": "Pracę w tle wykonuje pg-boss na Postgresie; innej kolejki w projekcie nie ma.",
+        "tags": ["queues", "postgres"]
+      }
+    },
+    {
+      "id": "hs12",
+      "label": "contradiction",
+      "category": "synonym",
+      "lang": "en",
+      "a": {
+        "header": "Date display format",
+        "body": "Dates in the UI are shown as DD.MM.YYYY.",
+        "tags": ["frontend", "i18n"]
+      },
+      "b": {
+        "header": "How the frontend renders dates",
+        "body": "The frontend renders every date in ISO order, year-month-day, across all screens.",
+        "tags": ["frontend", "formatting"]
+      }
+    },
+    {
+      "id": "hx01",
+      "label": "contradiction",
+      "category": "cross-lingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Limit długości tytułu zadania",
+        "body": "Tytuł zadania może mieć maksymalnie 200 znaków; walidacja jest w DTO i w bazie (`varchar(200)`).",
+        "tags": ["validation", "tasks"]
+      },
+      "b": {
+        "header": "Task title validation",
+        "body": "Task titles are capped at 255 characters, enforced by DTO validation and a `varchar(255)` column.",
+        "tags": ["validation", "database"]
+      }
+    },
+    {
+      "id": "hx02",
+      "label": "contradiction",
+      "category": "cross-lingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "WebSockets power live updates",
+        "body": "The board view receives live updates over a WebSocket connection using socket.io.",
+        "tags": ["realtime", "frontend"]
+      },
+      "b": {
+        "header": "Odświeżanie widoku tablicy",
+        "body": "Aplikacja nie używa WebSocketów ani SSE; widok tablicy odpytuje API co 10 sekund.",
+        "tags": ["realtime", "polling"]
+      }
+    },
+    {
+      "id": "hx03",
+      "label": "contradiction",
+      "category": "cross-lingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Konfiguracja CORS i nagłówków bezpieczeństwa",
+        "body": "API ustawia nagłówki bezpieczeństwa przez helmet. CORS dopuszcza wyłącznie domenę aplikacji webowej. Ciasteczka sesyjne mają atrybut SameSite=Strict. HSTS jest włączony z rocznym max-age.",
+        "tags": ["security", "http"]
+      },
+      "b": {
+        "header": "Security headers overview",
+        "body": "helmet sets the standard security headers on the API. Session cookies are issued with SameSite=Lax so links from emails keep users signed in. CORS allows only the web app's origin. HSTS is enabled.",
+        "tags": ["security", "cookies"]
+      }
+    },
+    {
+      "id": "hx04",
+      "label": "contradiction",
+      "category": "cross-lingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Search implementation",
+        "body": "Search is implemented with Postgres full-text search (tsvector + GIN); there is no external search engine.",
+        "tags": ["search", "database"]
+      },
+      "b": {
+        "header": "Indeksowanie wyszukiwarki",
+        "body": "Po każdej zmianie zadania worker wysyła dokument do Meilisearch, z którego korzysta wyszukiwarka w aplikacji.",
+        "tags": ["search", "workers"]
+      }
+    },
+    {
+      "id": "hx05",
+      "label": "contradiction",
+      "category": "cross-lingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Szyfrowanie ruchu do bazy",
+        "body": "Połączenie API z bazą jest szyfrowane TLS (`sslmode=require`).",
+        "tags": ["database", "security"]
+      },
+      "b": {
+        "header": "DB connection settings",
+        "body": "The API talks to Postgres over a plaintext connection (`sslmode=disable`) inside the private network.",
+        "tags": ["database", "network"]
+      }
+    },
+    {
+      "id": "hx06",
+      "label": "contradiction",
+      "category": "cross-lingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Refresh token lifetime",
+        "body": "Refresh tokens are valid for 30 days and rotate on every use.",
+        "tags": ["auth", "sessions"]
+      },
+      "b": {
+        "header": "Ważność refresh tokenów",
+        "body": "Refresh token wygasa po 14 dniach; przy każdym użyciu wydajemy nowy.",
+        "tags": ["auth", "security"]
+      }
+    },
+    {
+      "id": "hx07",
+      "label": "contradiction",
+      "category": "cross-lingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Wymuszanie Conventional Commits",
+        "body": "Commitlint w hooku commit-msg odrzuca wiadomości niezgodne z Conventional Commits.",
+        "tags": ["git", "conventions"]
+      },
+      "b": {
+        "header": "Commit message format",
+        "body": "We don't enforce any commit message convention; there is no commitlint and no commit-msg hook.",
+        "tags": ["git", "process"]
+      }
+    },
+    {
+      "id": "hx08",
+      "label": "contradiction",
+      "category": "cross-lingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Availability and deployments",
+        "body": "The service runs 24/7 with zero planned downtime; production deployments are rolling.",
+        "tags": ["deploy", "availability"]
+      },
+      "b": {
+        "header": "Przerwa przy wdrożeniu",
+        "body": "Każdy deploy produkcyjny wyłącza aplikację na około 5 minut, a użytkownicy widzą w tym czasie stronę serwisową.",
+        "tags": ["deploy", "maintenance"]
+      }
+    },
+    {
+      "id": "hx09",
+      "label": "contradiction",
+      "category": "cross-lingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Strategia gałęzi",
+        "body": "Pracujemy w modelu trunk-based: krótkie gałęzie, merge do main jeszcze tego samego dnia.",
+        "tags": ["git", "process"]
+      },
+      "b": {
+        "header": "Branching model",
+        "body": "We follow Git Flow with long-lived develop and release branches; features merge into develop, not main.",
+        "tags": ["git", "branching"]
+      }
+    },
+    {
+      "id": "hx10",
+      "label": "contradiction",
+      "category": "cross-lingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Image processing pipeline",
+        "body": "Uploaded images are processed by a worker using sharp. Each upload produces three widths: 320, 768 and 1600 px. The output format is WebP at quality 80. Originals are kept in a private bucket.",
+        "tags": ["images", "workers"]
+      },
+      "b": {
+        "header": "Przetwarzanie obrazków",
+        "body": "Obrazki po uploadzie obrabia worker oparty na sharp. Generujemy warianty o szerokości 320, 768 i 1600 px. Formatem wyjściowym jest AVIF, WebP nie generujemy wcale. Oryginały trafiają do prywatnego bucketu.",
+        "tags": ["images", "uploads"]
+      }
+    },
+    {
+      "id": "hx11",
+      "label": "contradiction",
+      "category": "cross-lingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Paginacja listy zadań w UI",
+        "body": "Lista zadań w aplikacji webowej domyślnie ładuje 25 pozycji na stronę.",
+        "tags": ["frontend", "pagination"]
+      },
+      "b": {
+        "header": "Task list defaults",
+        "body": "The task list in the web app loads 50 items per page by default.",
+        "tags": ["frontend", "ux"]
+      }
+    },
+    {
+      "id": "hx12",
+      "label": "contradiction",
+      "category": "cross-lingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Rate limiting on the public API",
+        "body": "All public API routes are rate-limited by the NestJS throttler at 100 requests per minute per client.",
+        "tags": ["api", "rate-limit"]
+      },
+      "b": {
+        "header": "Ochrona publicznego API",
+        "body": "Publiczne API nie ma żadnego limitowania liczby żądań — ani w aplikacji, ani na proxy.",
+        "tags": ["api", "security"]
+      }
+    },
+    {
+      "id": "hx13",
+      "label": "contradiction",
+      "category": "cross-lingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Dostęp do aplikacji",
+        "body": "Aplikacja jest dostępna wyłącznie dla zalogowanych użytkowników — nie ma żadnych publicznych stron ani widoków.",
+        "tags": ["auth", "access"]
+      },
+      "b": {
+        "header": "Shared board links",
+        "body": "Shared boards can be viewed by anyone with the link, without signing in.",
+        "tags": ["sharing", "boards"]
+      }
+    },
+    {
+      "id": "hx14",
+      "label": "contradiction",
+      "category": "cross-lingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Background job scheduling",
+        "body": "Recurring jobs are defined as Kubernetes CronJobs in the Helm chart.",
+        "tags": ["scheduling", "kubernetes"]
+      },
+      "b": {
+        "header": "Zadania cykliczne",
+        "body": "Cykliczne zadania rejestruje sam proces API przez `@nestjs/schedule`; w klastrze nie ma żadnych CronJobów.",
+        "tags": ["scheduling", "api"]
+      }
+    },
+    {
+      "id": "hx15",
+      "label": "contradiction",
+      "category": "cross-lingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Środowisko serwisu ml-ranker",
+        "body": "Serwis `ml-ranker` działa na Pythonie 3.12; obraz bazowy to `python:3.12-slim`.",
+        "tags": ["python", "services"]
+      },
+      "b": {
+        "header": "ml-ranker runtime",
+        "body": "The ml-ranker service image is built from `python:3.11-slim`.",
+        "tags": ["python", "docker"]
+      }
+    },
+    {
+      "id": "hx16",
+      "label": "contradiction",
+      "category": "cross-lingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Proces wydawania wersji",
+        "body": "Wydanie tworzy ręcznie uruchamiany workflow `release`. Changelog generuje changesets na podstawie plików w `.changeset/`. Tag ma format `v<wersja>`. Obraz Dockera jest publikowany do GHCR.",
+        "tags": ["release", "ci"]
+      },
+      "b": {
+        "header": "How releases are cut",
+        "body": "Releases are cut by the manually triggered `release` workflow. The changelog is written by hand in CHANGELOG.md; changesets is not used. Tags look like `v<version>` and the image is pushed to GHCR.",
+        "tags": ["release", "changelog"]
+      }
+    },
+    {
+      "id": "hx17",
+      "label": "contradiction",
+      "category": "cross-lingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Currency of stored prices",
+        "body": "All prices are stored as integers in euro cents.",
+        "tags": ["billing", "database"]
+      },
+      "b": {
+        "header": "Kwoty w bazie",
+        "body": "Ceny przechowujemy jako liczby całkowite w groszach (PLN).",
+        "tags": ["billing", "money"]
+      }
+    },
+    {
+      "id": "ne01",
+      "label": "compatible",
+      "category": "environment",
+      "lang": "pl",
+      "a": {
+        "header": "Poziom logowania w środowisku dev: debug",
+        "body": "Lokalnie i na maszynach deweloperskich `LOG_LEVEL` domyślnie wynosi `debug`, żeby widzieć zapytania SQL i payloady kolejki.",
+        "tags": ["logging", "dev", "config"]
+      },
+      "b": {
+        "header": "Poziom logowania na produkcji: warn",
+        "body": "Na produkcji `LOG_LEVEL` jest ustawiony na `warn`, żeby ograniczyć wolumen logów w Loki. Info i debug nie trafiają do agregatora.",
+        "tags": ["logging", "prod", "config"]
+      }
+    },
+    {
+      "id": "ne02",
+      "label": "compatible",
+      "category": "environment",
+      "lang": "pl",
+      "a": {
+        "header": "Lokalnie e-maile przechwytuje Mailpit",
+        "body": "W `docker-compose.dev.yml` SMTP wskazuje na kontener Mailpit (port 1025), więc w dev żaden mail nie wychodzi na zewnątrz. Podgląd skrzynki pod localhost:8025.",
+        "tags": ["email", "dev", "docker"]
+      },
+      "b": {
+        "header": "Na produkcji e-maile wysyłamy przez Amazon SES",
+        "body": "Produkcyjna instancja wysyła maile transakcyjne przez Amazon SES w regionie eu-central-1. Bounce'y wracają przez SNS do endpointu `/webhooks/ses`.",
+        "tags": ["email", "prod", "aws"]
+      }
+    },
+    {
+      "id": "ne03",
+      "label": "compatible",
+      "category": "environment",
+      "lang": "en",
+      "a": {
+        "header": "In CI, Playwright E2E runs on Chromium only",
+        "body": "The CI e2e job sets `--project=chromium` to keep the pipeline under 10 minutes. Firefox and WebKit are not run on pull requests.",
+        "tags": ["e2e", "ci", "playwright"]
+      },
+      "b": {
+        "header": "Locally, `pnpm e2e` runs Playwright on Chromium, Firefox and WebKit",
+        "body": "The local default in `playwright.config.ts` includes all three browser projects, so developers catch engine-specific bugs before pushing.",
+        "tags": ["e2e", "local", "playwright"]
+      }
+    },
+    {
+      "id": "ne04",
+      "label": "compatible",
+      "category": "environment",
+      "lang": "pl",
+      "a": {
+        "header": "Na Windows dev Vite używa pollingu do obserwowania plików",
+        "body": "Na deweloperskich maszynach z Windows (repo w WSL montowane z dysku C:) eventy plików nie dochodzą, więc ustawiamy `server.watch.usePolling: true`.",
+        "tags": ["vite", "windows", "dev"]
+      },
+      "b": {
+        "header": "W kontenerach Linux watcher Vite działa bez pollingu",
+        "body": "W kontenerach Linux (devcontainer i podgląd PR) watcher korzysta z natywnych eventów inotify, a polling jest wyłączony, bo niepotrzebnie obciąża CPU.",
+        "tags": ["vite", "linux", "docker"]
+      }
+    },
+    {
+      "id": "ne05",
+      "label": "compatible",
+      "category": "environment",
+      "lang": "pl",
+      "a": {
+        "header": "Pliki do 5 MB wysyłamy jednym żądaniem PUT",
+        "body": "Dla załączników mniejszych niż 5 MB frontend robi pojedynczy PUT na presigned URL do S3. To najprostsza ścieżka i pokrywa większość uploadów.",
+        "tags": ["upload", "s3", "frontend"]
+      },
+      "b": {
+        "header": "Pliki powyżej 5 MB idą przez multipart upload",
+        "body": "Załączniki większe niż 5 MB są dzielone na części po 8 MB i wysyłane przez S3 multipart upload, z ponawianiem pojedynczych części.",
+        "tags": ["upload", "s3", "multipart"]
+      }
+    },
+    {
+      "id": "ne06",
+      "label": "compatible",
+      "category": "environment",
+      "lang": "pl",
+      "a": {
+        "header": "Plan Free: maksymalnie 3 projekty na workspace",
+        "body": "Workspace na planie Free może mieć najwyżej 3 aktywne projekty. Próba utworzenia czwartego zwraca 402 z linkiem do upgrade'u.",
+        "tags": ["billing", "limits", "plans"]
+      },
+      "b": {
+        "header": "Plan Team: do 50 projektów na workspace",
+        "body": "Na płatnym planie Team limit wynosi 50 aktywnych projektów na workspace. Limit sprawdza `PlanGuard` przy tworzeniu projektu.",
+        "tags": ["billing", "limits", "plans"]
+      }
+    },
+    {
+      "id": "ne07",
+      "label": "compatible",
+      "category": "environment",
+      "lang": "pl",
+      "a": {
+        "header": "Staging: migracje bazy uruchamiane automatycznie przy starcie kontenera",
+        "body": "Na stagingu entrypoint kontenera odpala `db:migrate` przed startem serwera, żeby każdy deploy PR-a miał świeży schemat bez ręcznej roboty.",
+        "tags": ["migrations", "staging", "deploy"]
+      },
+      "b": {
+        "header": "Produkcja: migracje odpalane ręcznie jobem przed deployem",
+        "body": "Na produkcji kontener nie migruje sam. Migracje uruchamia ręcznie wyzwalany job `db:migrate` w pipeline, dopiero po nim idzie rollout aplikacji.",
+        "tags": ["migrations", "prod", "deploy"]
+      }
+    },
+    {
+      "id": "ne08",
+      "label": "compatible",
+      "category": "environment",
+      "lang": "en",
+      "a": {
+        "header": "Sentry traces sample rate in production is 0.1",
+        "body": "Production sets `SENTRY_TRACES_SAMPLE_RATE=0.1` so only 10% of transactions are traced, which keeps us inside the plan quota.",
+        "tags": ["sentry", "prod", "observability"]
+      },
+      "b": {
+        "header": "Staging sends 100% of traces to Sentry",
+        "body": "On staging `SENTRY_TRACES_SAMPLE_RATE` is 1.0, because traffic there is low and we want every transaction when debugging releases.",
+        "tags": ["sentry", "staging", "observability"]
+      }
+    },
+    {
+      "id": "ne09",
+      "label": "compatible",
+      "category": "environment",
+      "lang": "en",
+      "a": {
+        "header": "CI runs unit tests with 4 parallel workers",
+        "body": "The CI runner has 4 vCPUs, so the test job pins `--maxWorkers=4` to avoid oversubscription and flaky timeouts.",
+        "tags": ["testing", "ci", "performance"]
+      },
+      "b": {
+        "header": "Locally the test runner uses all available CPU cores",
+        "body": "On developer machines no worker limit is set, so the runner defaults to the number of local CPU cores for the fastest feedback loop.",
+        "tags": ["testing", "local", "performance"]
+      }
+    },
+    {
+      "id": "ne10",
+      "label": "compatible",
+      "category": "environment",
+      "lang": "pl-en",
+      "a": {
+        "header": "W dev CORS przepuszcza każdy origin",
+        "body": "Gdy `NODE_ENV=development`, serwer ustawia `Access-Control-Allow-Origin: *`, żeby dało się testować z dowolnego portu i narzędzi typu Postman w przeglądarce.",
+        "tags": ["cors", "dev", "security"]
+      },
+      "b": {
+        "header": "In production CORS allows only the app origin",
+        "body": "With `NODE_ENV=production` the allowlist contains a single origin, https://app.taskflow.example; any other origin gets no CORS headers.",
+        "tags": ["cors", "prod", "security"]
+      }
+    },
+    {
+      "id": "nb01",
+      "label": "compatible",
+      "category": "before-after",
+      "lang": "pl",
+      "a": {
+        "header": "Kolejka zadań: do v1.3 Bull, od v1.4 BullMQ",
+        "body": "Do wersji 1.3 kolejka działała na bibliotece Bull. W v1.4 przeszliśmy na BullMQ i Bull został usunięty z zależności.",
+        "tags": ["queue", "bullmq", "migration"]
+      },
+      "b": {
+        "header": "Kolejka zadań działa na BullMQ",
+        "body": "Wszystkie joby w tle (maile, eksporty, webhooki) są obsługiwane przez BullMQ z workerami w `apps/worker`.",
+        "tags": ["queue", "bullmq", "worker"]
+      }
+    },
+    {
+      "id": "nb02",
+      "label": "compatible",
+      "category": "before-after",
+      "lang": "pl",
+      "a": {
+        "header": "Sesje użytkowników przechowujemy w Redis od marca 2026",
+        "body": "W marcu 2026 przenieśliśmy sesje z tabeli `sessions` w Postgres do Redis, bo zapisy sesji generowały większość ruchu na bazie.",
+        "tags": ["sessions", "redis", "auth"]
+      },
+      "b": {
+        "header": "Migracja sesji z Postgres do Redis zakończona",
+        "body": "Po przeniesieniu sesji do Redis tabela `sessions` w Postgres została usunięta w migracji 0042. Kod nie odwołuje się już do niej.",
+        "tags": ["sessions", "postgres", "migration"]
+      }
+    },
+    {
+      "id": "nb03",
+      "label": "compatible",
+      "category": "before-after",
+      "lang": "pl",
+      "a": {
+        "header": "Frontend: do v2.0 webpack, od v2.0 Vite",
+        "body": "Do wersji 2.0 frontend był budowany webpackiem z własnym configiem. Od v2.0 bundlerem jest Vite, a `webpack.config.js` usunięto.",
+        "tags": ["frontend", "build", "vite"]
+      },
+      "b": {
+        "header": "Konfiguracja bundlera frontendu jest w apps/web/vite.config.ts",
+        "body": "Aliasy ścieżek, proxy do API i pluginy builda ustawiamy w `apps/web/vite.config.ts`.",
+        "tags": ["frontend", "build", "config"]
+      }
+    },
+    {
+      "id": "nb04",
+      "label": "compatible",
+      "category": "before-after",
+      "lang": "pl",
+      "a": {
+        "header": "Obraz runtime serwera przeszedł z Node 20 na Node 22 w v3.1",
+        "body": "Do wersji 3.0 obraz bazował na Node 20. Od v3.1 używamy Node 22, bo potrzebowaliśmy natywnego `require(esm)`.",
+        "tags": ["node", "docker", "upgrade"]
+      },
+      "b": {
+        "header": "Dockerfile serwera bazuje na node:22-alpine",
+        "body": "Obraz produkcyjny serwera buduje się z `node:22-alpine` w dwóch etapach: build i runtime.",
+        "tags": ["node", "docker", "runtime"]
+      }
+    },
+    {
+      "id": "nb05",
+      "label": "compatible",
+      "category": "before-after",
+      "lang": "pl",
+      "a": {
+        "header": "ORM: do lipca 2025 TypeORM, obecnie Drizzle",
+        "body": "Do lipca 2025 warstwa danych używała TypeORM. Potem przepisaliśmy ją na Drizzle, a encje TypeORM zostały usunięte.",
+        "tags": ["orm", "drizzle", "migration"]
+      },
+      "b": {
+        "header": "Nowe migracje generujemy przez drizzle-kit generate",
+        "body": "Po zmianie schematu w `src/db/schema.ts` odpalamy `drizzle-kit generate` i commitujemy wygenerowany plik SQL.",
+        "tags": ["orm", "drizzle", "migrations"]
+      }
+    },
+    {
+      "id": "nb06",
+      "label": "compatible",
+      "category": "before-after",
+      "lang": "pl-en",
+      "a": {
+        "header": "Uwierzytelnianie: od v1.8 cookie httpOnly zamiast localStorage",
+        "body": "Do wersji 1.7 frontend trzymał JWT w localStorage. Od v1.8 identyfikator sesji jest w ciasteczku httpOnly, a localStorage nie przechowuje nic związanego z auth.",
+        "tags": ["auth", "cookies", "security"]
+      },
+      "b": {
+        "header": "Session identifier is stored in an httpOnly cookie",
+        "body": "The server sets the `sid` cookie with httpOnly, Secure and SameSite=Lax; frontend code never reads it directly.",
+        "tags": ["auth", "cookies", "frontend"]
+      }
+    },
+    {
+      "id": "nb07",
+      "label": "compatible",
+      "category": "before-after",
+      "lang": "pl",
+      "a": {
+        "header": "Branching: do końca 2025 git-flow, od 2026 trunk-based",
+        "body": "Do końca 2025 pracowaliśmy w git-flow z gałęzią `develop`. Od stycznia 2026 przeszliśmy na trunk-based development na `main`.",
+        "tags": ["git", "workflow", "branching"]
+      },
+      "b": {
+        "header": "PR-y otwieramy bezpośrednio do main",
+        "body": "Każdy PR celuje w `main`; gałęzi `develop` już nie ma. Krótko żyjące branche feature'owe merge'ujemy po zielonym CI.",
+        "tags": ["git", "workflow", "pull-requests"]
+      }
+    },
+    {
+      "id": "nb08",
+      "label": "compatible",
+      "category": "before-after",
+      "lang": "en",
+      "a": {
+        "header": "Logging moved from winston to pino in v2.3",
+        "body": "Until v2.2 the server logged with winston. In v2.3 we switched to pino for lower overhead and removed winston from dependencies.",
+        "tags": ["logging", "pino", "migration"]
+      },
+      "b": {
+        "header": "Server logger is pino with JSON output",
+        "body": "The server uses pino and writes one JSON object per line to stdout; pino-pretty is enabled only via the `dev` script.",
+        "tags": ["logging", "pino", "server"]
+      }
+    },
+    {
+      "id": "nb09",
+      "label": "compatible",
+      "category": "before-after",
+      "lang": "en",
+      "a": {
+        "header": "moment.js was replaced by date-fns during the 2.x cleanup",
+        "body": "Earlier versions formatted dates with moment.js. During the 2.x cleanup every usage was migrated to date-fns and moment was dropped from the bundle.",
+        "tags": ["frontend", "dates", "dependencies"]
+      },
+      "b": {
+        "header": "Use date-fns for all date formatting in the frontend",
+        "body": "Date formatting and arithmetic in `apps/web` go through date-fns helpers in `src/lib/dates.ts`.",
+        "tags": ["frontend", "dates", "conventions"]
+      }
+    },
+    {
+      "id": "nb10",
+      "label": "compatible",
+      "category": "before-after",
+      "lang": "en",
+      "a": {
+        "header": "MCP rate limit was raised from 30 to 60 req/min per token in v1.6",
+        "body": "Before v1.6 MCP tools were limited to 30 requests per minute per token. Agents hit the cap during long sessions, so v1.6 raised it to 60.",
+        "tags": ["rate-limit", "mcp", "api"]
+      },
+      "b": {
+        "header": "MCP rate limit: 60 requests per minute per token",
+        "body": "Each MCP token may make at most 60 tool calls per minute; excess calls get HTTP 429 with a Retry-After header.",
+        "tags": ["rate-limit", "mcp", "api"]
+      }
+    },
+    {
+      "id": "nm01",
+      "label": "compatible",
+      "category": "more-specific",
+      "lang": "pl",
+      "a": {
+        "header": "Obrazy Dockera są skanowane pod kątem podatności",
+        "body": "Każdy obraz budowany z repo przechodzi skan bezpieczeństwa, zanim trafi do rejestru.",
+        "tags": ["security", "docker", "ci"]
+      },
+      "b": {
+        "header": "Trivy w CI blokuje merge przy CVE o wadze HIGH lub CRITICAL",
+        "body": "Job `image-scan` odpala Trivy na zbudowanym obrazie. Znalezienie podatności HIGH albo CRITICAL z dostępną poprawką oznacza czerwony check i blokadę merge'a.",
+        "tags": ["security", "trivy", "ci"]
+      }
+    },
+    {
+      "id": "nm02",
+      "label": "compatible",
+      "category": "more-specific",
+      "lang": "pl",
+      "a": {
+        "header": "Upload awatarów jest walidowany po stronie serwera",
+        "body": "Serwer nie ufa walidacji z frontendu i sam sprawdza każdy przesłany awatar.",
+        "tags": ["upload", "validation", "avatars"]
+      },
+      "b": {
+        "header": "Awatar: tylko PNG, JPEG lub WebP, max 2 MB, skalowany do 256x256",
+        "body": "Endpoint `POST /me/avatar` odrzuca inne typy MIME i pliki powyżej 2 MB, a zaakceptowany obraz skaluje przez sharp do 256x256.",
+        "tags": ["upload", "avatars", "images"]
+      }
+    },
+    {
+      "id": "nm03",
+      "label": "compatible",
+      "category": "more-specific",
+      "lang": "pl",
+      "a": {
+        "header": "Feature flagi trzymamy w bazie danych",
+        "body": "Flagi funkcji nie są w zmiennych środowiskowych, tylko w bazie, żeby dało się je przełączać bez redeployu.",
+        "tags": ["feature-flags", "database", "config"]
+      },
+      "b": {
+        "header": "Flagi w tabeli feature_flags z cache w pamięci odświeżanym co 30 s",
+        "body": "Serwer czyta tabelę `feature_flags` i trzyma ją w cache procesu, odświeżanym co 30 sekund, więc zmiana flagi działa najpóźniej po pół minuty.",
+        "tags": ["feature-flags", "cache", "postgres"]
+      }
+    },
+    {
+      "id": "nm04",
+      "label": "compatible",
+      "category": "more-specific",
+      "lang": "pl",
+      "a": {
+        "header": "Commity piszemy w konwencji Conventional Commits",
+        "body": "Wiadomości commitów mają format `typ(scope): opis`, z którego generujemy changelog.",
+        "tags": ["git", "conventions", "commits"]
+      },
+      "b": {
+        "header": "Dozwolone typy commitów: feat, fix, docs, refactor, test, chore",
+        "body": "commitlint akceptuje tylko te sześć typów; scope jest opcjonalny, a opis ma być w trybie rozkazującym i bez kropki na końcu.",
+        "tags": ["git", "commitlint", "conventions"]
+      }
+    },
+    {
+      "id": "nm05",
+      "label": "compatible",
+      "category": "more-specific",
+      "lang": "pl",
+      "a": {
+        "header": "Wyszukiwanie zadań korzysta z pełnotekstowego indeksu Postgres",
+        "body": "Wyszukiwarka w aplikacji nie używa zewnętrznego silnika; opiera się na full-text search w Postgres.",
+        "tags": ["search", "postgres", "fts"]
+      },
+      "b": {
+        "header": "Kolumna search_vector (tsvector, konfiguracja simple) z indeksem GIN",
+        "body": "Tabela `tasks` ma generowaną kolumnę `search_vector` budowaną z tytułu i opisu w konfiguracji `simple`, z indeksem GIN używanym przez zapytania wyszukiwarki.",
+        "tags": ["search", "postgres", "indexes"]
+      }
+    },
+    {
+      "id": "nm06",
+      "label": "compatible",
+      "category": "more-specific",
+      "lang": "pl",
+      "a": {
+        "header": "Webhooki wychodzące są ponawiane przy błędzie",
+        "body": "Jeśli odbiorca webhooka zwróci błąd albo nie odpowie, dostawa jest ponawiana automatycznie.",
+        "tags": ["webhooks", "retry", "queue"]
+      },
+      "b": {
+        "header": "Retry webhooka: 5 prób z backoffem 1, 2, 4, 8 i 16 minut",
+        "body": "Nieudana dostawa webhooka jest ponawiana do 5 razy z wykładniczym opóźnieniem 1, 2, 4, 8 i 16 minut. Po ostatniej porażce dostawa dostaje status `failed`.",
+        "tags": ["webhooks", "retry", "backoff"]
+      }
+    },
+    {
+      "id": "nm07",
+      "label": "compatible",
+      "category": "more-specific",
+      "lang": "en",
+      "a": {
+        "header": "Linting is enforced before every commit",
+        "body": "Code that fails lint cannot be committed locally without explicitly bypassing the hook.",
+        "tags": ["lint", "git-hooks", "conventions"]
+      },
+      "b": {
+        "header": "lefthook pre-commit runs eslint --fix and prettier on staged files only",
+        "body": "The pre-commit hook configured in `lefthook.yml` runs eslint with --fix and prettier --write, limited to staged files so commits stay fast.",
+        "tags": ["lint", "lefthook", "prettier"]
+      }
+    },
+    {
+      "id": "nm08",
+      "label": "compatible",
+      "category": "more-specific",
+      "lang": "en",
+      "a": {
+        "header": "API error responses follow RFC 9457 problem details",
+        "body": "All non-2xx responses use the `application/problem+json` format with type, title, status and detail fields.",
+        "tags": ["api", "errors", "conventions"]
+      },
+      "b": {
+        "header": "Validation errors return 422 problem+json with an errors array",
+        "body": "When request validation fails the API returns 422 as problem+json and adds an `errors` extension member listing each failing field path and message.",
+        "tags": ["api", "validation", "errors"]
+      }
+    },
+    {
+      "id": "nm09",
+      "label": "compatible",
+      "category": "more-specific",
+      "lang": "en",
+      "a": {
+        "header": "Static frontend assets are served through a CDN",
+        "body": "Browsers do not fetch JS, CSS or fonts from the app server directly; they come from the CDN edge.",
+        "tags": ["cdn", "frontend", "caching"]
+      },
+      "b": {
+        "header": "Hashed files under /assets/ are cached by Cloudflare for one year",
+        "body": "Fingerprinted files in `/assets/` are served by Cloudflare with `Cache-Control: max-age=31536000, immutable`; index.html itself is not cached.",
+        "tags": ["cdn", "cloudflare", "caching"]
+      }
+    },
+    {
+      "id": "nm10",
+      "label": "compatible",
+      "category": "more-specific",
+      "lang": "pl-en",
+      "a": {
+        "header": "Publiczne API jest wersjonowane",
+        "body": "Klienci integrujący się z API dostają stabilny kontrakt w ramach wersji; zmiany łamiące nie trafiają do istniejącej wersji.",
+        "tags": ["api", "versioning", "conventions"]
+      },
+      "b": {
+        "header": "API version is a URL prefix: /api/v1, breaking changes go to /api/v2",
+        "body": "Every public route is mounted under `/api/v1`. A breaking change requires introducing the route under a new `/api/v2` prefix.",
+        "tags": ["api", "versioning", "routing"]
+      }
+    },
+    {
+      "id": "na01",
+      "label": "compatible",
+      "category": "different-aspect",
+      "lang": "pl",
+      "a": {
+        "header": "Backupy bazy: co 6 godzin",
+        "body": "Zrzut bazy produkcyjnej (pg_dump) wykonuje się co 6 godzin o 00:00, 06:00, 12:00 i 18:00 UTC.",
+        "tags": ["backups", "postgres", "schedule"]
+      },
+      "b": {
+        "header": "Backupy bazy: retencja 30 dni",
+        "body": "Zrzuty bazy produkcyjnej przechowujemy w buckecie przez 30 dni; starsze usuwa reguła lifecycle.",
+        "tags": ["backups", "retention", "s3"]
+      }
+    },
+    {
+      "id": "na02",
+      "label": "compatible",
+      "category": "different-aspect",
+      "lang": "pl",
+      "a": {
+        "header": "Pula połączeń do bazy: 10 na instancję aplikacji",
+        "body": "Każda instancja serwera otwiera pulę maksymalnie 10 połączeń do Postgres (`DB_POOL_MAX=10`).",
+        "tags": ["database", "pool", "config"]
+      },
+      "b": {
+        "header": "Postgres: max_connections ustawione na 200",
+        "body": "Na serwerze bazy `max_connections` wynosi 200, co zostawia zapas na workery, migracje i połączenia administracyjne.",
+        "tags": ["database", "postgres", "config"]
+      }
+    },
+    {
+      "id": "na03",
+      "label": "compatible",
+      "category": "different-aspect",
+      "lang": "pl",
+      "a": {
+        "header": "Sesja wygasa po 30 minutach bezczynności",
+        "body": "Jeśli użytkownik nie wykona żadnego żądania przez 30 minut, sesja jest unieważniana (idle timeout).",
+        "tags": ["auth", "sessions", "timeout"]
+      },
+      "b": {
+        "header": "Maksymalny czas życia sesji: 12 godzin",
+        "body": "Niezależnie od aktywności sesja wygasa 12 godzin po zalogowaniu (absolute lifetime) i trzeba zalogować się ponownie.",
+        "tags": ["auth", "sessions", "timeout"]
+      }
+    },
+    {
+      "id": "na04",
+      "label": "compatible",
+      "category": "different-aspect",
+      "lang": "pl",
+      "a": {
+        "header": "Eksport CSV: żądanie POST /exports ma timeout 30 s",
+        "body": "Endpoint `POST /exports` tylko tworzy zlecenie eksportu i zwraca jego id; samo żądanie HTTP ma timeout 30 sekund.",
+        "tags": ["exports", "api", "timeout"]
+      },
+      "b": {
+        "header": "Eksport CSV: job generujący plik ma timeout 15 minut",
+        "body": "Job w kolejce, który buduje plik CSV dla zlecenia eksportu, jest przerywany po 15 minutach i oznaczany jako `failed`.",
+        "tags": ["exports", "queue", "timeout"]
+      }
+    },
+    {
+      "id": "na05",
+      "label": "compatible",
+      "category": "different-aspect",
+      "lang": "pl",
+      "a": {
+        "header": "Upload załączników: max 25 MB na plik",
+        "body": "Pojedynczy załącznik do zadania może mieć najwyżej 25 MB; większe pliki serwer odrzuca z kodem 413.",
+        "tags": ["upload", "limits", "attachments"]
+      },
+      "b": {
+        "header": "Upload załączników: max 10 plików w jednym żądaniu",
+        "body": "W jednym żądaniu `POST /tasks/:id/attachments` można przesłać najwyżej 10 plików naraz.",
+        "tags": ["upload", "limits", "attachments"]
+      }
+    },
+    {
+      "id": "na06",
+      "label": "compatible",
+      "category": "different-aspect",
+      "lang": "en",
+      "a": {
+        "header": "Email queue: concurrency of 5 workers",
+        "body": "The `emails` queue processes at most 5 jobs in parallel per worker process.",
+        "tags": ["queue", "email", "concurrency"]
+      },
+      "b": {
+        "header": "Email queue: limited to 100 jobs per minute",
+        "body": "The `emails` queue has a BullMQ rate limiter of 100 jobs per minute to stay under the SES sending quota.",
+        "tags": ["queue", "email", "rate-limit"]
+      }
+    },
+    {
+      "id": "na07",
+      "label": "compatible",
+      "category": "different-aspect",
+      "lang": "pl",
+      "a": {
+        "header": "Magic link do logowania jest ważny 15 minut",
+        "body": "Link logowania wysłany mailem wygasa 15 minut po wygenerowaniu i działa tylko raz.",
+        "tags": ["auth", "magic-link", "expiry"]
+      },
+      "b": {
+        "header": "Magic link: max 5 wysyłek na godzinę na adres e-mail",
+        "body": "Na jeden adres e-mail można zamówić najwyżej 5 linków logowania w ciągu godziny; kolejne prośby dostają 429.",
+        "tags": ["auth", "magic-link", "rate-limit"]
+      }
+    },
+    {
+      "id": "na08",
+      "label": "compatible",
+      "category": "different-aspect",
+      "lang": "en",
+      "a": {
+        "header": "Project list cache: TTL 5 minutes",
+        "body": "Cached project lists expire 5 minutes after being written, after which the next request reloads them from the database.",
+        "tags": ["cache", "ttl", "projects"]
+      },
+      "b": {
+        "header": "Project list cache is capped at 10,000 entries (LRU)",
+        "body": "The in-memory project list cache holds at most 10,000 entries and evicts the least recently used one when full.",
+        "tags": ["cache", "lru", "projects"]
+      }
+    },
+    {
+      "id": "na09",
+      "label": "compatible",
+      "category": "different-aspect",
+      "lang": "en",
+      "a": {
+        "header": "Container healthcheck runs every 10 seconds",
+        "body": "The server container's healthcheck probes `GET /health` with an interval of 10s.",
+        "tags": ["docker", "healthcheck", "deploy"]
+      },
+      "b": {
+        "header": "Healthcheck: 5s timeout per probe, unhealthy after 3 failures",
+        "body": "Each probe of `GET /health` times out after 5 seconds, and the container is marked unhealthy after 3 consecutive failed probes.",
+        "tags": ["docker", "healthcheck", "deploy"]
+      }
+    },
+    {
+      "id": "na10",
+      "label": "compatible",
+      "category": "different-aspect",
+      "lang": "pl-en",
+      "a": {
+        "header": "Paginacja: domyślny rozmiar strony to 20",
+        "body": "Gdy klient nie poda parametru `limit`, endpointy listujące zwracają 20 elementów na stronę.",
+        "tags": ["api", "pagination", "defaults"]
+      },
+      "b": {
+        "header": "Pagination: max page size is 100",
+        "body": "List endpoints clamp the `limit` query parameter to 100; larger values are silently reduced to 100.",
+        "tags": ["api", "pagination", "limits"]
+      }
+    },
+    {
+      "id": "ns01",
+      "label": "compatible",
+      "category": "different-subject",
+      "lang": "pl",
+      "a": {
+        "header": "Serwer API nasłuchuje na porcie 4000",
+        "body": "Backend (`apps/server`) startuje na porcie 4000, ustawianym przez zmienną `PORT`.",
+        "tags": ["server", "ports", "config"]
+      },
+      "b": {
+        "header": "Vite dev server frontendu działa na porcie 5173",
+        "body": "`pnpm --filter web dev` uruchamia dev server Vite na porcie 5173, który proxy'uje `/api` do backendu.",
+        "tags": ["frontend", "vite", "ports"]
+      }
+    },
+    {
+      "id": "ns02",
+      "label": "compatible",
+      "category": "different-subject",
+      "lang": "pl",
+      "a": {
+        "header": "Obraz runtime serwera używa Node 22",
+        "body": "Produkcyjny kontener serwera API działa na Node 22 (`node:22-alpine`).",
+        "tags": ["node", "docker", "server"]
+      },
+      "b": {
+        "header": "Strona dokumentacji (apps/docs) budowana na Node 20 na Netlify",
+        "body": "Osobna strona dokumentacji na Docusaurusie jest budowana przez Netlify z `NODE_VERSION=20` ustawionym w `netlify.toml`; nie dzieli obrazu z serwerem.",
+        "tags": ["docs", "node", "netlify"]
+      }
+    },
+    {
+      "id": "ns03",
+      "label": "compatible",
+      "category": "different-subject",
+      "lang": "pl",
+      "a": {
+        "header": "Logi audytowe: retencja 2 lata",
+        "body": "Wpisy w tabeli `audit_log` (logowania, zmiany uprawnień, usunięcia) przechowujemy przez 2 lata ze względów zgodności.",
+        "tags": ["audit", "retention", "compliance"]
+      },
+      "b": {
+        "header": "Logi aplikacyjne: retencja 14 dni w Loki",
+        "body": "Logi stdout z kontenerów aplikacji trafiają do Loki i są usuwane po 14 dniach.",
+        "tags": ["logging", "retention", "loki"]
+      }
+    },
+    {
+      "id": "ns04",
+      "label": "compatible",
+      "category": "different-subject",
+      "lang": "pl",
+      "a": {
+        "header": "Timeout wywołania LLM: 60 sekund",
+        "body": "Wywołania modelu językowego przy generowaniu podsumowań mają timeout 60 s, bo długie odpowiedzi potrafią się generować kilkadziesiąt sekund.",
+        "tags": ["llm", "timeout", "integrations"]
+      },
+      "b": {
+        "header": "Timeout wywołania API embeddingów: 10 sekund",
+        "body": "Żądanie do API embeddingów przy indeksowaniu notatek jest przerywane po 10 s i ponawiane przez kolejkę.",
+        "tags": ["embeddings", "timeout", "integrations"]
+      }
+    },
+    {
+      "id": "ns05",
+      "label": "compatible",
+      "category": "different-subject",
+      "lang": "en",
+      "a": {
+        "header": "Cache Redis uses the allkeys-lru eviction policy",
+        "body": "The Redis instance used for HTTP response caching runs with `maxmemory-policy allkeys-lru`, so old keys are dropped under memory pressure.",
+        "tags": ["redis", "cache", "config"]
+      },
+      "b": {
+        "header": "Queue Redis uses noeviction",
+        "body": "BullMQ runs on a separate Redis instance configured with `maxmemory-policy noeviction`, because evicting job keys would silently lose jobs.",
+        "tags": ["redis", "queue", "config"]
+      }
+    },
+    {
+      "id": "ns06",
+      "label": "compatible",
+      "category": "different-subject",
+      "lang": "pl",
+      "a": {
+        "header": "Max rozmiar body JSON w API: 1 MB",
+        "body": "Parser JSON w serwerze odrzuca żądania z body większym niż 1 MB (`bodyLimit: 1mb`).",
+        "tags": ["api", "limits", "server"]
+      },
+      "b": {
+        "header": "Max rozmiar pliku w uploadzie załączników: 50 MB",
+        "body": "Endpoint uploadu przyjmuje multipart/form-data i pozwala na pliki do 50 MB; nie przechodzi przez parser JSON.",
+        "tags": ["upload", "limits", "attachments"]
+      }
+    },
+    {
+      "id": "ns07",
+      "label": "compatible",
+      "category": "different-subject",
+      "lang": "pl",
+      "a": {
+        "header": "Próg coverage w pakiecie packages/core: 90%",
+        "body": "Pakiet `packages/core` z logiką domenową ma wymagane 90% pokrycia linii; poniżej tego test job jest czerwony.",
+        "tags": ["testing", "coverage", "core"]
+      },
+      "b": {
+        "header": "Próg coverage w apps/web: 60%",
+        "body": "Dla aplikacji frontendowej `apps/web` próg pokrycia linii wynosi 60%, bo dużą część UI testujemy E2E.",
+        "tags": ["testing", "coverage", "frontend"]
+      }
+    },
+    {
+      "id": "ns08",
+      "label": "compatible",
+      "category": "different-subject",
+      "lang": "en",
+      "a": {
+        "header": "Primary database runs in eu-central-1",
+        "body": "The production Postgres primary and its read replica are hosted in AWS eu-central-1, next to the app servers.",
+        "tags": ["database", "aws", "region"]
+      },
+      "b": {
+        "header": "Backup bucket lives in eu-west-1",
+        "body": "Database backups are written to an S3 bucket in eu-west-1, deliberately a different region from the database for disaster recovery.",
+        "tags": ["backups", "aws", "region"]
+      }
+    },
+    {
+      "id": "ns09",
+      "label": "compatible",
+      "category": "different-subject",
+      "lang": "en",
+      "a": {
+        "header": "Session cookie expires after 7 days",
+        "body": "The `sid` session cookie is set with Max-Age of 7 days so users stay signed in across browser restarts.",
+        "tags": ["auth", "cookies", "expiry"]
+      },
+      "b": {
+        "header": "CSRF cookie is session-scoped",
+        "body": "The `csrf` cookie has no Max-Age or Expires, so it is cleared when the browser closes and reissued on the next page load.",
+        "tags": ["security", "csrf", "cookies"]
+      }
+    },
+    {
+      "id": "ns10",
+      "label": "compatible",
+      "category": "different-subject",
+      "lang": "pl-en",
+      "a": {
+        "header": "Cron czyszczenia soft-delete: co niedzielę o 03:00 UTC",
+        "body": "Job `purge-deleted` raz w tygodniu, w niedzielę o 03:00 UTC, trwale usuwa rekordy oznaczone jako usunięte ponad 30 dni temu.",
+        "tags": ["cron", "cleanup", "database"]
+      },
+      "b": {
+        "header": "Cron refreshing the project_stats materialized view runs every 15 minutes",
+        "body": "The `refresh-stats` job runs `REFRESH MATERIALIZED VIEW CONCURRENTLY project_stats` every 15 minutes so dashboard counters stay fresh.",
+        "tags": ["cron", "database", "dashboard"]
+      }
+    },
+    {
+      "id": "np01",
+      "label": "compatible",
+      "category": "plan-vs-fact",
+      "lang": "pl",
+      "a": {
+        "header": "Rozważamy przejście serwera API z Node 22 na Bun",
+        "body": "Pomysł z retro: Bun mógłby skrócić czas startu testów. Nic nie zostało zdecydowane — najpierw benchmark na osobnej gałęzi.",
+        "tags": ["runtime", "pomysł"]
+      },
+      "b": {
+        "header": "Serwer API działa na Node 22 LTS",
+        "body": "Obraz produkcyjny bazuje na `node:22-alpine`, a wersja jest przypięta w `.nvmrc` i polu `engines` w package.json.",
+        "tags": ["runtime", "node", "deploy"]
+      }
+    },
+    {
+      "id": "np02",
+      "label": "compatible",
+      "category": "plan-vs-fact",
+      "lang": "en",
+      "a": {
+        "header": "TODO: move user sessions to Redis?",
+        "body": "Open question from the incident review: would Redis-backed sessions reduce DB load during login spikes? Needs an owner and a load test before any decision.",
+        "tags": ["sessions", "todo"]
+      },
+      "b": {
+        "header": "User sessions are stored in the Postgres sessions table",
+        "body": "`connect-pg-simple` persists sessions in the `sessions` table; expired rows are pruned by a nightly job.",
+        "tags": ["sessions", "auth", "database"]
+      }
+    },
+    {
+      "id": "np03",
+      "label": "compatible",
+      "category": "plan-vs-fact",
+      "lang": "pl",
+      "a": {
+        "header": "Propozycja: podnieść limit zapytań API do 100 na minutę na klucz",
+        "body": "Dwóch klientów enterprise zgłasza, że obecny limit ich blokuje. Propozycja czeka na decyzję product ownera.",
+        "tags": ["rate-limit", "propozycja"]
+      },
+      "b": {
+        "header": "Limit zapytań API wynosi 60 na minutę na klucz",
+        "body": "Limit egzekwuje middleware rate-limit; po przekroczeniu zwracamy 429 z nagłówkiem `Retry-After`.",
+        "tags": ["rate-limit", "api"]
+      }
+    },
+    {
+      "id": "np04",
+      "label": "compatible",
+      "category": "plan-vs-fact",
+      "lang": "pl",
+      "a": {
+        "header": "Plan: migracja kolejki zadań z BullMQ na pg-boss",
+        "body": "Cel to pozbycie się osobnej zależności od Redisa. Na razie etap planowania, bez terminu wdrożenia.",
+        "tags": ["kolejki", "plan"]
+      },
+      "b": {
+        "header": "Kolejka zadań w tle jest oparta na BullMQ",
+        "body": "Workery w `apps/worker` konsumują kolejki `emails` i `exports` z BullMQ działającego na Redisie.",
+        "tags": ["kolejki", "worker", "redis"]
+      }
+    },
+    {
+      "id": "np05",
+      "label": "compatible",
+      "category": "plan-vs-fact",
+      "lang": "pl",
+      "a": {
+        "header": "Otwarte pytanie: czy trzymać logi aplikacyjne dłużej niż 14 dni?",
+        "body": "Compliance pyta o możliwość 90-dniowej retencji. Czekamy na wycenę storage i decyzję.",
+        "tags": ["logi", "pytanie"]
+      },
+      "b": {
+        "header": "Retencja logów aplikacyjnych w Loki wynosi 14 dni",
+        "body": "Ustawione przez `retention_period` w konfiguracji Loki; starsze chunki są kasowane przez compactor.",
+        "tags": ["logi", "loki", "retencja"]
+      }
+    },
+    {
+      "id": "np06",
+      "label": "compatible",
+      "category": "plan-vs-fact",
+      "lang": "en",
+      "a": {
+        "header": "Idea: switch the frontend bundler from Webpack to Vite",
+        "body": "Several devs suggested Vite for faster HMR. Spike ticket WEB-412 is in the backlog and has not been started.",
+        "tags": ["frontend", "idea"]
+      },
+      "b": {
+        "header": "Frontend is bundled with Webpack 5",
+        "body": "Config lives in `apps/web/webpack.config.ts`; production builds use split chunks per route.",
+        "tags": ["frontend", "build"]
+      }
+    },
+    {
+      "id": "np07",
+      "label": "compatible",
+      "category": "plan-vs-fact",
+      "lang": "pl",
+      "a": {
+        "header": "Do rozważenia: zastąpić JWT sesjami cookie w panelu admina",
+        "body": "Argument: łatwiejsze unieważnianie sesji po zmianie uprawnień. Temat na najbliższe spotkanie architektoniczne.",
+        "tags": ["auth", "admin", "do-rozważenia"]
+      },
+      "b": {
+        "header": "Panel admina uwierzytelnia żądania przez JWT ważne 15 minut",
+        "body": "Krótkotrwały JWT jest odświeżany przez httpOnly cookie; weryfikację robi guard w `apps/admin-api`.",
+        "tags": ["auth", "admin", "jwt"]
+      }
+    },
+    {
+      "id": "np08",
+      "label": "compatible",
+      "category": "plan-vs-fact",
+      "lang": "pl",
+      "a": {
+        "header": "TODO: wymusić 2FA dla wszystkich kont pracowników",
+        "body": "Zgłoszone po audycie bezpieczeństwa; wymaga zmian w onboardingu. Jeszcze niezaplanowane w żadnym sprincie.",
+        "tags": ["2fa", "bezpieczeństwo", "todo"]
+      },
+      "b": {
+        "header": "2FA jest obecnie opcjonalne dla kont pracowników",
+        "body": "Pracownik może włączyć TOTP w ustawieniach profilu, ale system tego nie wymusza.",
+        "tags": ["2fa", "auth"]
+      }
+    },
+    {
+      "id": "np09",
+      "label": "compatible",
+      "category": "plan-vs-fact",
+      "lang": "en",
+      "a": {
+        "header": "Proposal: run the E2E suite on every PR instead of nightly",
+        "body": "It would catch regressions earlier but adds about 12 minutes to CI. Discussion is in RFC-031, still undecided.",
+        "tags": ["e2e", "ci", "proposal"]
+      },
+      "b": {
+        "header": "Playwright E2E suite runs nightly on main",
+        "body": "A scheduled pipeline starts at 03:00 UTC and posts results to #qa-alerts.",
+        "tags": ["e2e", "playwright", "ci"]
+      }
+    },
+    {
+      "id": "np10",
+      "label": "compatible",
+      "category": "plan-vs-fact",
+      "lang": "pl-en",
+      "a": {
+        "header": "Rozważamy read replikę bazy dla modułu raportów",
+        "body": "Pomysł: ciężkie zapytania raportowe kierować na replikę. Na razie tylko notatka do planowania pojemności.",
+        "tags": ["baza", "raporty", "pomysł"]
+      },
+      "b": {
+        "header": "All reads and writes go to a single primary database",
+        "body": "There is currently no read replica; the reporting module queries the primary directly.",
+        "tags": ["database", "reporting"]
+      }
+    },
+    {
+      "id": "no01",
+      "label": "compatible",
+      "category": "opinion",
+      "lang": "pl",
+      "a": {
+        "header": "Preferujemy małe PR-y, do około 400 linii zmian",
+        "body": "To rekomendacja zespołu, nie twarda reguła — mniejsze PR-y szybciej przechodzą review.",
+        "tags": ["pull-request", "konwencje"]
+      },
+      "b": {
+        "header": "Pliki migracji Prisma commitujemy w tym samym PR co zmianę modelu",
+        "body": "Przez wygenerowany SQL PR-y ze zmianą schematu często mają kilkaset linii albo więcej.",
+        "tags": ["pull-request", "prisma", "migracje"]
+      }
+    },
+    {
+      "id": "no02",
+      "label": "compatible",
+      "category": "opinion",
+      "lang": "en",
+      "a": {
+        "header": "Opinion: ORM-generated queries are hard to debug, raw SQL reads better for reports",
+        "body": "Several backend devs find Prisma's query output opaque for complex aggregations. Not a team decision.",
+        "tags": ["orm", "opinion"]
+      },
+      "b": {
+        "header": "Data access layer uses Prisma ORM, including reporting queries",
+        "body": "All services access Postgres through Prisma Client; the reporting module uses `groupBy` and `aggregate`.",
+        "tags": ["orm", "prisma", "database"]
+      }
+    },
+    {
+      "id": "no03",
+      "label": "compatible",
+      "category": "opinion",
+      "lang": "pl",
+      "a": {
+        "header": "Zalecenie: unikać default exportów w nowym kodzie TypeScript",
+        "body": "Named exporty ułatwiają refaktoryzację i auto-importy. To rekomendacja, nie reguła lintera.",
+        "tags": ["typescript", "konwencje"]
+      },
+      "b": {
+        "header": "Strony Next.js w apps/web używają default exportów",
+        "body": "Wymaga tego App Router — `page.tsx` i `layout.tsx` eksportują komponent domyślnie.",
+        "tags": ["nextjs", "frontend"]
+      }
+    },
+    {
+      "id": "no04",
+      "label": "compatible",
+      "category": "opinion",
+      "lang": "pl",
+      "a": {
+        "header": "Moim zdaniem Sentry jest za drogie przy naszym wolumenie błędów",
+        "body": "Warto kiedyś porównać koszty z self-hostowanym GlitchTip. Luźna uwaga z przeglądu budżetu.",
+        "tags": ["monitoring", "koszty"]
+      },
+      "b": {
+        "header": "Błędy frontu i backendu raportujemy do Sentry",
+        "body": "Korzystamy z planu Team; sample rate dla transakcji wynosi 0.2.",
+        "tags": ["monitoring", "sentry"]
+      }
+    },
+    {
+      "id": "no05",
+      "label": "compatible",
+      "category": "opinion",
+      "lang": "pl",
+      "a": {
+        "header": "Lepiej testować repozytoria integracyjnie niż mocno mockowanymi unit testami",
+        "body": "Preferencja zespołu backend: testy na prawdziwej bazie w kontenerze łapią więcej błędów.",
+        "tags": ["testy", "preferencja"]
+      },
+      "b": {
+        "header": "Moduł billing ma 85% pokrycia testami jednostkowymi",
+        "body": "Większość testów billingu mockuje klienta Stripe i warstwę repozytorium.",
+        "tags": ["testy", "billing"]
+      }
+    },
+    {
+      "id": "no06",
+      "label": "compatible",
+      "category": "opinion",
+      "lang": "pl",
+      "a": {
+        "header": "Sugestia: przejść na Conventional Commits",
+        "body": "Ułatwiłoby to automatyczne generowanie changelogu. Na razie tylko sugestia, nikt tego nie egzekwuje.",
+        "tags": ["git", "sugestia"]
+      },
+      "b": {
+        "header": "Changelog jest pisany ręcznie przy każdym release",
+        "body": "CHANGELOG.md aktualizuje release manager na podstawie listy zmergowanych PR-ów.",
+        "tags": ["release", "changelog"]
+      }
+    },
+    {
+      "id": "no07",
+      "label": "compatible",
+      "category": "opinion",
+      "lang": "en",
+      "a": {
+        "header": "Monorepo build times are getting painful; a remote build cache might help",
+        "body": "Personal take after a slow week. Nobody has evaluated any caching option yet.",
+        "tags": ["ci", "build", "opinion"]
+      },
+      "b": {
+        "header": "Full CI pipeline on main takes about 18 minutes",
+        "body": "Median over the last 30 runs; the build step accounts for roughly half of it.",
+        "tags": ["ci", "metrics"]
+      }
+    },
+    {
+      "id": "no08",
+      "label": "compatible",
+      "category": "opinion",
+      "lang": "pl-en",
+      "a": {
+        "header": "Uważam, że feature flagi zbyt długo zostają w kodzie",
+        "body": "Warto by je sprzątać do dwóch sprintów po pełnym rolloucie — luźna sugestia, nie zasada.",
+        "tags": ["feature-flags", "opinia"]
+      },
+      "b": {
+        "header": "Feature flags are managed in Unleash",
+        "body": "The web and API apps read flags via the Unleash SDK. There are currently 41 active flags, some older than six months.",
+        "tags": ["feature-flags", "unleash"]
+      }
+    },
+    {
+      "id": "nq01",
+      "label": "paraphrase",
+      "category": "equivalent-values",
+      "lang": "pl",
+      "a": {
+        "header": "Timeout żądań do bramki płatności: 30 s",
+        "body": "Po 30 sekundach bez odpowiedzi żądanie jest przerywane i oznaczane do ponowienia.",
+        "tags": ["płatności", "timeout"]
+      },
+      "b": {
+        "header": "Klient bramki płatności ma timeout 30000 ms",
+        "body": "Wartość ustawiona w zmiennej `PAYMENTS_HTTP_TIMEOUT_MS` na 30000.",
+        "tags": ["płatności", "http", "konfiguracja"]
+      }
+    },
+    {
+      "id": "nq02",
+      "label": "paraphrase",
+      "category": "equivalent-values",
+      "lang": "en",
+      "a": {
+        "header": "Upload size limit is 1 GiB",
+        "body": "Files larger than 1 GiB are rejected with HTTP 413 before reaching the API.",
+        "tags": ["uploads", "limits"]
+      },
+      "b": {
+        "header": "Maximum upload size: 1024 MiB",
+        "body": "Configured in the ingress as `client_max_body_size 1024m`.",
+        "tags": ["uploads", "nginx"]
+      }
+    },
+    {
+      "id": "nq03",
+      "label": "paraphrase",
+      "category": "equivalent-values",
+      "lang": "pl",
+      "a": {
+        "header": "Synchronizacja kursów walut uruchamia się co godzinę",
+        "body": "Job pobiera kursy z API NBP na początku każdej pełnej godziny.",
+        "tags": ["cron", "waluty"]
+      },
+      "b": {
+        "header": "Harmonogram joba fx-sync: cron `0 * * * *`",
+        "body": "Zdefiniowany w `apps/worker/src/schedules.ts`, strefa czasowa UTC.",
+        "tags": ["cron", "worker"]
+      }
+    },
+    {
+      "id": "nq04",
+      "label": "paraphrase",
+      "category": "equivalent-values",
+      "lang": "pl",
+      "a": {
+        "header": "Sprint trwa dwa tygodnie",
+        "body": "Planowanie odbywa się w pierwszy dzień sprintu, a retro w ostatni.",
+        "tags": ["proces", "sprint"]
+      },
+      "b": {
+        "header": "Długość sprintu: 14 dni",
+        "body": "Sprint zaczyna się w środę i kończy we wtorek po dwóch tygodniach.",
+        "tags": ["proces", "scrum"]
+      }
+    },
+    {
+      "id": "nq05",
+      "label": "paraphrase",
+      "category": "equivalent-values",
+      "lang": "en",
+      "a": {
+        "header": "Trace sampling ratio is 0.25",
+        "body": "Set via `OTEL_TRACES_SAMPLER_ARG=0.25` with the `traceidratio` sampler.",
+        "tags": ["tracing", "otel"]
+      },
+      "b": {
+        "header": "Tracing samples 25% of requests",
+        "body": "One in four requests gets a full distributed trace in Tempo.",
+        "tags": ["tracing", "observability"]
+      }
+    },
+    {
+      "id": "nq06",
+      "label": "paraphrase",
+      "category": "equivalent-values",
+      "lang": "pl",
+      "a": {
+        "header": "Nocny backup Postgresa startuje o 02:00 UTC+0",
+        "body": "Pełny dump trafia do bucketu z kopiami i jest szyfrowany po stronie serwera.",
+        "tags": ["backup", "baza"]
+      },
+      "b": {
+        "header": "Pełny dump bazy wykonujemy codziennie o 2 w nocy UTC",
+        "body": "Kubernetes CronJob z harmonogramem `0 2 * * *`, strefa UTC.",
+        "tags": ["backup", "cron"]
+      }
+    },
+    {
+      "id": "nq07",
+      "label": "paraphrase",
+      "category": "equivalent-values",
+      "lang": "pl",
+      "a": {
+        "header": "Zaproszenia do workspace wygasają po 1 dniu",
+        "body": "Po tym czasie admin musi wysłać nowe zaproszenie.",
+        "tags": ["zaproszenia", "workspace"]
+      },
+      "b": {
+        "header": "Link zaproszenia do workspace jest ważny 24 h",
+        "body": "Czas życia ustawia zmienna `INVITE_TTL_HOURS` z wartością 24.",
+        "tags": ["zaproszenia", "konfiguracja"]
+      }
+    },
+    {
+      "id": "nq08",
+      "label": "paraphrase",
+      "category": "equivalent-values",
+      "lang": "en",
+      "a": {
+        "header": "Staging API listens on port 4100",
+        "body": "Set via `PORT=4100` in the staging environment config.",
+        "tags": ["staging", "api"]
+      },
+      "b": {
+        "header": "Staging API base URL is http://staging-api.internal:4100",
+        "body": "Frontend staging builds point `API_BASE_URL` at this address.",
+        "tags": ["staging", "frontend", "config"]
+      }
+    },
+    {
+      "id": "nq09",
+      "label": "paraphrase",
+      "category": "equivalent-values",
+      "lang": "pl",
+      "a": {
+        "header": "Cache odpowiedzi katalogu produktów ma TTL 5 minut",
+        "body": "Po wygaśnięciu kolejne żądanie odbudowuje wpis z bazy.",
+        "tags": ["cache", "katalog"]
+      },
+      "b": {
+        "header": "TTL wpisów katalogu w Redisie: 300 sekund",
+        "body": "Klucze `catalog:*` są zapisywane z `EX 300`.",
+        "tags": ["cache", "redis"]
+      }
+    },
+    {
+      "id": "nq10",
+      "label": "paraphrase",
+      "category": "equivalent-values",
+      "lang": "pl-en",
+      "a": {
+        "header": "Limit pamięci kontenera workera: 512 MiB",
+        "body": "Po przekroczeniu limitu kontener jest ubijany przez OOM killera i restartowany.",
+        "tags": ["worker", "kubernetes"]
+      },
+      "b": {
+        "header": "Worker container memory limit is 0.5 GiB",
+        "body": "Kubernetes `resources.limits.memory` is set to `512Mi` for the worker deployment.",
+        "tags": ["worker", "resources"]
+      }
+    },
+    {
+      "id": "nc01",
+      "label": "compatible",
+      "category": "complementary",
+      "lang": "pl",
+      "a": {
+        "header": "Administratorzy mogą trwale usuwać projekty",
+        "body": "Usunięcie wymaga potwierdzenia nazwą projektu i jest logowane w audycie.",
+        "tags": ["uprawnienia", "projekty"]
+      },
+      "b": {
+        "header": "Użytkownicy z rolą editor nie mogą usuwać projektów",
+        "body": "Editor może projekt tylko zarchiwizować; usuwanie jest zarezerwowane dla roli admin.",
+        "tags": ["uprawnienia", "role"]
+      }
+    },
+    {
+      "id": "nc02",
+      "label": "compatible",
+      "category": "complementary",
+      "lang": "en",
+      "a": {
+        "header": "Static assets under /assets are cached for one year",
+        "body": "Fingerprinted files are served with `Cache-Control: public, max-age=31536000, immutable`.",
+        "tags": ["caching", "cdn"]
+      },
+      "b": {
+        "header": "index.html is served with no-cache",
+        "body": "The HTML shell must always be revalidated so clients pick up new asset hashes after a deploy.",
+        "tags": ["caching", "frontend"]
+      }
+    },
+    {
+      "id": "nc03",
+      "label": "compatible",
+      "category": "complementary",
+      "lang": "pl",
+      "a": {
+        "header": "Migracje schematu wykonuje job migrate w pipeline przed rolloutem",
+        "body": "Rollout nowej wersji startuje dopiero po udanym zakończeniu migracji.",
+        "tags": ["migracje", "deploy"]
+      },
+      "b": {
+        "header": "Indeksy wyszukiwania przebudowujemy ręcznie poleceniem `pnpm reindex`",
+        "body": "Reindeks nie jest częścią migracji; uruchamia go dyżurny po zmianie słownika wyszukiwarki.",
+        "tags": ["wyszukiwanie", "operacje"]
+      }
+    },
+    {
+      "id": "nc04",
+      "label": "compatible",
+      "category": "complementary",
+      "lang": "pl",
+      "a": {
+        "header": "Logi na poziomie debug są włączone tylko na środowisku dev",
+        "body": "Lokalnie `LOG_LEVEL` domyślnie ma wartość debug.",
+        "tags": ["logi", "dev"]
+      },
+      "b": {
+        "header": "Na produkcji minimalny poziom logowania to info",
+        "body": "Produkcyjny deployment ustawia `LOG_LEVEL` na info, żeby ograniczyć wolumen logów.",
+        "tags": ["logi", "produkcja"]
+      }
+    },
+    {
+      "id": "nc05",
+      "label": "compatible",
+      "category": "complementary",
+      "lang": "pl",
+      "a": {
+        "header": "Wszystkie endpointy pod prefiksem /api wymagają uwierzytelnienia",
+        "body": "Globalny guard odrzuca żądania bez ważnej sesji kodem 401.",
+        "tags": ["auth", "api"]
+      },
+      "b": {
+        "header": "Ścieżki /healthz i /metrics są dostępne bez uwierzytelnienia",
+        "body": "Leżą poza prefiksem /api i obsługuje je osobny router dla probe'ów i Prometheusa.",
+        "tags": ["health", "monitoring"]
+      }
+    },
+    {
+      "id": "nc06",
+      "label": "compatible",
+      "category": "complementary",
+      "lang": "pl",
+      "a": {
+        "header": "Maile transakcyjne wysyłamy przez Postmark",
+        "body": "Dotyczy resetów konta, potwierdzeń zamówień i powiadomień systemowych.",
+        "tags": ["email", "postmark"]
+      },
+      "b": {
+        "header": "Newslettery i maile marketingowe idą przez Mailchimp",
+        "body": "Listy odbiorców synchronizuje nocny job z tabeli zgód marketingowych.",
+        "tags": ["email", "marketing"]
+      }
+    },
+    {
+      "id": "nc07",
+      "label": "compatible",
+      "category": "complementary",
+      "lang": "en",
+      "a": {
+        "header": "Unit tests run on every push",
+        "body": "The CI test job runs the unit suite for affected packages on each pushed commit.",
+        "tags": ["testing", "ci"]
+      },
+      "b": {
+        "header": "Load tests run manually before major releases",
+        "body": "The k6 scenarios in `perf/` are triggered by the release manager against staging.",
+        "tags": ["testing", "performance"]
+      }
+    },
+    {
+      "id": "nc08",
+      "label": "compatible",
+      "category": "complementary",
+      "lang": "en",
+      "a": {
+        "header": "Feature branches deploy to ephemeral preview environments",
+        "body": "Each open PR gets its own preview URL, torn down when the PR is closed.",
+        "tags": ["deploy", "preview"]
+      },
+      "b": {
+        "header": "Only tagged releases deploy to production",
+        "body": "Pushing a `v*` tag on main triggers the production deploy workflow.",
+        "tags": ["deploy", "production"]
+      }
+    },
+    {
+      "id": "nc09",
+      "label": "compatible",
+      "category": "complementary",
+      "lang": "pl",
+      "a": {
+        "header": "Pliki wgrywane przez użytkowników trzymamy w buckecie uploads-prod",
+        "body": "Bucket ma włączone wersjonowanie i nie ma reguły automatycznego kasowania.",
+        "tags": ["storage", "s3"]
+      },
+      "b": {
+        "header": "Wygenerowane raporty PDF trafiają do bucketu reports-prod z lifecycle 30 dni",
+        "body": "Raporty można odtworzyć z danych, więc po 30 dniach są automatycznie usuwane.",
+        "tags": ["storage", "raporty"]
+      }
+    },
+    {
+      "id": "nc10",
+      "label": "compatible",
+      "category": "complementary",
+      "lang": "pl-en",
+      "a": {
+        "header": "Aplikacja mobilna dostaje powiadomienia push przez FCM",
+        "body": "Tokeny urządzeń rejestruje endpoint `/devices` przy logowaniu w aplikacji.",
+        "tags": ["powiadomienia", "mobile"]
+      },
+      "b": {
+        "header": "Web app users receive notifications via an in-app inbox and email",
+        "body": "The web client has no push integration; unread items are shown in the bell menu.",
+        "tags": ["notifications", "web"]
+      }
+    },
+    {
+      "id": "nx01",
+      "label": "paraphrase",
+      "category": "paraphrase-crosslingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Wszystkie znaczniki czasu w bazie zapisujemy w UTC",
+        "body": "Konwersja na strefę użytkownika dzieje się dopiero we frontendzie.",
+        "tags": ["baza", "czas"]
+      },
+      "b": {
+        "header": "Database timestamps are stored in UTC",
+        "body": "Columns use `timestamptz` and the server session time zone is UTC.",
+        "tags": ["database", "time"]
+      }
+    },
+    {
+      "id": "nx02",
+      "label": "paraphrase",
+      "category": "paraphrase-crosslingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Branch names must start with feat/, fix/ or chore/",
+        "body": "A pre-push hook rejects branches without one of these prefixes.",
+        "tags": ["git", "conventions"]
+      },
+      "b": {
+        "header": "Nazwy gałęzi zaczynamy od prefiksu feat/, fix/ albo chore/",
+        "body": "Prefiks określa typ zmiany i ułatwia filtrowanie PR-ów.",
+        "tags": ["git", "konwencje"]
+      }
+    },
+    {
+      "id": "nx03",
+      "label": "paraphrase",
+      "category": "paraphrase-crosslingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Obrazy Dockera publikujemy do GHCR",
+        "body": "Pipeline buduje obraz i wypycha go do GitHub Container Registry.",
+        "tags": ["docker", "registry"]
+      },
+      "b": {
+        "header": "Container images are pushed to GitHub Container Registry",
+        "body": "Each image is tagged with the short commit SHA in addition to the branch name.",
+        "tags": ["docker", "ci"]
+      }
+    },
+    {
+      "id": "nx04",
+      "label": "paraphrase",
+      "category": "paraphrase-crosslingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Env vars are validated with a Zod schema on boot",
+        "body": "If validation fails, the app logs the invalid keys and exits with code 1.",
+        "tags": ["config", "env"]
+      },
+      "b": {
+        "header": "Zmienne środowiskowe walidujemy przy starcie schematem Zod",
+        "body": "Schemat leży w `apps/server/src/config/env.ts`.",
+        "tags": ["konfiguracja", "env"]
+      }
+    },
+    {
+      "id": "nx05",
+      "label": "paraphrase",
+      "category": "paraphrase-crosslingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Identyfikatory encji generujemy jako UUIDv7",
+        "body": "Dzięki temu ID są sortowalne po czasie utworzenia.",
+        "tags": ["baza", "identyfikatory"]
+      },
+      "b": {
+        "header": "Entity IDs are UUIDv7",
+        "body": "IDs are generated in the application layer, not by database defaults.",
+        "tags": ["database", "ids"]
+      }
+    },
+    {
+      "id": "nx06",
+      "label": "paraphrase",
+      "category": "paraphrase-crosslingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Money amounts are stored as integer minor units, never floats",
+        "body": "For PLN that means grosze; all arithmetic happens on integers.",
+        "tags": ["billing", "money"]
+      },
+      "b": {
+        "header": "Kwoty pieniężne trzymamy jako liczby całkowite w groszach",
+        "body": "Kolumny kwot mają typ `bigint`.",
+        "tags": ["billing", "kwoty"]
+      }
+    },
+    {
+      "id": "nx07",
+      "label": "paraphrase",
+      "category": "paraphrase-crosslingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Paginacja w API jest kursorowa",
+        "body": "Klient przekazuje kursor z poprzedniej odpowiedzi, żeby pobrać kolejną stronę.",
+        "tags": ["api", "paginacja"]
+      },
+      "b": {
+        "header": "The API uses cursor-based pagination",
+        "body": "Responses include a `next_cursor` field; the default page size is 50 items.",
+        "tags": ["api", "pagination"]
+      }
+    },
+    {
+      "id": "nx08",
+      "label": "paraphrase",
+      "category": "paraphrase-crosslingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Database backups are retained for 30 days",
+        "body": "Backups are kept in a separate storage account from production data.",
+        "tags": ["backups", "retention"]
+      },
+      "b": {
+        "header": "Kopie zapasowe bazy przechowujemy przez 30 dni",
+        "body": "Starsze kopie są usuwane automatycznie.",
+        "tags": ["backup", "retencja"]
+      }
+    },
+    {
+      "id": "nx09",
+      "label": "paraphrase",
+      "category": "paraphrase-crosslingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Frontend wspiera dwie ostatnie wersje głównych przeglądarek",
+        "body": "Dotyczy Chrome, Firefox, Safari i Edge.",
+        "tags": ["frontend", "przeglądarki"]
+      },
+      "b": {
+        "header": "Browser support: last 2 versions of major browsers",
+        "body": "Defined in the `browserslist` field of `apps/web/package.json`.",
+        "tags": ["frontend", "browsers"]
+      }
+    },
+    {
+      "id": "nx10",
+      "label": "paraphrase",
+      "category": "paraphrase-crosslingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "API versioning uses a URL path prefix such as /v1",
+        "body": "We do not version through request headers.",
+        "tags": ["api", "versioning"]
+      },
+      "b": {
+        "header": "Wersję API określa prefiks ścieżki /v1",
+        "body": "Nowa wersja niekompatybilna wstecz dostanie prefiks /v2.",
+        "tags": ["api", "wersjonowanie"]
+      }
+    },
+    {
+      "id": "nx11",
+      "label": "paraphrase",
+      "category": "paraphrase-crosslingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Logi aplikacji emitujemy w formacie JSON",
+        "body": "Każdy wpis ma pola `level`, `time` i `requestId`.",
+        "tags": ["logi", "format"]
+      },
+      "b": {
+        "header": "Application logs are structured JSON",
+        "body": "Logging is done with pino and written to stdout.",
+        "tags": ["logging", "pino"]
+      }
+    },
+    {
+      "id": "nx12",
+      "label": "paraphrase",
+      "category": "paraphrase-crosslingual",
+      "lang": "pl-en",
+      "a": {
+        "header": "Production deploys are allowed Monday through Thursday",
+        "body": "No production deploys on Fridays or weekends, except hotfixes approved by the on-call lead.",
+        "tags": ["deploy", "process"]
+      },
+      "b": {
+        "header": "Deploy na produkcję tylko od poniedziałku do czwartku",
+        "body": "W piątki i weekendy nie wdrażamy zmian na produkcję, poza zatwierdzonymi hotfixami.",
+        "tags": ["deploy", "proces"]
+      }
+    }
+  ]
+}
